@@ -8,6 +8,7 @@ declare global {
   interface Window {
     TemplatedEmailComposeRegistry?: {
       initAll?: (root?: ParentNode) => void;
+      getAll?: () => unknown[];
     };
     SendMailPage?: {
       init?: () => void;

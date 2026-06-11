@@ -7,7 +7,10 @@ import type { EligibleVotersBootstrap } from "../types";
 const bootstrap: EligibleVotersBootstrap = {
   eligibleVotersApiUrl: "/api/v1/elections/1/eligible-voters",
   ineligibleVotersApiUrl: "/api/v1/elections/1/ineligible-voters",
+  electionStatus: null,
   sendMailCredentialsApiUrl: null,
+  credentialEmailTemplateApiUrl: null,
+  credentialEmailPreviewUrl: null,
 };
 
 describe("EligibleVotersGrid", () => {

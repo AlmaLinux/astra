@@ -14,6 +14,8 @@ const props = withDefaults(
     skipInitialPreviewRefresh?: boolean;
     preview: ComposePreview;
     templateSelectorDisabled?: boolean;
+    showCard?: boolean;
+    showSaveButtons?: boolean;
     subjectField: ComposeFieldSpec;
     htmlContentField: ComposeFieldSpec;
     textContentField: ComposeFieldSpec;
@@ -23,6 +25,8 @@ const props = withDefaults(
     helpText: "Edit the template subject and body.",
     skipInitialPreviewRefresh: false,
     templateSelectorDisabled: false,
+    showCard: true,
+    showSaveButtons: false,
   },
 );
 
@@ -60,14 +64,15 @@ const textPreviewSrcdoc = computed(() => {
         :data-compose-preview-url="previewUrl"
         :data-compose-skip-initial-preview-refresh="skipInitialPreviewRefresh ? '1' : null"
       >
-        <div class="card card-outline card-success">
-          <div class="card-header">
+        <slot name="hidden-fields" />
+        <div :class="showCard ? 'card card-outline card-success' : undefined">
+          <div v-if="showCard" class="card-header">
             <div class="d-flex align-items-center justify-content-between flex-wrap" style="gap: .5rem;">
               <h3 class="card-title mb-0">{{ title }}</h3>
               <span class="badge badge-warning d-none" data-compose-unsaved-badge>Unsaved changes</span>
             </div>
           </div>
-          <div class="card-body">
+          <div :class="showCard ? 'card-body' : undefined">
             <div class="row">
               <div class="col-md-6">
                 <div class="text-muted small mb-2">{{ helpText }}</div>
@@ -85,6 +90,11 @@ const textPreviewSrcdoc = computed(() => {
                   </select>
                   <small class="form-text text-muted">Selecting a template will populate subject + bodies.</small>
                   <slot name="template-selector-extra" />
+                  <div v-if="showSaveButtons" class="mt-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" title="Restore last saved content" disabled>Restore</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save" title="Save to selected template">Save</button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save-as" title="Save as a new template">Save as&hellip;</button>
+                  </div>
                 </div>
               </div>
 
@@ -206,6 +216,32 @@ const textPreviewSrcdoc = computed(() => {
         </div>
 
         <slot name="after-card" />
+
+        <!-- Save-as modal (used by templated_email.js when save-as button is clicked) -->
+        <div v-if="showSaveButtons" data-compose-modal="save-as">
+          <div class="modal fade" tabindex="-1" role="dialog">
+            <div class="modal-dialog modal-sm" role="document">
+              <div class="modal-content">
+                <form>
+                  <div class="modal-header">
+                    <h5 class="modal-title">Save as new template</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                  </div>
+                  <div class="modal-body">
+                    <div class="form-group mb-0">
+                      <label for="compose-save-as-name">Template name</label>
+                      <input type="text" class="form-control" id="compose-save-as-name" name="name" required>
+                    </div>
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

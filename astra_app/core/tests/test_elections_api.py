@@ -1407,6 +1407,10 @@ class ElectionsApiTests(TestCase):
             email="alice@example.com",
             credential_public_id="cred-alice",
             tz_name=None,
+            subject_template=None,
+            html_template=None,
+            text_template=None,
+            include_credentials=True,
         )
         self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
@@ -1534,6 +1538,110 @@ class ElectionsApiTests(TestCase):
         second_payload = json.loads(second.content)
         self.assertFalse(second_payload["ok"])
         self.assertEqual(second_payload["errors"], ["Too many resend attempts. Please try again later."])
+
+    def test_election_credential_email_template_api_returns_template_content(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Template API election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+            voting_email_subject="Custom subject {{ election_name }}",
+            voting_email_html="<p>HTML {{ credential_public_id }}</p>",
+            voting_email_text="Text {{ credential_public_id }}",
+        )
+
+        response = self.client.get(
+            reverse("api-election-credential-email-template", args=[election.id]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["subject"], "Custom subject {{ election_name }}")
+        self.assertEqual(payload["html_content"], "<p>HTML {{ credential_public_id }}</p>")
+        self.assertEqual(payload["text_content"], "Text {{ credential_public_id }}")
+        self.assertIsInstance(payload["variables"], list)
+        variable_names = [v["name"] for v in payload["variables"]]
+        # Secret per-recipient variables (credential_public_id,
+        # vote_url_with_credential_fragment) must NOT be exposed.
+        self.assertNotIn("credential_public_id", variable_names)
+        self.assertNotIn("vote_url_with_credential_fragment", variable_names)
+        self.assertIn("election_name", variable_names)
+        self.assertIn("vote_url", variable_names)
+        # Template options and selected template should be present.
+        self.assertIsInstance(payload["template_options"], list)
+        self.assertIn("selected_template_id", payload)
+
+    def test_election_send_mail_credentials_api_passes_custom_template_content(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Custom template send election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+        VotingCredential.objects.create(
+            election=election,
+            public_id="cred-alice",
+            freeipa_username="alice",
+            weight=1,
+        )
+
+        def _get_user(username: str, respect_privacy: bool = True):
+            return FreeIPAUser(
+                username,
+                {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []},
+            )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+        ):
+            response = self.client.post(
+                reverse("api-election-send-mail-credentials", args=[election.id]),
+                data=json.dumps({
+                    "username": "alice",
+                    "subject_template": "Edited subject",
+                    "html_template": "<p>Edited html</p>",
+                    "text_template": "Edited text",
+                }),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertTrue(payload["ok"])
+
+        send_mock.assert_called_once_with(
+            request=ANY,
+            election=election,
+            username="alice",
+            email="alice@example.com",
+            credential_public_id="cred-alice",
+            tz_name=None,
+            subject_template="Edited subject",
+            html_template="<p>Edited html</p>",
+            text_template="Edited text",
+            include_credentials=True,
+        )
 
     def test_election_audit_log_api_hides_quorum_reached_for_non_managers(self) -> None:
         self._login_as_freeipa_user("viewer")

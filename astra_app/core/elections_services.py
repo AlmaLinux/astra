@@ -447,6 +447,7 @@ def send_voting_credential_email(
     subject_template: str | None = None,
     html_template: str | None = None,
     text_template: str | None = None,
+    include_credentials: bool = True,
 ) -> None:
     context = build_voting_credential_email_context(
         request=request,
@@ -455,6 +456,10 @@ def send_voting_credential_email(
         credential_public_id=credential_public_id,
         tz_name=tz_name,
     )
+
+    if not include_credentials:
+        context.pop("credential_public_id", None)
+        context.pop("vote_url_with_credential_fragment", None)
 
     if subject_template is not None or html_template is not None or text_template is not None:
         queued_email = queue_composed_email(
@@ -886,7 +891,35 @@ def issue_credentials_at_start_transition(*, election: Election) -> list[VotingC
     if election.status != Election.Status.open:
         raise ElectionError(START_TRANSITION_CREDENTIAL_ISSUANCE_ERROR)
 
-    return _issue_voting_credentials_from_memberships(election=election)
+    credentials = _issue_voting_credentials_from_memberships(election=election)
+    _populate_election_roll(election=election)
+    return credentials
+
+
+def _populate_election_roll(*, election: Election) -> None:
+    """Copy eligible usernames from VotingCredential into ElectionRoll.
+
+    Uses INSERT ... SELECT with ORDER BY RANDOM() so the roll row order
+    cannot be correlated with the credential table order.
+    """
+    from core.models import ElectionRoll
+
+    ElectionRoll.objects.filter(election=election).delete()
+
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO core_electionroll (election_id, freeipa_username)
+            SELECT election_id, freeipa_username
+              FROM core_votingcredential
+             WHERE election_id = %s
+               AND freeipa_username IS NOT NULL
+             ORDER BY RANDOM()
+            """,
+            [election.pk],
+        )
 
 
 @transaction.atomic

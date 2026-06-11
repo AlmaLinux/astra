@@ -482,7 +482,18 @@
 
     function getCsrfToken() {
       var el = document.querySelector('input[name=csrfmiddlewaretoken]');
-      return el ? String(el.value || '') : '';
+      if (el) return String(el.value || '');
+
+      // Fall back to the csrftoken cookie (used by pages that don't have a
+      // Django form with {% csrf_token %}, e.g. Vue-rendered modals).
+      var cookies = String(document.cookie || '').split(';');
+      for (var i = 0; i < cookies.length; i++) {
+        var c = cookies[i].trim();
+        if (c.indexOf('csrftoken=') === 0) {
+          return decodeURIComponent(c.substring('csrftoken='.length));
+        }
+      }
+      return '';
     }
 
     function getTemplateSelectEl() {
@@ -954,6 +965,15 @@
         val = '';
       }
       data.append(key, val);
+    }
+
+    // Include any extra hidden fields inside the compose container
+    // (e.g. preview_username injected by Vue).
+    var extraHidden = compose.container.querySelectorAll('input[type=hidden][data-compose-extra-field]');
+    for (var j = 0; j < extraHidden.length; j++) {
+      var h = extraHidden[j];
+      var hName = String(h.getAttribute('name') || '').trim();
+      if (hName) data.append(hName, String(h.value || ''));
     }
 
     try {

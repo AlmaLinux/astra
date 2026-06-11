@@ -6,6 +6,8 @@ function buildRoot(): HTMLDivElement {
   const root = document.createElement("div");
   root.setAttribute("data-election-credential-resend-root", "");
   root.setAttribute("data-election-send-mail-credentials-api-url", "/api/v1/elections/1/send-mail-credentials");
+  root.setAttribute("data-election-credential-email-template-api-url", "/api/v1/elections/1/credential-email-template");
+  root.setAttribute("data-election-email-render-preview-url", "/elections/1/email/render-preview/");
 
   const script = document.createElement("script");
   script.id = "election-eligible-voter-usernames-json";

@@ -383,12 +383,17 @@ def election_detail(request, election_id: int):
     can_manage_elections = _can_manage_elections(request)
     _enforce_election_detail_visibility(request, election, can_manage_elections=can_manage_elections)
 
+    can_send_election_email = can_manage_elections and election.status in {
+        Election.Status.open, Election.Status.closed, Election.Status.tallied,
+    }
+
     return render(
         request,
         "core/election_detail.html",
         {
             "election": election,
             "can_manage_elections": can_manage_elections,
+            "can_send_election_email": can_send_election_email,
             "eligible_q": str(request.GET.get("eligible_q") or ""),
             "ineligible_q": str(request.GET.get("ineligible_q") or ""),
         },
@@ -504,27 +509,52 @@ def _eligible_voters_context_data(
     """Build the eligible voter grid state shared by HTML and JSON views."""
     q_lower = q.lower()
 
-    eligible = elections_eligibility.eligible_voters_from_memberships(election=election)
-    eligible_for_grid = (
-        [v for v in eligible if q_lower in str(v.username or "").lower()]
-        if q_lower
-        else list(eligible)
-    )
+    # Once an election has been started, the ElectionRoll is the source of
+    # truth for who was eligible (it's a snapshot taken at credential issuance
+    # and survives anonymization).  Fall back to computing from current
+    # memberships only for drafts (no roll yet) or legacy elections started
+    # before the roll migration.
+    roll_usernames = _election_roll_usernames(election=election, q=q_lower)
+    if roll_usernames is not None:
+        usernames = roll_usernames
+    else:
+        eligible = elections_eligibility.eligible_voters_from_memberships(election=election)
+        eligible_for_grid = (
+            [v for v in eligible if q_lower in str(v.username or "").lower()]
+            if q_lower
+            else list(eligible)
+        )
+        usernames = [v.username for v in eligible_for_grid]
 
-    usernames = [v.username for v in eligible_for_grid]
     grid_items = [{"kind": "user", "username": username} for username in usernames]
 
     _, page_url_prefix = build_page_url_prefix(request.GET, page_param="eligible_page")
     page_ctx = paginate_and_build_context(grid_items, page_number, 24, page_url_prefix=page_url_prefix)
 
     return {
-        "eligible_voters": eligible,
         "eligible_voter_usernames": usernames,
         "eligible_q": q,
         "grid_items": list(page_ctx["page_obj"]),
         **page_ctx,
         "empty_label": "No eligible voters.",
     }
+
+
+def _election_roll_usernames(*, election: Election, q: str = "") -> list[str] | None:
+    """Return usernames from the ElectionRoll, or None if no roll exists.
+
+    Returns None for draft/legacy elections that were never rolled, so
+    callers can fall back to computing eligibility from memberships.
+    """
+    from core.models import ElectionRoll
+
+    qs = ElectionRoll.objects.filter(election=election)
+    if not qs.exists():
+        return None
+    qs = qs.order_by("freeipa_username")
+    if q:
+        qs = qs.filter(freeipa_username__icontains=q)
+    return list(qs.values_list("freeipa_username", flat=True))
 
 
 def _ineligible_voters_context_data(

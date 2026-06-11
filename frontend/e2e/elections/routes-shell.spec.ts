@@ -47,9 +47,9 @@ test("elections-detail-operator-actions loads credential resend controls and vot
 
   const eligibleCard = voterCards.nth(0);
   await collapseToggles.nth(0).click();
-  await expect(eligibleCard.getByRole("button", { name: "Resend all credentials", exact: true })).toBeVisible();
-  await expect(eligibleCard.getByRole("button", { name: "Resend voting credential", exact: true })).toBeVisible();
-  await expect(page.locator("#eligible-voter-usernames option")).toHaveCount(3);
+  await expect(eligibleCard.getByRole("button", { name: "Send reminder to all", exact: true })).toBeVisible();
+  await expect(eligibleCard.getByRole("button", { name: "Send reminder", exact: true })).toBeVisible();
+  await expect(page.locator("#resend-credential-username option")).toHaveCount(4);
   await expect(eligibleCard.locator(`a[href="/user/${manager.username}/"]`).first()).toBeVisible();
 
   const ineligibleCard = voterCards.nth(1);

@@ -8,7 +8,7 @@ from django.http import Http404
 
 from core import elections_services
 from core.elections_services import ElectionError
-from core.email_context import user_email_context
+from core.email_context import election_committee_email_context, user_email_context
 from core.forms_elections import ElectionEndDateForm
 from core.freeipa.user import FreeIPAUser
 from core.models import Candidate, Election
@@ -111,19 +111,22 @@ def _election_email_preview_context(
     *,
     request,
     election: Election,
+    preview_username: str | None = None,
 ) -> dict[str, object]:
-    """Build the shared email preview context for election email templates.
+    """Build the full email preview context for election credential templates.
 
-    Produces the standard template variables (election fields, vote URLs,
-    credential placeholder) plus user_email_context.  Callers merge
-    additional keys (e.g. committee context) as needed.
+    Includes: user context, committee context, 7 election fields, vote_url,
+    and placeholder values for the two secret per-recipient variables.
+
+    ``preview_username`` overrides the user shown in the preview (e.g. the
+    selected recipient).  Falls back to the logged-in user when omitted.
 
     For saved elections, delegates the 7 core fields to
     ``_election_email_context`` in elections_services so they are defined
     in a single place.  For unsaved elections (no pk), falls back to
     null-safe inline construction.
     """
-    username = get_username(request) or "preview"
+    username = preview_username or get_username(request) or "preview"
     # Minimal Election for URL helpers so unsaved instances work.
     url_election = Election(id=int(election.id or 0))
 
@@ -142,19 +145,31 @@ def _election_email_preview_context(
             "election_number_of_seats": election.number_of_seats or "",
         }
 
-    return {
+    ctx = {
         **user_email_context(username=username),
+        **election_committee_email_context(),
         **base,
-        "credential_public_id": "PREVIEW",
         "vote_url": elections_services.election_vote_url(
             request=request, election=url_election,
         ),
-        "vote_url_with_credential_fragment": elections_services.election_vote_url_with_credential_fragment(
-            request=request,
-            election=url_election,
-            credential_public_id="PREVIEW",
-        ),
     }
+
+    # Credential variables are only relevant while the election is open.
+    # For closed/tallied elections they are omitted entirely so templates
+    # can be composed without stale credential placeholders.
+    if election.status == Election.Status.open or election.pk is None:
+        ctx["credential_public_id"] = "(credential — hidden in preview)"
+        ctx["vote_url_with_credential_fragment"] = "(hidden in preview)"
+
+    return ctx
+
+
+# Keys in the preview context that are secret per-recipient values and
+# must NOT be exposed in the variable list or used for real previews.
+CREDENTIAL_EMAIL_SECRET_VARIABLES: frozenset[str] = frozenset({
+    "credential_public_id",
+    "vote_url_with_credential_fragment",
+})
 
 
 def _load_candidate_users(usernames: set[str]) -> dict[str, FreeIPAUser]:

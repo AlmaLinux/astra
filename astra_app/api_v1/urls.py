@@ -23,6 +23,7 @@ from core.views_elections.detail import (
 )
 from core.views_elections.lifecycle import (
     election_conclude_api,
+    election_credential_email_template_api,
     election_extend_end_api,
     election_send_mail_credentials_api,
     election_tally_api,
@@ -178,6 +179,11 @@ urlpatterns = [
         "elections/<int:election_id>/send-mail-credentials",
         election_send_mail_credentials_api,
         name="api-election-send-mail-credentials",
+    ),
+    path(
+        "elections/<int:election_id>/credential-email-template",
+        election_credential_email_template_api,
+        name="api-election-credential-email-template",
     ),
     path(
         "elections/<int:election_id>/public/ballots",

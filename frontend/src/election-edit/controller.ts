@@ -1,3 +1,5 @@
+import { saveAsComposeTemplate, saveComposeTemplate } from "../email-tools/compose-actions";
+
 type JQueryLike = {
   fn?: Record<string, unknown>;
   (target: string | Element | Document): {
@@ -209,68 +211,6 @@ function enforceNoSelfNomination(row: HTMLTableRowElement | null): void {
   const nominator = normalizeUsername(nominatorEl.value);
   if (candidate && nominator && candidate === nominator) {
     clearSelectValue(nominatorEl);
-  }
-}
-
-async function saveTemplate(templateId: string): Promise<void> {
-  if (!templateId) {
-    window.alert("Select a template to save, or use Save as.");
-    return;
-  }
-
-  const data = new FormData();
-  data.append("email_template_id", templateId);
-  data.append("subject", getField("subject"));
-  data.append("html_content", getField("html_content"));
-  data.append("text_content", getField("text_content"));
-
-  try {
-    const response = await fetch("/email-tools/templates/save/", {
-      method: "POST",
-      headers: {
-        "X-CSRFToken": getCompose()?.getCsrfToken() ?? "",
-        Accept: "application/json",
-      },
-      body: data,
-    });
-    const payload = await response.json() as { ok?: boolean; error?: string };
-    if (!response.ok || payload.ok !== true) {
-      throw new Error(payload.error ?? "save failed");
-    }
-    markComposeBaselineFromFields();
-    window.alert("Template saved.");
-  } catch {
-    window.alert("Failed to save template.");
-  }
-}
-
-async function saveAsTemplate(name: string): Promise<{ id?: string | number; name?: string } | null> {
-  if (!name) {
-    return null;
-  }
-
-  const data = new FormData();
-  data.append("name", name);
-  data.append("subject", getField("subject"));
-  data.append("html_content", getField("html_content"));
-  data.append("text_content", getField("text_content"));
-
-  try {
-    const response = await fetch("/email-tools/templates/save-as/", {
-      method: "POST",
-      headers: {
-        "X-CSRFToken": getCompose()?.getCsrfToken() ?? "",
-        Accept: "application/json",
-      },
-      body: data,
-    });
-    const payload = await response.json() as { ok?: boolean; id?: string | number; name?: string };
-    if (!response.ok || payload.ok !== true) {
-      throw new Error("save as failed");
-    }
-    return payload;
-  } catch {
-    return null;
   }
 }
 
@@ -517,7 +457,12 @@ export function initElectionEditController(): void {
     const preview = currentWindow().TemplatedEmailComposePreview;
     const composeForEvent = preview?.getComposeFromEvent(event) ?? getCompose();
     const templateId = composeForEvent?.getTemplateId?.() ?? String(getTemplateSelectEl()?.value || "").trim();
-    void saveTemplate(templateId);
+    const values = composeForEvent?.getValues?.() ?? { subject: getField("subject"), html_content: getField("html_content"), text_content: getField("text_content") };
+    const token = composeForEvent?.getCsrfToken?.() ?? "";
+
+    void saveComposeTemplate(templateId, { subject: values.subject, html_content: values.html_content ?? values.html ?? "", text_content: values.text_content ?? values.text ?? "" }, token).then((ok) => {
+      if (ok) markComposeBaselineFromFields();
+    });
   });
 
   document.addEventListener("templated-email-compose:save-as-confirmed", async (event) => {
@@ -527,17 +472,20 @@ export function initElectionEditController(): void {
       return;
     }
 
-    const payload = await saveAsTemplate(name);
-    if (!payload) {
-      window.alert("Failed to create template.");
+    const composeForEvent = detail?.instance ?? getCompose();
+    const values = composeForEvent?.getValues?.() ?? { subject: getField("subject"), html_content: getField("html_content"), text_content: getField("text_content") };
+    const token = composeForEvent?.getCsrfToken?.() ?? "";
+
+    const result = await saveAsComposeTemplate(name, { subject: values.subject, html_content: values.html_content ?? values.html ?? "", text_content: values.text_content ?? values.text ?? "" }, token);
+    if (!result.ok) {
       return;
     }
 
     const liveTemplateSelect = getTemplateSelectEl();
-    if (liveTemplateSelect && payload.id != null) {
-      const option = new Option(String(payload.name || name), String(payload.id), true, true);
+    if (liveTemplateSelect && result.id != null) {
+      const option = new Option(String(result.name || name), String(result.id), true, true);
       liveTemplateSelect.append(option);
-      liveTemplateSelect.value = String(payload.id);
+      liveTemplateSelect.value = String(result.id);
     }
 
     const saveModeEl = byId("election-edit-email-save-mode") as HTMLInputElement | null;

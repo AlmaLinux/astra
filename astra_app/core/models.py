@@ -1601,6 +1601,35 @@ class VotingCredential(models.Model):
         return secrets.token_urlsafe(32)
 
 
+class ElectionRoll(models.Model):
+    """Permanent record of which FreeIPA users were eligible when an election started.
+
+    Populated from VotingCredential at credential-issuance time via a single
+    INSERT ... SELECT, so it is guaranteed to match the credential set exactly.
+    Unlike VotingCredential.freeipa_username (which is nulled by
+    anonymize_election), ElectionRoll rows are never scrubbed — there is no
+    privacy concern because the roll cannot be linked back to individual
+    credentials or ballots.
+
+    Rows are inserted in randomized order to prevent positional correlation
+    with the credential table.
+    """
+
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="roll")
+    freeipa_username = models.CharField(max_length=255, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["election", "freeipa_username"],
+                name="uniq_roll_election_username",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"ElectionRoll(election_id={self.election_id}, username={self.freeipa_username})"
+
+
 class BallotQuerySet(models.QuerySet["Ballot"]):
     def for_election(self, *, election: Election) -> BallotQuerySet:
         return self.filter(election=election)

@@ -25,6 +25,7 @@ from core.models import (
     Ballot,
     Candidate,
     Election,
+    ElectionRoll,
     ExclusionGroup,
     FreeIPAPermissionGrant,
     Membership,
@@ -748,6 +749,7 @@ class Command(BaseCommand):
                 "algorithm": reverse("election-algorithm"),
                 "audit_tallied": reverse("election-audit-log", args=[tallied_election.id]),
                 "ballot_verify": reverse("ballot-verify"),
+                "closed_detail": elections_payload[PAST_LIST_ALIAS]["route"],
                 "edit_draft": elections_payload[DRAFT_MANAGER_ALIAS]["route"],
                 "open_detail": elections_payload[DETAIL_OPEN_ALIAS]["route"],
                 "open_vote": reverse("election-vote", args=[open_election.id]),
@@ -839,6 +841,24 @@ class Command(BaseCommand):
                     "destructive": False,
                     "route_target": reverse("ballot-verify"),
                 },
+                "elections-email-open-reminder": {
+                    "actor": MANAGER_USERNAME,
+                    "aliases": [DETAIL_OPEN_ALIAS],
+                    "destructive": True,
+                    "route_target": elections_payload[DETAIL_OPEN_ALIAS]["route"],
+                },
+                "elections-email-closed-send": {
+                    "actor": MANAGER_USERNAME,
+                    "aliases": [PAST_LIST_ALIAS],
+                    "destructive": True,
+                    "route_target": elections_payload[PAST_LIST_ALIAS]["route"],
+                },
+                "elections-email-tallied-send": {
+                    "actor": MANAGER_USERNAME,
+                    "aliases": [DETAIL_TALLIED_ALIAS],
+                    "destructive": True,
+                    "route_target": elections_payload[DETAIL_TALLIED_ALIAS]["route"],
+                },
             },
         }
 
@@ -895,6 +915,7 @@ class Command(BaseCommand):
                 election.refresh_from_db()
                 continue
             VotingCredential.objects.filter(election=election).delete()
+            ElectionRoll.objects.filter(election=election).delete()
             AuditLogEntry.objects.filter(election=election).delete()
             Election.objects.filter(pk=election.pk).update(
                 status=Election.Status.draft,
@@ -968,6 +989,7 @@ class Command(BaseCommand):
             election=election,
             credential_public_ids=credential_public_ids,
         )
+        self._ensure_election_roll(election=election)
         lifecycle_event_types = [
             "ballot_submitted",
             "election_anonymized",
@@ -1033,6 +1055,22 @@ class Command(BaseCommand):
                 freeipa_username=None,
                 weight=1,
             )
+
+    def _ensure_election_roll(self, *, election: Election) -> None:
+        """Populate ElectionRoll from group membership if missing.
+
+        The replay path preserves existing ballots and credentials, but on
+        first run after the ElectionRoll migration the roll won't exist yet.
+        """
+        if ElectionRoll.objects.filter(election=election).exists():
+            return
+
+        from core.elections_eligibility import eligible_voters_from_memberships
+
+        eligible = eligible_voters_from_memberships(election=election)
+        ElectionRoll.objects.bulk_create(
+            [ElectionRoll(election=election, freeipa_username=v.username) for v in eligible],
+        )
 
     def _replace_seed_ballot_submission_audit_entries(
         self,

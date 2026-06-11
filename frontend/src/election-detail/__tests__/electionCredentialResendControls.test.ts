@@ -7,7 +7,26 @@ import type { ElectionCredentialResendBootstrap } from "../types";
 
 const bootstrap: ElectionCredentialResendBootstrap = {
   sendMailCredentialsApiUrl: "/api/v1/elections/1/send-mail-credentials",
+  credentialEmailTemplateApiUrl: "/api/v1/elections/1/credential-email-template",
+  credentialEmailPreviewUrl: "/elections/1/email/render-preview/",
+  electionStatus: "open",
   eligibleUsernames: ["alice", "bob"],
+};
+
+const templatePayload = {
+  subject: "Your voting credential for {{ election_name }}",
+  html_content: "<p>Hi {{ first_name }}, your credential is {{ credential_public_id }}.</p>",
+  text_content: "Hi {{ first_name }}, your credential is {{ credential_public_id }}.",
+  variables: [
+    { name: "first_name", example: "Jane" },
+    { name: "election_name", example: "Board Election" },
+    { name: "vote_url", example: "https://example.com/vote/1" },
+  ],
+  template_options: [
+    { id: 10, name: "Default credential email" },
+    { id: 11, name: "Custom template" },
+  ],
+  selected_template_id: 10,
 };
 
 function flushPromises(): Promise<void> {
@@ -16,18 +35,13 @@ function flushPromises(): Promise<void> {
   });
 }
 
-function deferredResponse(): {
-  promise: Promise<Response>;
-  resolve: (response: Response) => void;
-} {
-  let resolvePromise!: (response: Response) => void;
-  const promise = new Promise<Response>((resolve) => {
-    resolvePromise = resolve;
+function mockTemplateFetch(): ReturnType<typeof vi.fn> {
+  return vi.fn((url: string) => {
+    if (url.includes("credential-email-template")) {
+      return Promise.resolve(new Response(JSON.stringify(templatePayload), { status: 200 }));
+    }
+    return Promise.resolve(new Response(JSON.stringify({ ok: true, message: "Queued voting credential email for 1 recipient.", recipient_count: 1 }), { status: 200 }));
   });
-  return {
-    promise,
-    resolve: resolvePromise,
-  };
 }
 
 describe("ElectionCredentialResendControls", () => {
@@ -35,83 +49,141 @@ describe("ElectionCredentialResendControls", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the existing resend controls and select options", () => {
+  it("renders the resend controls and select options", () => {
     const wrapper = mount(ElectionCredentialResendControls, {
       props: { bootstrap },
     });
 
-    expect(wrapper.text()).toContain("Resend all credentials");
-    expect(wrapper.text()).toContain("Resend voting credential");
-    // First option is the empty placeholder, then alice and bob
+    expect(wrapper.text()).toContain("Send reminder to all");
+    expect(wrapper.text()).toContain("Send reminder");
     const options = wrapper.findAll("select option");
     expect(options).toHaveLength(3);
     expect(wrapper.find('option[value="alice"]').exists()).toBe(true);
   });
 
-  it("shows a confirmation modal for single-user resend and submits on confirm", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, message: "Queued voting credential email for 1 recipient.", recipient_count: 1 }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    const assignMock = vi.fn();
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { assign: assignMock },
+  it("shows 'Send email' labels for closed elections", () => {
+    const closedBootstrap: ElectionCredentialResendBootstrap = {
+      ...bootstrap,
+      electionStatus: "closed",
+    };
+    const wrapper = mount(ElectionCredentialResendControls, {
+      props: { bootstrap: closedBootstrap },
     });
+
+    expect(wrapper.text()).toContain("Send email to all");
+    expect(wrapper.text()).toContain("Send email");
+    expect(wrapper.text()).not.toContain("Send reminder");
+  });
+
+  it("single-user button is disabled when no user is selected", () => {
+    const wrapper = mount(ElectionCredentialResendControls, {
+      props: { bootstrap },
+    });
+
+    const button = wrapper.find<HTMLButtonElement>("[data-testid='send-reminder-single']");
+    expect(button.exists()).toBe(true);
+    expect(button.attributes("disabled")).toBeDefined();
+  });
+
+  it("resend-all button is disabled when there are no eligible usernames", () => {
+    const emptyBootstrap: ElectionCredentialResendBootstrap = {
+      sendMailCredentialsApiUrl: "/api/v1/elections/1/send-mail-credentials",
+      credentialEmailTemplateApiUrl: "/api/v1/elections/1/credential-email-template",
+      credentialEmailPreviewUrl: "/elections/1/email/render-preview/",
+      electionStatus: "open",
+      eligibleUsernames: [],
+    };
+
+    const wrapper = mount(ElectionCredentialResendControls, {
+      props: { bootstrap: emptyBootstrap },
+    });
+
+    const button = wrapper.find<HTMLButtonElement>("[data-testid='send-reminder-all']");
+    expect(button.attributes("disabled")).toBeDefined();
+  });
+
+  it("opens a compose modal with template content when clicking send-reminder-single", async () => {
+    const fetchMock = mockTemplateFetch();
+    vi.stubGlobal("fetch", fetchMock);
 
     const wrapper = mount(ElectionCredentialResendControls, {
       props: { bootstrap },
     });
 
     await wrapper.get("#resend-credential-username").setValue("alice");
-    await wrapper.findAll("form")[0]?.trigger("submit.prevent");
+    await wrapper.find("[data-testid='send-reminder-single']").trigger("click");
+    await flushPromises();
     await nextTick();
 
-    // Modal should be visible with the right message
+    // Modal should be visible with template content loaded
     expect(wrapper.find(".modal").exists()).toBe(true);
-    expect(wrapper.text()).toContain("Send voting credentials to alice?");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("Send credential reminder to alice");
 
-    // Click the confirm button in the modal
-    await wrapper.find(".modal-footer .btn-danger").trigger("click");
-    await flushPromises();
+    // ComposeCard subject field should be populated
+    const subjectInput = wrapper.find<HTMLInputElement>('input[name="subject"]');
+    expect(subjectInput.element.value).toBe(templatePayload.subject);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const fetchCalls = fetchMock.mock.calls as unknown[][];
-    const fetchOptions = fetchCalls[0]?.[1] as RequestInit;
-    expect(fetchOptions).toMatchObject({
-      method: "POST",
-      credentials: "same-origin",
+    // Variables should be shown
+    expect(wrapper.text()).toContain("first_name");
+    expect(wrapper.text()).toContain("Jane");
+  });
+
+  it("opens a compose modal for all voters when clicking send-reminder-all", async () => {
+    const fetchMock = mockTemplateFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(ElectionCredentialResendControls, {
+      props: { bootstrap },
     });
-    expect(String(fetchOptions.body)).toContain('"username":"alice"');
-    expect(assignMock).not.toHaveBeenCalled();
+
+    await wrapper.find("[data-testid='send-reminder-all']").trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.find(".modal").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Send credential reminder to all 2 eligible voters");
+  });
+
+  it("sends credentials with edited template content on confirm", async () => {
+    const fetchMock = mockTemplateFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(ElectionCredentialResendControls, {
+      props: { bootstrap },
+    });
+
+    await wrapper.get("#resend-credential-username").setValue("alice");
+    await wrapper.find("[data-testid='send-reminder-single']").trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    // Edit the subject via the ComposeCard input
+    await wrapper.find<HTMLInputElement>('input[name="subject"]').setValue("Custom subject");
+
+    // Click send
+    await wrapper.find("[data-testid='send-credentials-confirm']").trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    // Should have made the send call with custom template content
+    const sendCall = fetchMock.mock.calls.find(
+      (call: unknown[]) => typeof call[0] === "string" && call[0].includes("send-mail-credentials"),
+    ) as [string, RequestInit] | undefined;
+    expect(sendCall).toBeDefined();
+
+    const body = JSON.parse(sendCall![1].body as string) as Record<string, string>;
+    expect(body.username).toBe("alice");
+    expect(body.subject_template).toBe("Custom subject");
+    expect(body.html_template).toBe(templatePayload.html_content);
+    expect(body.text_template).toBe(templatePayload.text_content);
+
+    // Modal should close, success message shown
+    expect(wrapper.find(".modal").exists()).toBe(false);
     expect(wrapper.text()).toContain("Queued voting credential email for 1 recipient.");
   });
 
-  it("shows a confirmation modal for resend-all with the voter count", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ ok: false, errors: ["Too many resend attempts. Please try again later."] }), { status: 429 })),
-    );
-
-    const wrapper = mount(ElectionCredentialResendControls, {
-      props: { bootstrap },
-    });
-
-    await wrapper.findAll("form")[1]?.trigger("submit.prevent");
-    await nextTick();
-
-    // Modal should mention the number of voters
-    expect(wrapper.find(".modal").exists()).toBe(true);
-    expect(wrapper.text()).toContain("Send voting credentials to all 2 eligible voters?");
-
-    // Confirm and check the API error renders inline
-    await wrapper.find(".modal-footer .btn-danger").trigger("click");
-    await flushPromises();
-
-    expect(wrapper.text()).toContain("Too many resend attempts. Please try again later.");
-  });
-
-  it("cancelling the confirmation modal does not send a request", async () => {
-    const fetchMock = vi.fn();
+  it("closes the modal without sending when cancel is clicked", async () => {
+    const fetchMock = mockTemplateFetch();
     vi.stubGlobal("fetch", fetchMock);
 
     const wrapper = mount(ElectionCredentialResendControls, {
@@ -119,56 +191,21 @@ describe("ElectionCredentialResendControls", () => {
     });
 
     await wrapper.get("#resend-credential-username").setValue("alice");
-    await wrapper.findAll("form")[0]?.trigger("submit.prevent");
+    await wrapper.find("[data-testid='send-reminder-single']").trigger("click");
+    await flushPromises();
     await nextTick();
 
     expect(wrapper.find(".modal").exists()).toBe(true);
 
-    // Click cancel
-    await wrapper.find(".modal-footer .btn-secondary").trigger("click");
+    await wrapper.find("[data-testid='send-credentials-cancel']").trigger("click");
     await nextTick();
 
     expect(wrapper.find(".modal").exists()).toBe(false);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 
-  it("disables resend controls while a single-user request is pending so a second click does not send again", async () => {
-    const pending = deferredResponse();
-    const fetchMock = vi.fn(() => pending.promise);
-    vi.stubGlobal("fetch", fetchMock);
-
-    const wrapper = mount(ElectionCredentialResendControls, {
-      props: { bootstrap },
-    });
-
-    await wrapper.get("#resend-credential-username").setValue("alice");
-    const input = wrapper.get("#resend-credential-username");
-
-    // Trigger the form and confirm via modal
-    await wrapper.findAll("form")[0]!.trigger("submit.prevent");
-    await nextTick();
-    await wrapper.find(".modal-footer .btn-danger").trigger("click");
-    await nextTick();
-
-    const buttons = wrapper.findAll("form button[type='submit']");
-    const submitSingleButton = buttons[0];
-    const submitAllButton = buttons[1];
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(input.attributes("disabled")).toBeDefined();
-    expect(submitSingleButton.attributes("disabled")).toBeDefined();
-    expect(submitAllButton.attributes("disabled")).toBeDefined();
-
-    pending.resolve(
-      new Response(JSON.stringify({ ok: true, message: "Queued voting credential email for 1 recipient.", recipient_count: 1 }), {
-        status: 200,
-      }),
+    // Only the template fetch should have been made, not a send
+    const sendCalls = fetchMock.mock.calls.filter(
+      (call: unknown[]) => typeof call[0] === "string" && call[0].includes("send-mail-credentials"),
     );
-    await flushPromises();
-
-    expect(input.attributes("disabled")).toBeUndefined();
-    // Submit button stays disabled after clearing the selection (no user selected)
-    expect(submitSingleButton.attributes("disabled")).toBeDefined();
-    expect(submitAllButton.attributes("disabled")).toBeUndefined();
+    expect(sendCalls).toHaveLength(0);
   });
 });

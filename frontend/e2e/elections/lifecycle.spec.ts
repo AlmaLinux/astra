@@ -166,3 +166,209 @@ test("elections-vote-ranking-submit-and-copy-receipt submits a ranked ballot and
   await expect(page.locator("#election-vote-result")).toContainText("Ballot receipt code copied to clipboard.");
   await expect(page.locator("#election-receipt-verify")).toHaveAttribute("href", `${resetState.routes.ballot_verify}?receipt=${receiptValue}`);
 });
+
+// --- Election email send controls ---
+
+async function expandEligibleVotersCard(page: Page): Promise<void> {
+  // Wait for the detail Vue app to mount so the page is fully rendered.
+  await expect(page.locator("[data-election-detail-vue-root]")).toBeVisible();
+
+  const votersRoot = page.locator("[data-election-eligible-voters-vue-root]");
+  await expect(votersRoot).toBeAttached();
+
+  // The eligible voters card is .card-primary (ineligible is .card-warning).
+  const eligibleCard = votersRoot.locator(".card-primary");
+
+  // Click the AdminLTE collapse widget button to expand the card.
+  await eligibleCard.locator("[data-card-widget='collapse']").click();
+  await expect(eligibleCard.locator(".card-body")).toBeVisible({ timeout: 5_000 });
+
+  // The resend controls only render once the eligible voters API returns
+  // the usernames list, so this wait confirms the data has loaded.
+  await expect(eligibleCard.locator("[data-election-credential-resend-vue-root]")).toBeVisible({ timeout: 10_000 });
+}
+
+// As an election operator, I can send credential reminders to one or all eligible voters of an open election.
+test("elections-email-open-reminder sends a credential reminder to one user and to all eligible voters", async ({ page }) => {
+  const manager = resetState.actors.manager;
+  const electionId = resetState.elections.detail_open_election.id;
+
+  await loginViaForm(page, manager.username, manager.password);
+  await page.goto(resetState.routes.open_detail);
+
+  await expandEligibleVotersCard(page);
+
+  const controls = page.locator("[data-election-credential-resend-vue-root]");
+
+  // Open elections should show "Send reminder" labels.
+  const singleButton = controls.getByTestId("send-reminder-single");
+  const allButton = controls.getByTestId("send-reminder-all");
+  await expect(singleButton).toContainText("Send reminder");
+  await expect(allButton).toContainText("Send reminder to all");
+
+  // --- Send to a single user ---
+  const select = controls.locator("#resend-credential-username");
+  await select.selectOption({ index: 1 });
+  await expect(singleButton).toBeEnabled();
+  await singleButton.click();
+
+  const modal = controls.locator(".modal.d-block");
+  await expect(modal).toBeVisible();
+  await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send credential reminder to");
+  await expect(modal.locator(".modal-content > .modal-body")).toContainText("unique voting credential and link");
+
+  // Intercept the send API and click confirm.
+  const singleSendPromise = page.waitForResponse((response) =>
+    response.url().includes(`/api/v1/elections/${electionId}/send-mail-credentials`)
+    && response.request().method() === "POST",
+  );
+  await modal.getByTestId("send-credentials-confirm").click();
+  const singleSendResponse = await singleSendPromise;
+  const singlePayload = await singleSendResponse.json() as { ok: boolean; recipient_count: number };
+  expect(singlePayload.ok).toBe(true);
+  expect(singlePayload.recipient_count).toBe(1);
+
+  // Modal should close, success message should appear.
+  await expect(modal).not.toBeVisible();
+  await expect(controls.locator("[role='status']")).toBeVisible();
+
+  // --- Send to all ---
+  await allButton.click();
+  await expect(modal).toBeVisible();
+  await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send credential reminder to all");
+
+  const allSendPromise = page.waitForResponse((response) =>
+    response.url().includes(`/api/v1/elections/${electionId}/send-mail-credentials`)
+    && response.request().method() === "POST",
+  );
+  await modal.getByTestId("send-credentials-confirm").click();
+  const allSendResponse = await allSendPromise;
+  const allPayload = await allSendResponse.json() as { ok: boolean; recipient_count: number };
+  expect(allPayload.ok).toBe(true);
+  expect(allPayload.recipient_count).toBeGreaterThanOrEqual(2);
+
+  await expect(modal).not.toBeVisible();
+  await expect(controls.locator("[role='status']")).toBeVisible();
+});
+
+// As an election operator, I can send a general email to eligible voters of a closed election.
+test("elections-email-closed-send sends an email to one user and to all eligible voters of a closed election without credential context", async ({ page }) => {
+  const manager = resetState.actors.manager;
+  const closedElection = resetState.elections.past_list_election;
+
+  await loginViaForm(page, manager.username, manager.password);
+  await page.goto(resetState.routes.closed_detail);
+
+  await expandEligibleVotersCard(page);
+
+  const controls = page.locator("[data-election-credential-resend-vue-root]");
+
+  // Closed elections should show "Send email" labels (not "Send reminder").
+  const singleButton = controls.getByTestId("send-reminder-single");
+  const allButton = controls.getByTestId("send-reminder-all");
+  await expect(singleButton).toContainText("Send email");
+  await expect(allButton).toContainText("Send email to all");
+
+  // --- Send to a single user ---
+  const select = controls.locator("#resend-credential-username");
+  await select.selectOption({ index: 1 });
+  await expect(singleButton).toBeEnabled();
+  await singleButton.click();
+
+  const modal = controls.locator(".modal.d-block");
+  await expect(modal).toBeVisible();
+  await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send email to");
+  await expect(modal.locator(".modal-content > .modal-body")).not.toContainText("unique voting credential");
+
+  const singleSendPromise = page.waitForResponse((response) =>
+    response.url().includes(`/api/v1/elections/${closedElection.id}/send-mail-credentials`)
+    && response.request().method() === "POST",
+  );
+  await modal.getByTestId("send-credentials-confirm").click();
+  const singleSendResponse = await singleSendPromise;
+  const singlePayload = await singleSendResponse.json() as { ok: boolean; recipient_count: number };
+  expect(singlePayload.ok).toBe(true);
+  expect(singlePayload.recipient_count).toBe(1);
+
+  await expect(modal).not.toBeVisible();
+  await expect(controls.locator("[role='status']")).toBeVisible();
+
+  // --- Send to all ---
+  await allButton.click();
+  await expect(modal).toBeVisible();
+  await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send email to all");
+
+  const allSendPromise = page.waitForResponse((response) =>
+    response.url().includes(`/api/v1/elections/${closedElection.id}/send-mail-credentials`)
+    && response.request().method() === "POST",
+  );
+  await modal.getByTestId("send-credentials-confirm").click();
+  const allSendResponse = await allSendPromise;
+  const allPayload = await allSendResponse.json() as { ok: boolean; recipient_count: number };
+  expect(allPayload.ok).toBe(true);
+  expect(allPayload.recipient_count).toBeGreaterThanOrEqual(2);
+
+  await expect(modal).not.toBeVisible();
+  await expect(controls.locator("[role='status']")).toBeVisible();
+});
+
+// As an election operator, I can send a general email to eligible voters of a tallied election.
+test("elections-email-tallied-send sends an email to one user and to all eligible voters of a tallied election without credential context", async ({ page }) => {
+  const manager = resetState.actors.manager;
+  const talliedElection = resetState.elections.detail_tallied_election;
+
+  await loginViaForm(page, manager.username, manager.password);
+  await page.goto(resetState.routes.tallied_detail);
+
+  await expandEligibleVotersCard(page);
+
+  const controls = page.locator("[data-election-credential-resend-vue-root]");
+
+  // Tallied elections should show "Send email" labels (not "Send reminder").
+  const singleButton = controls.getByTestId("send-reminder-single");
+  const allButton = controls.getByTestId("send-reminder-all");
+  await expect(singleButton).toContainText("Send email");
+  await expect(allButton).toContainText("Send email to all");
+
+  // --- Send to a single user ---
+  const select = controls.locator("#resend-credential-username");
+  await select.selectOption({ index: 1 });
+  await expect(singleButton).toBeEnabled();
+  await singleButton.click();
+
+  const modal = controls.locator(".modal.d-block");
+  await expect(modal).toBeVisible();
+  await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send email to");
+  await expect(modal.locator(".modal-content > .modal-body")).not.toContainText("unique voting credential");
+
+  const singleSendPromise = page.waitForResponse((response) =>
+    response.url().includes(`/api/v1/elections/${talliedElection.id}/send-mail-credentials`)
+    && response.request().method() === "POST",
+  );
+  await modal.getByTestId("send-credentials-confirm").click();
+  const singleSendResponse = await singleSendPromise;
+  const singlePayload = await singleSendResponse.json() as { ok: boolean; recipient_count: number };
+  expect(singlePayload.ok).toBe(true);
+  expect(singlePayload.recipient_count).toBe(1);
+
+  await expect(modal).not.toBeVisible();
+  await expect(controls.locator("[role='status']")).toBeVisible();
+
+  // --- Send to all ---
+  await allButton.click();
+  await expect(modal).toBeVisible();
+  await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send email to all");
+
+  const allSendPromise = page.waitForResponse((response) =>
+    response.url().includes(`/api/v1/elections/${talliedElection.id}/send-mail-credentials`)
+    && response.request().method() === "POST",
+  );
+  await modal.getByTestId("send-credentials-confirm").click();
+  const allSendResponse = await allSendPromise;
+  const allPayload = await allSendResponse.json() as { ok: boolean; recipient_count: number };
+  expect(allPayload.ok).toBe(true);
+  expect(allPayload.recipient_count).toBeGreaterThanOrEqual(2);
+
+  await expect(modal).not.toBeVisible();
+  await expect(controls.locator("[role='status']")).toBeVisible();
+});

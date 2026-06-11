@@ -9,16 +9,22 @@ from django.contrib.auth.decorators import permission_required
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
+from post_office.models import EmailTemplate
 
 from core import elections_services
 from core.elections_services import ElectionError
 from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
-from core.models import Election, VotingCredential
+from core.models import Election, ElectionRoll, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.rate_limit import allow_request
-from core.views_elections._helpers import _extend_election_end_from_post, _get_active_election
+from core.views_elections._helpers import (
+    CREDENTIAL_EMAIL_SECRET_VARIABLES,
+    _election_email_preview_context,
+    _extend_election_end_from_post,
+    _get_active_election,
+)
 from core.views_utils import get_username
 
 
@@ -47,11 +53,12 @@ class ElectionTallyResult:
 
 
 def _send_mail_credentials_result(*, request: HttpRequest, election: Election, data: Mapping[str, object]) -> ElectionCredentialResendResult:
-    if election.status != Election.Status.open:
+    _SENDABLE_STATUSES = {Election.Status.open, Election.Status.closed, Election.Status.tallied}
+    if election.status not in _SENDABLE_STATUSES:
         return ElectionCredentialResendResult(
             success=False,
             status_code=400,
-            message="Only open elections can send credential reminders.",
+            message="Emails can only be sent for open, closed, or tallied elections.",
         )
 
     admin_username = get_username(request)
@@ -70,16 +77,27 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
 
     target_username = str(data.get("username") or "").strip()
 
-    credentials_qs = VotingCredential.objects.filter(election=election).exclude(freeipa_username__isnull=True)
-    if not credentials_qs.exists():
-        return ElectionCredentialResendResult(
-            success=False,
-            status_code=400,
-            message=(
-                "No voting credentials exist for this election. Credentials are issued only at election start (draft -> open)."
-            ),
-        )
-    else:
+    # Optional custom template content from the compose modal.
+    subject_template = str(data.get("subject_template") or "").strip() or None
+    html_template = str(data.get("html_template") or "").strip() or None
+    text_template = str(data.get("text_template") or "").strip() or None
+
+    include_credentials = election.status == Election.Status.open
+
+    # For open elections, derive recipients from credentials (which retain
+    # freeipa_username).  For closed/tallied elections, credentials are
+    # anonymized so we fall back to the eligible-voters group membership.
+    if include_credentials:
+        credentials_qs = VotingCredential.objects.filter(election=election).exclude(freeipa_username__isnull=True)
+        if not credentials_qs.exists():
+            return ElectionCredentialResendResult(
+                success=False,
+                status_code=400,
+                message=(
+                    "No voting credentials exist for this election. "
+                    "Credentials are issued only at election start (draft -> open)."
+                ),
+            )
         if target_username:
             credential_list = list(
                 credentials_qs.filter(freeipa_username=target_username).only("freeipa_username", "public_id")
@@ -87,12 +105,41 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
         else:
             credential_list = list(credentials_qs.only("freeipa_username", "public_id"))
 
-    if target_username and not credential_list:
-        return ElectionCredentialResendResult(
-            success=False,
-            status_code=400,
-            message="That user does not have a voting credential for this election.",
-        )
+        if target_username and not credential_list:
+            return ElectionCredentialResendResult(
+                success=False,
+                status_code=400,
+                message="That user does not have a voting credential for this election.",
+            )
+    else:
+        # Closed/tallied: credentials are anonymized, so use the permanent
+        # ElectionRoll snapshot that was captured at credential issuance.
+        roll_qs = ElectionRoll.objects.filter(election=election)
+
+        if target_username:
+            if not roll_qs.filter(freeipa_username=target_username).exists():
+                return ElectionCredentialResendResult(
+                    success=False,
+                    status_code=400,
+                    message="That user is not an eligible voter for this election.",
+                )
+            eligible_usernames = [target_username]
+        else:
+            eligible_usernames = list(roll_qs.values_list("freeipa_username", flat=True))
+
+        if not eligible_usernames:
+            return ElectionCredentialResendResult(
+                success=False,
+                status_code=400,
+                message="No eligible voters found for this election.",
+            )
+
+        # Build a lightweight stub list so the delivery loop below works
+        # uniformly.  public_id is unused when include_credentials is False.
+        credential_list = [
+            type("_RollStub", (), {"freeipa_username": username, "public_id": ""})()
+            for username in eligible_usernames
+        ]
 
     deliveries: list[tuple[str, str, str, str | None]] = []
     for credential in credential_list:
@@ -131,8 +178,12 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
                 election=election,
                 username=username,
                 email=email,
-                credential_public_id=credential_public_id,
+                credential_public_id=credential_public_id if include_credentials else "",
                 tz_name=tz_name,
+                subject_template=subject_template,
+                html_template=html_template,
+                text_template=text_template,
+                include_credentials=include_credentials,
             )
             recipient_count += 1
         except Exception:
@@ -149,7 +200,8 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
         )
 
     recipient_label = "recipient" if recipient_count == 1 else "recipients"
-    success_message = f"Queued voting credential email for {recipient_count} {recipient_label}."
+    email_kind = "voting credential email" if include_credentials else "email"
+    success_message = f"Queued {email_kind} for {recipient_count} {recipient_label}."
 
     if failure_count > 0:
         failure_label = "email" if failure_count == 1 else "emails"
@@ -393,3 +445,100 @@ def election_send_mail_credentials_api(request: HttpRequest, election_id: int) -
         payload["errors"] = [result.message]
 
     return JsonResponse(payload, status=result.status_code if not result.success else 200)
+
+
+def _resolve_election_email_template(election: Election) -> tuple[str, str, str]:
+    """Return (subject, html, text) for the election's voting credential email.
+
+    Uses the election's snapshot fields when populated, otherwise falls back to
+    the linked EmailTemplate FK or the default named template.
+    """
+    if (
+        election.voting_email_subject.strip()
+        or election.voting_email_html.strip()
+        or election.voting_email_text.strip()
+    ):
+        return (
+            election.voting_email_subject,
+            election.voting_email_html,
+            election.voting_email_text,
+        )
+
+    template: EmailTemplate | None = None
+    if election.voting_email_template_id is not None:
+        template = election.voting_email_template
+    else:
+        template = EmailTemplate.objects.filter(
+            name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+        ).first()
+
+    if template is not None:
+        return (
+            template.subject or "",
+            template.html_content or "",
+            template.content or "",
+        )
+
+    return ("", "", "")
+
+
+def _credential_email_variable_examples(
+    request: HttpRequest,
+    election: Election,
+    *,
+    preview_username: str | None = None,
+) -> list[dict[str, str]]:
+    """Build variable examples pre-filled from the real election data.
+
+    Derives the variable list from ``_election_email_preview_context``,
+    excluding the secret per-recipient keys.
+    """
+    ctx = _election_email_preview_context(
+        request=request, election=election, preview_username=preview_username,
+    )
+
+    return [
+        {"name": name, "example": str(value)}
+        for name, value in ctx.items()
+        if name not in CREDENTIAL_EMAIL_SECRET_VARIABLES
+    ]
+
+
+@require_GET
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_credential_email_template_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    """Return the election's credential email template content and available variables."""
+    election = _get_active_election(election_id)
+
+    preview_username = str(request.GET.get("preview_username") or "").strip() or None
+
+    subject, html_content, text_content = _resolve_election_email_template(election)
+
+    # Template selector options.
+    templates = list(EmailTemplate.objects.all().order_by("name"))
+    template_options = [
+        {"id": t.pk, "name": t.name}
+        for t in templates
+    ]
+
+    # Determine selected template: FK on election, or default.
+    selected_template_id: int | None = None
+    if election.voting_email_template_id is not None:
+        selected_template_id = election.voting_email_template_id
+    else:
+        default = EmailTemplate.objects.filter(
+            name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+        ).only("pk").first()
+        if default is not None:
+            selected_template_id = default.pk
+
+    return JsonResponse({
+        "subject": subject,
+        "html_content": html_content,
+        "text_content": text_content,
+        "variables": _credential_email_variable_examples(
+            request, election, preview_username=preview_username,
+        ),
+        "template_options": template_options,
+        "selected_template_id": selected_template_id,
+    })

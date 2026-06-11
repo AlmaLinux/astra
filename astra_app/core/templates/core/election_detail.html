@@ -8,6 +8,9 @@
   {% vite_asset 'src/entrypoints/electionDetail.ts' %}
   <link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.css' %}">
   <link rel="stylesheet" href="{% static 'core/css/select2_overrides.css' %}">
+  {% if can_send_election_email %}
+    {% include 'core/_templated_email_compose_assets_head.html' %}
+  {% endif %}
   <style>
     /* Keep header tools aligned across collapsed/expanded cards. */
     .election-collapsible-card > .card-header {
@@ -140,7 +143,10 @@
       data-election-eligible-voters-root
       data-election-eligible-voters-api-url="{% url 'api-election-detail-eligible-voters' election.id %}"
       data-election-ineligible-voters-api-url="{% url 'api-election-detail-ineligible-voters' election.id %}"
-      {% if election.status == 'open' %}data-election-send-mail-credentials-api-url="{% url 'api-election-send-mail-credentials' election.id %}"{% endif %}
+      {% if can_send_election_email %}data-election-status="{{ election.status }}"{% endif %}
+      {% if can_send_election_email %}data-election-send-mail-credentials-api-url="{% url 'api-election-send-mail-credentials' election.id %}"{% endif %}
+      {% if can_send_election_email %}data-election-credential-email-template-api-url="{% url 'api-election-credential-email-template' election.id %}"{% endif %}
+      {% if can_send_election_email %}data-election-email-render-preview-url="{% url 'election-email-render-preview' election.id %}"{% endif %}
     ></div>
   {% endif %}
 {% endblock %}
@@ -149,4 +155,7 @@
   {{ block.super }}
   <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
   <script src="{% static 'admin/js/vendor/select2/select2.full.js' %}"></script>
+  {% if can_send_election_email %}
+    {% include 'core/_templated_email_compose_assets_scripts.html' %}
+  {% endif %}
 {% endblock %}

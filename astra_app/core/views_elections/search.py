@@ -7,7 +7,6 @@ from django.views.decorators.http import require_GET, require_POST
 from core import elections_eligibility
 from core.election_nominators import organization_nominator_identifier, organization_nominator_label
 from core.elections_eligibility import ElectionEligibilityError
-from core.email_context import election_committee_email_context
 from core.forms_elections import parse_datetime_local_value
 from core.freeipa.user import FreeIPAUser
 from core.models import Election, Organization
@@ -166,10 +165,11 @@ def election_email_render_preview(request, election_id: int) -> JsonResponse:
         if eligible_group_raw or "eligible_group_cn" in request.POST:
             election.eligible_group_cn = eligible_group_raw
 
-    context: dict[str, object] = {
-        **_election_email_preview_context(request=request, election=election),
-        **election_committee_email_context(),
-    }
+    preview_username = str(request.POST.get("preview_username") or "").strip() or None
+
+    context = _election_email_preview_context(
+        request=request, election=election, preview_username=preview_username,
+    )
 
     return render_templated_email_preview_response(request=request, context=context)
 

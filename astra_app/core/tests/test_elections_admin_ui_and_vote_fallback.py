@@ -228,6 +228,10 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             email="alice@example.com",
             credential_public_id="cred-alice",
             tz_name=None,
+            subject_template=None,
+            html_template=None,
+            text_template=None,
+            include_credentials=True,
         )
         self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
@@ -302,6 +306,10 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             email="alice@example.com",
             credential_public_id="cred-alice",
             tz_name=None,
+            subject_template=None,
+            html_template=None,
+            text_template=None,
+            include_credentials=True,
         )
         self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
@@ -666,6 +674,10 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             email="alice@example.com",
             credential_public_id="cred-alice-existing",
             tz_name=None,
+            subject_template=None,
+            html_template=None,
+            text_template=None,
+            include_credentials=True,
         )
         self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 

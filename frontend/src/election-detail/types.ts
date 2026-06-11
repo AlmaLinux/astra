@@ -145,6 +145,9 @@ export interface ElectionTallyActionBootstrap {
 
 export interface ElectionCredentialResendBootstrap {
   sendMailCredentialsApiUrl: string;
+  credentialEmailTemplateApiUrl: string;
+  credentialEmailPreviewUrl: string;
+  electionStatus: string;
   eligibleUsernames: string[];
 }
 
@@ -165,7 +168,10 @@ export interface IneligibleVoterModalBootstrap {
 export interface EligibleVotersBootstrap {
   eligibleVotersApiUrl: string;
   ineligibleVotersApiUrl: string;
+  electionStatus: string | null;
   sendMailCredentialsApiUrl: string | null;
+  credentialEmailTemplateApiUrl: string | null;
+  credentialEmailPreviewUrl: string | null;
 }
 
 export interface ElectionVoterSearchBootstrap {
@@ -236,7 +242,9 @@ export function readElectionTallyActionBootstrap(root: HTMLElement): ElectionTal
 
 export function readElectionCredentialResendBootstrap(root: HTMLElement): ElectionCredentialResendBootstrap | null {
   const sendMailCredentialsApiUrl = String(root.dataset.electionSendMailCredentialsApiUrl || "").trim();
-  if (!sendMailCredentialsApiUrl) {
+  const credentialEmailTemplateApiUrl = String(root.dataset.electionCredentialEmailTemplateApiUrl || "").trim();
+  const credentialEmailPreviewUrl = String(root.dataset.electionEmailRenderPreviewUrl || "").trim();
+  if (!sendMailCredentialsApiUrl || !credentialEmailTemplateApiUrl || !credentialEmailPreviewUrl) {
     return null;
   }
 
@@ -255,6 +263,9 @@ export function readElectionCredentialResendBootstrap(root: HTMLElement): Electi
 
   return {
     sendMailCredentialsApiUrl,
+    credentialEmailTemplateApiUrl,
+    credentialEmailPreviewUrl,
+    electionStatus: String(root.dataset.electionStatus || "open").trim(),
     eligibleUsernames,
   };
 }
@@ -297,8 +308,11 @@ export function readEligibleVotersBootstrap(root: HTMLElement): EligibleVotersBo
   if (!eligibleVotersApiUrl || !ineligibleVotersApiUrl) {
     return null;
   }
+  const electionStatus = String(root.dataset.electionStatus || "").trim() || null;
   const sendMailCredentialsApiUrl = String(root.dataset.electionSendMailCredentialsApiUrl || "").trim() || null;
-  return { eligibleVotersApiUrl, ineligibleVotersApiUrl, sendMailCredentialsApiUrl };
+  const credentialEmailTemplateApiUrl = String(root.dataset.electionCredentialEmailTemplateApiUrl || "").trim() || null;
+  const credentialEmailPreviewUrl = String(root.dataset.electionEmailRenderPreviewUrl || "").trim() || null;
+  return { eligibleVotersApiUrl, ineligibleVotersApiUrl, electionStatus, sendMailCredentialsApiUrl, credentialEmailTemplateApiUrl, credentialEmailPreviewUrl };
 }
 
 export function readElectionVoterSearchBootstrap(root: HTMLElement): ElectionVoterSearchBootstrap | null {

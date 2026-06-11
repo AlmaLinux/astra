@@ -38,11 +38,14 @@ const selectedIneligibleUsername = ref("");
 const isIneligibleModalVisible = ref(false);
 
 const credentialResendBootstrap = computed<ElectionCredentialResendBootstrap | null>(() => {
-  if (!props.bootstrap.sendMailCredentialsApiUrl) {
+  if (!props.bootstrap.sendMailCredentialsApiUrl || !props.bootstrap.credentialEmailTemplateApiUrl || !props.bootstrap.credentialEmailPreviewUrl) {
     return null;
   }
   return {
     sendMailCredentialsApiUrl: props.bootstrap.sendMailCredentialsApiUrl,
+    credentialEmailTemplateApiUrl: props.bootstrap.credentialEmailTemplateApiUrl,
+    credentialEmailPreviewUrl: props.bootstrap.credentialEmailPreviewUrl,
+    electionStatus: props.bootstrap.electionStatus || "open",
     eligibleUsernames: eligibleUsernames.value,
   };
 });
