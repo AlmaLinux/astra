@@ -19,7 +19,7 @@ from core.freeipa.exceptions import FreeIPAOperationFailed
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.freeipa_directory import search_freeipa_users
-from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
+from core.permissions import ASTRA_ADD_ELECTION
 from core.templatetags._user_helpers import try_get_full_name
 from core.views_utils import (
     MSG_SERVICE_UNAVAILABLE,
@@ -259,6 +259,7 @@ def _group_edit_payload(group: FreeIPAGroup) -> dict[str, object]:
 
 
 def _serialize_group_user_items(usernames: list[str]) -> dict[str, dict[str, str]]:
+    FreeIPAUser.warm_user_cache(usernames)
     users_by_username: dict[str, FreeIPAUser] = {}
     user_objects: list[FreeIPAUser] = []
 

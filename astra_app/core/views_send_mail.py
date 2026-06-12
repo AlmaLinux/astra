@@ -238,6 +238,7 @@ def _preview_for_group(group_cn: str) -> tuple[RecipientPreview, list[dict[str, 
         raise ValueError("Group not found.")
 
     usernames = sorted(group.member_usernames_recursive(), key=str.lower)
+    FreeIPAUser.warm_user_cache(usernames)
     recipients: list[dict[str, str]] = []
     skipped_usernames: list[str] = []
     for username in usernames:
@@ -609,6 +610,7 @@ def _preview_for_manual(emails: list[str]) -> tuple[RecipientPreview, list[dict[
 
 
 def _preview_for_users(usernames: list[str]) -> tuple[RecipientPreview, list[dict[str, str]]]:
+    FreeIPAUser.warm_user_cache(usernames)
     recipients: list[dict[str, str]] = []
     skipped_usernames: list[str] = []
     for username in usernames:
