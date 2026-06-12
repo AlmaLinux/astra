@@ -10,7 +10,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonR
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_GET, require_POST
-from post_office.models import EmailTemplate
+from post_office.models import Email, EmailTemplate
 
 from core import elections_services
 from core.elections_services import ElectionError
@@ -19,6 +19,7 @@ from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.models import Election, ElectionRoll, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.rate_limit import allow_request
+from core.templated_email import bulk_save_emails
 from core.views_elections._helpers import (
     CREDENTIAL_EMAIL_SECRET_VARIABLES,
     _election_email_preview_context,
@@ -141,6 +142,14 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
             for username in eligible_usernames
         ]
 
+    # Pre-warm the FreeIPA user cache so individual .get() calls are cache hits.
+    all_usernames = [
+        str(credential.freeipa_username or "").strip()
+        for credential in credential_list
+        if str(credential.freeipa_username or "").strip()
+    ]
+    FreeIPAUser.warm_user_cache(all_usernames)
+
     deliveries: list[tuple[str, str, str, str | None]] = []
     for credential in credential_list:
         username = str(credential.freeipa_username or "").strip()
@@ -169,11 +178,13 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
             message="No credential recipients are available (missing email addresses?).",
         )
 
+    # Render all emails without committing to the database, then bulk-insert.
     recipient_count = 0
     failure_count = 0
+    pending_emails: list[Email] = []
     for username, email, credential_public_id, tz_name in deliveries:
         try:
-            elections_services.send_voting_credential_email(
+            email_obj = elections_services.send_voting_credential_email(
                 request=request,
                 election=election,
                 username=username,
@@ -184,10 +195,15 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
                 html_template=html_template,
                 text_template=text_template,
                 include_credentials=include_credentials,
+                commit=False,
             )
+            if email_obj is not None and isinstance(email_obj, Email):
+                pending_emails.append(email_obj)
             recipient_count += 1
         except Exception:
             failure_count += 1
+
+    bulk_save_emails(pending_emails)
 
     if recipient_count == 0 and failure_count > 0:
         failure_label = "email" if failure_count == 1 else "emails"

@@ -987,7 +987,7 @@ class SendMailTests(TestCase):
         session.save()
 
         def _queue_email(**kwargs):
-            return Email.objects.create(
+            return Email(
                 from_email=kwargs["sender"],
                 to=kwargs["recipients"][0],
                 cc="",
@@ -1562,7 +1562,7 @@ class SendMailTests(TestCase):
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP]})
 
         first_error = ValueError("render failed")
-        queued_email = Email.objects.create(
+        queued_email = Email(
             from_email=settings.DEFAULT_FROM_EMAIL,
             to="bob@example.com",
             cc="",

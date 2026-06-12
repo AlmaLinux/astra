@@ -313,6 +313,43 @@ class FreeIPAUser(_FreeIPAClientMixin):
             return []
 
     @classmethod
+    def warm_user_cache(cls, usernames: Collection[str]) -> None:
+        """Pre-populate individual user cache entries from the all-users list cache.
+
+        If the all-users list is cached, extract matching entries and seed the
+        per-user cache so that subsequent ``get()`` calls are instant cache hits.
+        Usernames not found in the list are silently skipped (``get()`` will
+        fall back to its normal IPA RPC call).
+        """
+        from django.core.cache import cache
+
+        if not usernames:
+            return
+
+        users_data = cache.get(_users_list_cache_key())
+        if not users_data:
+            # All-users cache is cold — call all() to populate it, which makes
+            # a single IPA RPC call, then re-read the cached list.
+            cls.all(respect_privacy=False)
+            users_data = cache.get(_users_list_cache_key())
+            if not users_data:
+                return
+
+        wanted = {str(u).strip().lower() for u in usernames if u}
+        for user_data in users_data:
+            if not isinstance(user_data, dict):
+                continue
+            uid = user_data.get("uid")
+            if isinstance(uid, list):
+                username = uid[0] if uid else ""
+            else:
+                username = uid or ""
+            username = str(username).strip()
+            if not username or username.lower() not in wanted:
+                continue
+            cache.set(_user_cache_key(username), user_data)
+
+    @classmethod
     def _fetch_full_user(cls, client: ClientMeta, username: str):
         """Return a single user's full attribute dict.
 

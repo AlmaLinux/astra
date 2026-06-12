@@ -18,7 +18,7 @@ from django.shortcuts import render
 from django.urls import reverse_lazy
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
-from post_office.models import EmailTemplate
+from post_office.models import Email, EmailTemplate
 
 from core.email_context import system_email_context, user_email_context_from_user
 from core.forms_base import StyledForm
@@ -30,6 +30,7 @@ from core.models import MembershipRequest, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
 from core.rate_limit import allow_request
 from core.templated_email import (
+    bulk_save_emails,
     execute_email_template_save,
     preview_drop_inline_image_tags,
     preview_rewrite_inline_image_tags_to_urls,
@@ -1166,6 +1167,9 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                     sent = 0
                     failures = 0
                     first_template_error: Exception | None = None
+                    pending_emails: list[Email] = []
+                    # Track emails that need a membership-request note after bulk insert.
+                    deferred_note_emails: list[object] = []
                     for recipient in recipients:
                         to_email = str(recipient.get("email") or "").strip()
                         if not to_email:
@@ -1181,35 +1185,22 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                                 cc=cc,
                                 bcc=bcc,
                                 reply_to=reply_to,
+                                commit=False,
                             )
 
                             raw_election_id = recipient.get("election_id")
                             if raw_election_id is not None:
                                 try:
                                     queued_email.context = {"election_id": int(raw_election_id)}
-                                    queued_email.save(update_fields=["context"])
                                 except (TypeError, ValueError):
                                     pass
 
+                            if isinstance(queued_email, Email):
+                                pending_emails.append(queued_email)
                             sent += 1
 
                             if membership_request is not None:
-                                try:
-                                    add_note(
-                                        membership_request=membership_request,
-                                        username=get_username(request),
-                                        action={
-                                            "type": "contacted",
-                                            "kind": email_kind,
-                                            "email_id": queued_email.id,
-                                        },
-                                    )
-                                except Exception:
-                                    logger.exception(
-                                        "Send mail email-note failed membership_request_id=%s",
-                                        raw_request_id,
-                                        extra=current_exception_log_fields(),
-                                    )
+                                deferred_note_emails.append(queued_email)
                         except Exception as exc:
                             if first_template_error is None:
                                 first_template_error = exc
@@ -1217,6 +1208,27 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                             logger.exception(
                                 "Send mail failed email=%s",
                                 to_email,
+                                extra=current_exception_log_fields(),
+                            )
+
+                    bulk_save_emails(pending_emails)
+
+                    # Add membership-request notes now that emails have IDs.
+                    for queued_email in deferred_note_emails:
+                        try:
+                            add_note(
+                                membership_request=membership_request,
+                                username=get_username(request),
+                                action={
+                                    "type": "contacted",
+                                    "kind": email_kind,
+                                    "email_id": queued_email.id,
+                                },
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Send mail email-note failed membership_request_id=%s",
+                                raw_request_id,
                                 extra=current_exception_log_fields(),
                             )
 

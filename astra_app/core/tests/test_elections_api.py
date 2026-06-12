@@ -1411,6 +1411,7 @@ class ElectionsApiTests(TestCase):
             html_template=None,
             text_template=None,
             include_credentials=True,
+            commit=False,
         )
         self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
@@ -1641,6 +1642,7 @@ class ElectionsApiTests(TestCase):
             html_template="<p>Edited html</p>",
             text_template="Edited text",
             include_credentials=True,
+            commit=False,
         )
 
     def test_election_audit_log_api_hides_quorum_reached_for_non_managers(self) -> None:

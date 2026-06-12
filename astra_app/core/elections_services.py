@@ -448,7 +448,8 @@ def send_voting_credential_email(
     html_template: str | None = None,
     text_template: str | None = None,
     include_credentials: bool = True,
-) -> None:
+    commit: bool = True,
+) -> Email | None:
     context = build_voting_credential_email_context(
         request=request,
         election=election,
@@ -470,19 +471,23 @@ def send_voting_credential_email(
             text_source=text_template or "",
             context=context,
             reply_to=[settings.ELECTION_COMMITTEE_EMAIL],
+            commit=commit,
         )
         queued_email.context = _post_office_json_context({"election_id": election.id})
-        queued_email.save(update_fields=["context"])
-        return
+        if commit:
+            queued_email.save(update_fields=["context"])
+        return queued_email
 
     context = _post_office_json_context(context)
-    queue_templated_email(
+    queued_email = queue_templated_email(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
         template_name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
         context=context,
         reply_to=[settings.ELECTION_COMMITTEE_EMAIL],
+        commit=commit,
     )
+    return queued_email
 
 
 def build_voting_credential_email_context(
@@ -861,7 +866,8 @@ def _issue_voting_credentials_from_memberships(
     if election.status != Election.Status.open:
         raise ElectionError("cannot issue credentials unless election is open")
 
-    # Check once before the issuance loop rather than once per credential save.
+    # Guard once — this is the only check VotingCredential.save() performs, so
+    # we can safely bypass per-row save() and use bulk_create() below.
     if AuditLogEntry.objects.filter(election=election, event_type="election_anonymized").exists():
         raise ElectionError("cannot issue credentials for an anonymized election")
 
@@ -869,15 +875,32 @@ def _issue_voting_credentials_from_memberships(
         election=election,
         require_fresh=True,
     )
-    issued: list[VotingCredential] = []
-    for voter in eligible:
-        credential = _issue_voting_credential(
+
+    # Re-issue guard: if any credentials already exist (e.g. partial retry),
+    # fall back to the safe per-row path that handles duplicates.
+    existing_count = VotingCredential.objects.filter(election=election).count()
+    if existing_count > 0:
+        issued: list[VotingCredential] = []
+        for voter in eligible:
+            credential = _issue_voting_credential(
+                election=election,
+                freeipa_username=voter.username,
+                weight=voter.weight,
+            )
+            issued.append(credential)
+        return issued
+
+    # Fast path: no existing credentials, create in bulk.
+    objs = [
+        VotingCredential(
             election=election,
+            public_id=VotingCredential.generate_public_id(),
             freeipa_username=voter.username,
             weight=voter.weight,
         )
-        issued.append(credential)
-    return issued
+        for voter in eligible
+    ]
+    return VotingCredential.objects.bulk_create(objs, batch_size=500)
 
 
 @transaction.atomic

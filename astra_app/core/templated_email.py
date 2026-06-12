@@ -255,6 +255,7 @@ def queue_templated_email(
     bcc: list[str] | None = None,
     reply_to: list[str] | None = None,
     strict_inline_images: bool = False,
+    commit: bool = True,
 ) -> Email:
     """Queue an EmailTemplate with inline_image support and storage-backed images.
 
@@ -296,6 +297,7 @@ def queue_templated_email(
         reply_to=reply_to,
         strict_inline_images=strict_inline_images,
         template_name=template_name,
+        commit=commit,
     )
 
     # Preserve linkage to the EmailTemplate and original context so the admin UI
@@ -303,7 +305,8 @@ def queue_templated_email(
     try:
         email.template = template
         email.context = dict(context)
-        email.save(update_fields=["template", "context"])
+        if commit:
+            email.save(update_fields=["template", "context"])
     except Exception:
         logger.exception(
             "Failed to persist post_office template/context metadata template=%s",
@@ -370,12 +373,18 @@ def queue_composed_email(
     reply_to: list[str] | None = None,
     strict_inline_images: bool = False,
     template_name: str = "unknown",
+    commit: bool = True,
 ) -> Email:
     """Queue operator/template-composed email through the SSOT pipeline.
 
     This helper is intentionally metadata-agnostic: callers that need
     `Email.template` / `Email.context` persistence (template-based sends)
     should set those fields after calling this helper.
+
+    When *commit=False*, the Email object is constructed and rendered but not
+    saved to the database.  The caller is responsible for persisting it (e.g.
+    via ``Email.objects.bulk_create``).  Attachments are not supported in
+    deferred-commit mode.
     """
 
     staged_files: list[str] = []
@@ -408,17 +417,36 @@ def queue_composed_email(
         if reply_to:
             headers = {"Reply-To": ", ".join(reply_to)}
 
-        return post_office.mail.send(
-            recipients=recipients,
+        if commit:
+            return post_office.mail.send(
+                recipients=recipients,
+                sender=sender,
+                subject=rendered_subject,
+                message=rendered_text,
+                html_message=rendered_html,
+                attachments=attachments or None,
+                render_on_delivery=False,
+                commit=True,
+                cc=cc,
+                bcc=bcc,
+                headers=headers,
+            )
+        # Bypass send() which rejects commit=False with the default
+        # priority='now'.  create() has no such restriction and honours
+        # the configured default priority.  bulk_save_emails() dispatches
+        # 'now'-priority emails after insert so dev doesn't need
+        # send_queued_mail running.
+        return post_office.mail.create(
             sender=sender,
+            recipients=recipients,
+            cc=cc,
+            bcc=bcc,
             subject=rendered_subject,
             message=rendered_text,
             html_message=rendered_html,
-            attachments=attachments or None,
-            render_on_delivery=False,
-            cc=cc,
-            bcc=bcc,
             headers=headers,
+            render_on_delivery=False,
+            commit=False,
         )
     finally:
         for path in staged_files:
@@ -432,6 +460,23 @@ def queue_composed_email(
                     path,
                     extra=current_exception_log_fields(),
                 )
+
+
+def bulk_save_emails(emails: list[Email], batch_size: int = 500) -> None:
+    """Bulk-insert deferred Email objects and dispatch any with priority='now'.
+
+    In dev (default priority='now'), emails are dispatched immediately after
+    the bulk insert.  In production (priority='medium' / 'low'), emails remain
+    queued for the ``send_queued_mail`` management command.
+    """
+    if not emails:
+        return
+    Email.objects.bulk_create(emails, batch_size=batch_size)
+    for email in emails:
+        # create() sets status=None for priority='now'; dispatch sends
+        # the email immediately through the configured backend.
+        if email.status is None:
+            email.dispatch()
 
 
 def _iter_pluralize_vars(*sources: str) -> Iterable[str]:

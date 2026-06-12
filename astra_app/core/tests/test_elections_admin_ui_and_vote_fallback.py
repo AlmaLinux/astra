@@ -232,6 +232,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             html_template=None,
             text_template=None,
             include_credentials=True,
+            commit=False,
         )
         self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
@@ -310,6 +311,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             html_template=None,
             text_template=None,
             include_credentials=True,
+            commit=False,
         )
         self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
@@ -678,6 +680,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             html_template=None,
             text_template=None,
             include_credentials=True,
+            commit=False,
         )
         self.assertIsNone(self.client.session.get("send_mail_csv_payload_v1"))
 
