@@ -121,6 +121,68 @@ class ElectionEligibilityReferenceDatetimeTests(TestCase):
         self.assertEqual(weight, 0)
 
 
+@override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
+class ElectionEligibilityMembershipAgeCutoffTests(TestCase):
+    def test_started_election_membership_age_uses_utc_cutoff_day(self) -> None:
+        today = datetime.date(2026, 6, 14)
+        election_start = datetime.datetime.combine(
+            today - datetime.timedelta(days=10),
+            datetime.time(15, 42),
+            tzinfo=datetime.UTC,
+        )
+        election = Election.objects.create(
+            name="Membership age cutoff election",
+            description="",
+            start_datetime=election_start,
+            end_datetime=election_start + datetime.timedelta(days=7),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        voter_type = MembershipType.objects.create(
+            code="cutoff-voter",
+            name="Cutoff Voter",
+            votes=1,
+            category_id="individual",
+            enabled=True,
+        )
+
+        membership_starts_by_username = {
+            "started-11-days-ago": election_start - datetime.timedelta(days=1),
+            "started-11-days-ago-noon": datetime.datetime(2026, 6, 3, 12, 0, 0, tzinfo=datetime.UTC),
+            "started-11-days-ago-afternoon": datetime.datetime(2026, 6, 3, 16, 0, 0, tzinfo=datetime.UTC),
+            "started-10-days-ago-noon": datetime.datetime(2026, 6, 4, 12, 0, 0, tzinfo=datetime.UTC),
+        }
+
+        for username, start_at in membership_starts_by_username.items():
+            membership = Membership.objects.create(
+                target_username=username,
+                membership_type=voter_type,
+                expires_at=election_start + datetime.timedelta(days=365),
+            )
+            Membership.objects.filter(pk=membership.pk).update(created_at=start_at)
+
+        eligible = eligible_voters_from_memberships(election=election)
+        weights_by_username = {
+            username: eligible_vote_weight_for_username(election=election, username=username)
+            for username in membership_starts_by_username
+        }
+
+        self.assertEqual(
+            [v.username for v in eligible],
+            ["started-11-days-ago", "started-11-days-ago-afternoon", "started-11-days-ago-noon"],
+        )
+        self.assertEqual(
+            weights_by_username,
+            {
+                "started-11-days-ago": 1,
+                "started-11-days-ago-noon": 1,
+                "started-11-days-ago-afternoon": 1,
+                "started-10-days-ago-noon": 0,
+            },
+        )
+
+
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=40)
 class ElectionEligibilityRenewalPreservesCreatedAtTests(TestCase):
     def test_uninterrupted_membership_renewal_does_not_break_election_eligibility(self) -> None:

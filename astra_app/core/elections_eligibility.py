@@ -82,8 +82,25 @@ def _membership_is_active_at_reference(
     return expires_at is None or expires_at > reference_datetime
 
 
+def _membership_age_cutoff(*, reference_datetime: datetime.datetime) -> datetime.datetime:
+    """Return midnight UTC on the last eligible membership-start date."""
+    reference_utc = reference_datetime.astimezone(datetime.UTC)
+    cutoff_date = reference_utc.date() - datetime.timedelta(
+        days=int(settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+    )
+    return datetime.datetime.combine(cutoff_date, datetime.time.min, tzinfo=datetime.UTC)
+
+
 def _membership_is_old_enough(*, created_at: datetime.datetime | None, cutoff: datetime.datetime) -> bool:
-    return created_at is not None and created_at <= cutoff
+    if created_at is None:
+        return False
+
+    created_at_utc_day = datetime.datetime.combine(
+        created_at.astimezone(datetime.UTC).date(),
+        datetime.time.min,
+        tzinfo=datetime.UTC,
+    )
+    return created_at_utc_day <= cutoff
 
 
 def _eligibility_facts_cache_key(*, election_id: int, election_state: str) -> str:
@@ -96,7 +113,7 @@ def _eligibility_facts_state_cache_key(*, election_id: int) -> str:
 
 def _compute_eligibility_facts_by_username(*, election: Election) -> dict[str, EligibilityFacts]:
     reference_datetime = _election_reference_datetime(election=election)
-    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+    cutoff = _membership_age_cutoff(reference_datetime=reference_datetime)
 
     weights_by_username: dict[str, int] = {}
     term_start_by_username: dict[str, datetime.datetime] = {}
@@ -370,7 +387,7 @@ def vote_weight_breakdown_for_username(*, election: Election, username: str) -> 
         return []
 
     reference_datetime = _election_reference_datetime(election=election)
-    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+    cutoff = _membership_age_cutoff(reference_datetime=reference_datetime)
 
     lines: list[VoteWeightLine] = []
 
@@ -550,7 +567,7 @@ def eligible_nominator_usernames(*, election: Election, require_fresh: bool = Fa
 
 def eligible_nominator_organization_ids(*, election: Election, require_fresh: bool = False) -> set[int]:
     reference_datetime = _election_reference_datetime(election=election)
-    cutoff = reference_datetime - datetime.timedelta(days=settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS)
+    cutoff = _membership_age_cutoff(reference_datetime=reference_datetime)
 
     org_memberships = Membership.objects.filter(
         target_organization__isnull=False,
