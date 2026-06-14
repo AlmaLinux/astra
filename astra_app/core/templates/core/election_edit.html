@@ -27,7 +27,10 @@
 {% endblock %}
 
 {% block content %}
-  <div data-election-edit-root></div>
+  <div
+    data-election-edit-root
+    data-election-edit-min-membership-age-days="{{ eligibility_min_membership_age_days }}"
+  ></div>
   <form method="post" id="election-edit-form" {% include 'core/_form_validation_attrs.html' with form=details_form %}>
     {% csrf_token %}
     <input type="hidden" name="action" id="election-edit-action" value="" />
@@ -53,7 +56,10 @@
             {% include 'core/_form_field.html' with field=details_form.url %}
 
             <div class="form-row">
-              {% include 'core/_form_field.html' with field=details_form.start_datetime wrapper_class='col-md-6' %}
+              <div class="form-group col-md-6">
+                {% include 'core/_form_field_inner.html' with field=details_form.start_datetime %}
+                <small class="form-text text-muted" data-election-edit-start-cutoff-help></small>
+              </div>
               {% include 'core/_form_field.html' with field=details_form.end_datetime wrapper_class='col-md-6' %}
             </div>
 

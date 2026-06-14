@@ -49,6 +49,66 @@ function byId(id: string): HTMLElement | null {
   return document.getElementById(id);
 }
 
+function electionEditRoot(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-election-edit-root]");
+}
+
+function eligibilityMinMembershipAgeDays(): number | null {
+  const raw = String(electionEditRoot()?.dataset.electionEditMinMembershipAgeDays || "").trim();
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function utcDatePartsFromStartValue(startValue: string): { year: number; monthIndex: number; day: number } | null {
+  const raw = String(startValue || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const localDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}/);
+  const hasExplicitOffset = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+  if (localDateMatch && !hasExplicitOffset) {
+    return {
+      year: Number.parseInt(localDateMatch[1] ?? "", 10),
+      monthIndex: Number.parseInt(localDateMatch[2] ?? "", 10) - 1,
+      day: Number.parseInt(localDateMatch[3] ?? "", 10),
+    };
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return {
+    year: parsed.getUTCFullYear(),
+    monthIndex: parsed.getUTCMonth(),
+    day: parsed.getUTCDate(),
+  };
+}
+
+function eligibilityCutoffDate(startValue: string, minAgeDays: number): string | null {
+  const parts = utcDatePartsFromStartValue(startValue);
+  if (!parts) {
+    return null;
+  }
+
+  const cutoff = new Date(Date.UTC(parts.year, parts.monthIndex, parts.day));
+  cutoff.setUTCDate(cutoff.getUTCDate() - minAgeDays);
+  return cutoff.toISOString().slice(0, 10);
+}
+
+function updateEligibilityCutoffHelp(): void {
+  const helpEl = document.querySelector<HTMLElement>("[data-election-edit-start-cutoff-help]");
+  const startEl = document.getElementById("id_start_datetime") as HTMLInputElement | null;
+  const minAgeDays = eligibilityMinMembershipAgeDays();
+  if (!helpEl || !startEl || minAgeDays === null) {
+    return;
+  }
+
+  const cutoffDate = eligibilityCutoffDate(String(startEl.value || ""), minAgeDays);
+  helpEl.textContent = cutoffDate ? `Eligibility cutoff date: ${cutoffDate} 00:00 UTC.` : "";
+}
+
 function getCompose(): TemplatedEmailCompose | null {
   return currentWindow().TemplatedEmailCompose ?? null;
 }
@@ -520,17 +580,17 @@ export function initElectionEditController(): void {
 
   const startEl = document.getElementById("id_start_datetime");
   if (startEl) {
+    const handleStartDatetimeChange = () => {
+      updateEligibilityCutoffHelp();
+      void refreshEligibleVotersCount();
+    };
+    startEl.addEventListener("change", handleStartDatetimeChange);
     if (jquery) {
-      jquery(startEl).on?.("change", () => {
-        void refreshEligibleVotersCount();
-      });
-    } else {
-      startEl.addEventListener("change", () => {
-        void refreshEligibleVotersCount();
-      });
+      jquery(startEl).on?.("dp.change", handleStartDatetimeChange);
     }
   }
 
+  updateEligibilityCutoffHelp();
   void refreshEligibleVotersCount();
 
   document.addEventListener("change", (event) => {

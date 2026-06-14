@@ -6,6 +6,7 @@ describe("initElectionEditController", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("adds candidate rows from the empty-form template and marks removed rows as deleted", () => {
@@ -206,5 +207,30 @@ describe("initElectionEditController", () => {
 
     expect(groupChange).toHaveBeenCalled();
     expect(Array.from(groupSelect?.options ?? []).map((option) => option.value)).toEqual(["bob"]);
+  });
+
+  it("updates the start datetime eligibility cutoff help text using the UTC cutoff day", () => {
+    document.body.innerHTML = `
+      <div data-election-edit-root data-election-edit-min-membership-age-days="1"></div>
+      <input id="id_start_datetime" value="2026-06-04T15:42" />
+      <small data-election-edit-start-cutoff-help></small>
+      <input id="id_candidates-TOTAL_FORMS" value="0" />
+      <template id="candidates-empty-form"></template>
+      <tbody id="candidates-formset-body"></tbody>
+      <input id="id_groups-TOTAL_FORMS" value="0" />
+      <template id="groups-empty-form"></template>
+      <tbody id="groups-formset-body"></tbody>
+    `;
+
+    initElectionEditController();
+
+    const helpText = document.querySelector<HTMLElement>("[data-election-edit-start-cutoff-help]");
+    expect(helpText?.textContent).toBe("Eligibility cutoff date: 2026-06-03 00:00 UTC.");
+
+    const startInput = document.getElementById("id_start_datetime") as HTMLInputElement;
+    startInput.value = "2026-06-10T00:15";
+    startInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(helpText?.textContent).toBe("Eligibility cutoff date: 2026-06-09 00:00 UTC.");
   });
 });

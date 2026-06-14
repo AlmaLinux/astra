@@ -884,6 +884,7 @@ def election_edit(request, election_id: int):
             "rendered_preview": rendered_preview,
             "email_template_variables": email_template_variables,
             "default_template_name": settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+            "eligibility_min_membership_age_days": settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS,
             "original_email_template_id": original_email_template_id,
         },
     )

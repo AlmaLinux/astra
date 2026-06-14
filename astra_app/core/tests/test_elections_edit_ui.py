@@ -866,6 +866,7 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
         self.assertContains(resp, "Candidates cannot nominate themselves.")
         self.assertEqual(Candidate.objects.count(), 0)
 
+    @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=17)
     def test_new_election_mounts_vue_edit_controller_and_keeps_select2_assets(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
@@ -880,6 +881,7 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
         html = resp.content.decode("utf-8")
         self.assertIn("src/entrypoints/electionEdit.ts", html)
         self.assertIn("data-election-edit-root", html)
+        self.assertIn('data-election-edit-min-membership-age-days="17"', html)
         self.assertIn("admin/js/vendor/select2/select2.full.js", html)
         self.assertNotIn("core/js/election_edit.js", html)
 
