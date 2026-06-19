@@ -990,6 +990,77 @@ class PasswordResetFlowTests(TestCase):
             email="alice@example.com",
         )
 
+    @override_settings(
+        PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60,
+        AUTH_RATE_LIMIT_PASSWORD_RESET_LIMIT=5,
+        AUTH_RATE_LIMIT_PASSWORD_RESET_WINDOW_SECONDS=60,
+    )
+    def test_password_reset_confirm_reused_token_message_wins_after_html_and_api_gets(self) -> None:
+        cache.clear()
+        client = Client()
+        token = make_password_reset_token(
+            {
+                "u": "alice",
+                "e": "alice@example.com",
+                "lpc": "20260323074752Z",
+            }
+        )
+        current_user = SimpleNamespace(
+            username="alice",
+            email="alice@example.com",
+            last_password_change="20260323074752Z",
+            first_name="Alice",
+            last_name="User",
+            full_name="Alice User",
+        )
+        svc_client = SimpleNamespace(
+            user_mod=Mock(return_value={"result": {"uid": ["alice"]}}),
+            otptoken_find=Mock(return_value={"result": []}),
+        )
+        pw_client = SimpleNamespace(change_password=Mock(return_value=True))
+
+        with (
+            patch("core.views_auth.find_user_for_password_reset", autospec=True, return_value=current_user),
+            patch("core.views_auth.FreeIPAUser.get_client", autospec=True, return_value=svc_client),
+            patch("core.views_auth._build_freeipa_client", autospec=True, return_value=pw_client),
+            patch("core.views_auth.send_password_reset_success_email", autospec=True),
+        ):
+            client.get(f'{reverse("password-reset-confirm")}?token={token}', follow=False)
+            client.get(f'{reverse("api-password-reset-confirm-detail")}?token={token}', follow=False)
+            first_post = client.post(
+                reverse("password-reset-confirm"),
+                data={
+                    "token": token,
+                    "password": "S3curePassword!",
+                    "password_confirm": "S3curePassword!",
+                    "otp": "",
+                },
+                follow=False,
+            )
+            client.get(f'{reverse("password-reset-confirm")}?token={token}', follow=False)
+            client.get(f'{reverse("api-password-reset-confirm-detail")}?token={token}', follow=False)
+            second_post = client.post(
+                reverse("password-reset-confirm"),
+                data={
+                    "token": token,
+                    "password": "DifferentS3curePassword!",
+                    "password_confirm": "DifferentS3curePassword!",
+                    "otp": "",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(first_post.status_code, 302)
+        self.assertEqual(first_post["Location"], reverse("login"))
+        self.assertEqual(second_post.status_code, 302)
+        self.assertEqual(second_post["Location"], reverse("password-reset"))
+        follow_response = client.get(second_post["Location"])
+        messages = [message.message for message in get_messages(follow_response.wsgi_request)]
+        self.assertIn("This password reset link is no longer valid. Please request a new one.", messages)
+        self.assertNotIn("Too many password reset attempts. Please try again later.", messages)
+        self.assertEqual(svc_client.user_mod.call_count, 1)
+        self.assertEqual(pw_client.change_password.call_count, 1)
+
     @override_settings(PASSWORD_RESET_TOKEN_TTL_SECONDS=60 * 60)
     def test_password_reset_confirm_reconciles_invitation_from_token_context(self) -> None:
         client = Client()

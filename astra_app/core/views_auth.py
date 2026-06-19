@@ -479,8 +479,9 @@ def _password_reset_confirm_rate_limit_error(
     client_ip = _rate_limit_client_ip(request)
     limit = settings.AUTH_RATE_LIMIT_PASSWORD_RESET_LIMIT
     window_seconds = settings.AUTH_RATE_LIMIT_PASSWORD_RESET_WINDOW_SECONDS
+    scope = "auth.password_reset_confirm_post" if request.method == "POST" else "auth.password_reset_confirm_get"
     if allow_request(
-        scope="auth.password_reset_confirm_get",
+        scope=scope,
         key_parts=[client_ip, normalized_token],
         limit=limit,
         window_seconds=window_seconds,
