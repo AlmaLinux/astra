@@ -1,5 +1,6 @@
 import base64
 import datetime
+import hashlib
 import io
 import logging
 import os
@@ -14,6 +15,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
+from django.core.cache import cache
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import IntegrityError, transaction
@@ -2323,6 +2325,17 @@ def settings_email_validate(request: HttpRequest) -> HttpResponse:
     value = state["value"]
 
     if request.method == "POST":
+        token_digest = hashlib.sha256(state["token_string"].encode("utf-8")).hexdigest()
+        token_claim_key = f"astra:settings:email-validation-token-used:{token_digest}"
+        if not cache.add(token_claim_key, True, timeout=settings.EMAIL_VALIDATION_TOKEN_TTL_SECONDS):
+            logger.warning(
+                "Email validation rejected: token already used username=%s attr=%s",
+                username,
+                attr,
+            )
+            messages.warning(request, "This validation link is no longer valid. Please request a new validation email.")
+            return redirect(settings_url(tab="emails"))
+
         direct_updates: dict[str, object] = {}
         setattrs: list[str] = []
         delattrs: list[str] = []

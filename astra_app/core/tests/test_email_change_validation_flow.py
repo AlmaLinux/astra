@@ -243,6 +243,41 @@ class EmailChangeValidationFlowTests(TestCase):
         update_mock.assert_called_once()
 
     @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
+    def test_settings_email_validate_rejects_reused_token_before_second_freeipa_update(self) -> None:
+        from core import views_settings
+        from core.tokens import make_settings_email_validation_token
+
+        token = make_settings_email_validation_token(
+            {"p": "settings-email-validate", "u": "alice", "a": "mail", "v": "new@example.org"}
+        )
+        fu = SimpleNamespace(
+            username="alice",
+            email="old@example.org",
+            is_authenticated=True,
+            _user_data={"mail": ["old@example.org"], "fasstatusnote": ["US"]},
+        )
+
+        first_request = self.factory.post(f"/settings/emails/validate/?token={token}")
+        self._add_session_and_messages(first_request)
+        first_request.user = self._auth_user("alice")
+        second_request = self.factory.post(f"/settings/emails/validate/?token={token}")
+        self._add_session_and_messages(second_request)
+        second_request.user = self._auth_user("alice")
+
+        with (
+            patch("core.views_settings._get_full_user", autospec=True, return_value=fu),
+            patch("core.views_settings._update_user_attrs", autospec=True) as update_mock,
+        ):
+            first_response = views_settings.settings_email_validate(first_request)
+            second_response = views_settings.settings_email_validate(second_request)
+
+        self.assertEqual(first_response.status_code, 302)
+        self.assertEqual(second_response.status_code, 302)
+        update_mock.assert_called_once()
+        messages = [message.message for message in get_messages(second_request)]
+        self.assertIn("This validation link is no longer valid. Please request a new validation email.", messages)
+
+    @override_settings(SECRET_KEY="test-secret", EMAIL_VALIDATION_TOKEN_TTL_SECONDS=3600)
     def test_settings_email_validate_detail_api_returns_data_only_payload(self):
         from core import views_settings
         from core.tokens import make_settings_email_validation_token
