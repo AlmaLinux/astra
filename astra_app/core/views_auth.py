@@ -11,6 +11,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
 from django.core import signing
+from django.core.cache import cache
 from django.forms.forms import NON_FIELD_ERRORS
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
@@ -797,6 +798,15 @@ def password_reset_confirm(request: HttpRequest) -> HttpResponse:
         # user's password-change endpoint with OTP. This avoids leaving the user's
         # chosen password set if OTP validation fails.
         temp_password = secrets.token_urlsafe(32)
+        claim_material = f"{username}\0{token_lpc}".encode()
+        token_claim_key = f"astra:auth:password-reset-state-used:{hashlib.sha256(claim_material).hexdigest()}"
+        if not cache.add(token_claim_key, True, timeout=settings.PASSWORD_RESET_TOKEN_TTL_SECONDS):
+            logger.warning(
+                "Password reset confirm rejected: token already used username=%s",
+                username,
+            )
+            messages.warning(request, "This password reset link is no longer valid. Please request a new one.")
+            return redirect("password-reset")
 
         try:
             svc = FreeIPAUser.get_client()
