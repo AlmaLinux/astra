@@ -2,6 +2,7 @@ import datetime
 import re
 from unittest.mock import call, patch
 
+from django.conf import settings
 from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
@@ -374,6 +375,73 @@ class AdminAccountDeletionRequestTests(TestCase):
         self.assertEqual(len(change_messages), 2)
         self.assertTrue(any("Pending review -> Approved" in message for message in change_messages))
         self.assertTrue(any("Approved -> Completed" in message for message in change_messages))
+
+    def test_admin_action_approve_queues_user_notification_before_delete(self) -> None:
+        deletion_request = self._create_request(
+            username="bob",
+            manual_review_required=False,
+            blocker_codes=[],
+        )
+        self._login_as_freeipa_admin("admin")
+        admin_user = self._admin_user("admin")
+        target_user = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "givenname": ["Bob"],
+                "sn": ["Builder"],
+                "cn": ["Bob Builder"],
+                "mail": ["bob@example.com"],
+            },
+        )
+        execution_steps: list[str] = []
+
+        def lookup_user(username: str, *args, **kwargs) -> FreeIPAUser | None:
+            if username == "admin":
+                return admin_user
+            if username == "bob":
+                return target_user
+            return None
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=lookup_user),
+            patch(
+                "core.admin.queue_templated_email",
+                autospec=True,
+                side_effect=lambda **kwargs: execution_steps.append("send"),
+            ) as queue_email,
+            patch(
+                "core.account_deletion.FreeIPAUser.delete",
+                autospec=True,
+                side_effect=lambda *args, **kwargs: execution_steps.append("delete"),
+            ) as delete_mock,
+        ):
+            response = self.client.post(
+                reverse("admin:core_accountdeletionrequest_changelist"),
+                data={
+                    "action": "approve_requests",
+                    "_selected_action": [str(deletion_request.pk)],
+                    "post": "yes",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(execution_steps, ["send", "delete"])
+        delete_mock.assert_called_once()
+        queue_email.assert_called_once()
+
+        queue_kwargs = queue_email.call_args.kwargs
+        self.assertEqual(queue_kwargs["recipients"], ["bob@example.com"])
+        self.assertEqual(queue_kwargs["sender"], settings.DEFAULT_FROM_EMAIL)
+        self.assertEqual(
+            queue_kwargs["template_name"],
+            settings.ACCOUNT_DELETION_APPROVED_EMAIL_TEMPLATE_NAME,
+        )
+        self.assertEqual(queue_kwargs["context"]["username"], "bob")
+        self.assertEqual(queue_kwargs["context"]["full_name"], "Bob Builder")
+        self.assertRegex(queue_kwargs["context"]["requested_at_utc"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$")
+        self.assertTrue(queue_kwargs["context"]["login_url"].endswith(reverse("login")))
 
     def test_admin_action_approve_emits_approved_and_completed_signals(self) -> None:
         deletion_request = self._create_request(

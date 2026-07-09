@@ -32,6 +32,7 @@ from django.utils.text import Truncator
 from django.utils.translation import gettext_lazy as _
 from import_export.admin import ImportMixin
 from import_export.formats import base_formats
+from post_office.models import Email as PostOfficeEmail
 from python_freeipa import exceptions
 from tablib import Dataset
 
@@ -50,6 +51,7 @@ from core.elections_services import (
     close_election,
     tally_election,
 )
+from core.email_context import system_email_context, user_email_delivery_context
 from core.form_validators import (
     clean_fas_discussion_url_value,
     clean_fas_irc_channels_value,
@@ -119,6 +121,7 @@ from core.organization_representative_transition import apply_organization_repre
 from core.profanity import validate_no_profanity_or_hate_speech
 from core.protected_resources import protected_freeipa_group_cns
 from core.signals import CANONICAL_SIGNALS
+from core.templated_email import queue_templated_email
 from core.user_labels import user_choice, user_choice_from_freeipa, user_choice_with_fallback, user_choices_from_users
 from core.views_utils import _normalize_str, get_username
 
@@ -2774,6 +2777,34 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
                         event_key=ACCOUNT_DELETION_STATUS_EVENT_KEYS[AccountDeletionRequest.Status.approved],
                         account_deletion_request_id=deletion_request.pk,
                         actor=actor,
+                    )
+
+                approval_notification_already_queued = PostOfficeEmail.objects.filter(
+                    template__name=settings.ACCOUNT_DELETION_APPROVED_EMAIL_TEMPLATE_NAME,
+                    context__account_deletion_request_id=deletion_request.pk,
+                ).exists()
+                if not approval_notification_already_queued:
+                    recipient_context = user_email_delivery_context(username=deletion_request.username)
+                    recipient_email = str(recipient_context["email"] or "").strip()
+                    if not recipient_email:
+                        raise RuntimeError(
+                            "Account deletion approval email could not be queued because no email address "
+                            f"is available for {deletion_request.username}."
+                        )
+
+                    requested_at_utc = deletion_request.created_at.astimezone(datetime.UTC).strftime(
+                        "%Y-%m-%d %H:%M UTC"
+                    )
+                    queue_templated_email(
+                        recipients=[recipient_email],
+                        sender=settings.DEFAULT_FROM_EMAIL,
+                        template_name=settings.ACCOUNT_DELETION_APPROVED_EMAIL_TEMPLATE_NAME,
+                        context={
+                            **system_email_context(),
+                            **recipient_context,
+                            "account_deletion_request_id": deletion_request.pk,
+                            "requested_at_utc": requested_at_utc,
+                        },
                     )
 
                 # Keep the row locked across execution so concurrent confirm posts cannot
