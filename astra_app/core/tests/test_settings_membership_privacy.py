@@ -470,6 +470,36 @@ class SelfServiceMembershipPrivacyTests(TestCase):
         messages_list = [message.message for message in get_messages(request)]
         self.assertIn("Your existing account deletion request is still pending review.", messages_list)
 
+    def test_account_deletion_request_cancel_allows_user_to_close_pending_request(self) -> None:
+        from core.models import AccountDeletionRequest  # noqa: PLC0415
+
+        deletion_request = AccountDeletionRequest.objects.create(
+            username="alice",
+            status=AccountDeletionRequest.Status.pending_review,
+            reason_category=AccountDeletionRequest.ReasonCategory.privacy,
+            reason_text="Please cancel this pending request.",
+        )
+
+        request = self.factory.post(reverse("settings-account-deletion-cancel"))
+        self._add_session_and_messages(request)
+        self._add_csrf(request)
+        request.user = self._auth_user("alice")
+
+        with (
+            patch("core.views_settings.transaction.on_commit", autospec=True, side_effect=lambda callback: callback()),
+            patch("core.views_settings.astra_signals.account_deletion_cancelled.send", autospec=True) as signal_send,
+        ):
+            response = views_settings.settings_account_deletion_cancel(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=privacy&status=deletion-cancelled")
+        deletion_request.refresh_from_db()
+        self.assertEqual(deletion_request.status, AccountDeletionRequest.Status.cancelled)
+        self.assertIsNotNone(deletion_request.reason_cleanup_due_at)
+        signal_send.assert_called_once()
+        messages_list = [message.message for message in get_messages(request)]
+        self.assertIn("Your account deletion request has been cancelled.", messages_list)
+
     def test_account_deletion_request_reauth_failure_logs_exception_object(self) -> None:
         request = self.factory.post(
             reverse("settings-account-deletion-request"),

@@ -22,6 +22,7 @@ describe("SettingsEmailValidationPage", () => {
         agreementsUrl: "/settings/?tab=agreements",
         userProfileUrl: "/users/alice/profile/",
         accountDeletionSubmitUrl: "/settings/privacy/delete-request/",
+        accountDeletionCancelUrl: "/settings/privacy/delete-request/cancel/",
         otpEnableUrl: "/settings/security/otp/enable/",
         otpDisableUrl: "/settings/security/otp/disable/",
         otpDeleteUrl: "/settings/security/otp/delete/",

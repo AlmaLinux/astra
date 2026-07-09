@@ -255,6 +255,11 @@ function accountDeletionStatusLabel(status: string): string {
   return accountDeletionStatusLabels[status] || status;
 }
 
+function activeDeletionRequestCanBeCancelled(): boolean {
+  const status = payload.value?.privacy.activeDeletionRequest?.status;
+  return status === "pending_review" || status === "pending_privilege_check";
+}
+
 function terminationUrl(code: string): string {
   return props.bootstrap.routeConfig.membershipTerminateUrlTemplate.replace("__membership_type_code__", encodeURIComponent(code));
 }
@@ -683,7 +688,12 @@ onMounted(async () => {
                     <h3 class="h5">Delete my account</h3>
                     <p class="text-muted">Submitting a deletion request starts a staff-reviewed workflow. Some records may still be retained for legal, security, election, or audit reasons.</p>
                     <div v-if="payload.privacy.activeDeletionRequest" class="alert alert-info" role="alert">Your current deletion request status is <strong>{{ accountDeletionStatusLabel(payload.privacy.activeDeletionRequest.status) }}</strong>.</div>
-                    <p v-if="payload.privacy.activeDeletionRequest" class="text-muted mb-0">This request is already in progress. Contact support if you need help with the review.</p>
+                    <form v-if="payload.privacy.activeDeletionRequest && activeDeletionRequestCanBeCancelled()" method="post" :action="bootstrap.routeConfig.accountDeletionCancelUrl">
+                      <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
+                      <p class="text-muted">This request is still pending. You can cancel it here if you no longer want your account deleted.</p>
+                      <button type="submit" class="btn btn-outline-secondary">Cancel deletion request</button>
+                    </form>
+                    <p v-else-if="payload.privacy.activeDeletionRequest" class="text-muted mb-0">This request is already in progress. Contact support if you need help with the review.</p>
                     <form v-else method="post" :action="bootstrap.routeConfig.accountDeletionSubmitUrl" class="needs-validation" novalidate>
                       <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
                       <div class="form-group">

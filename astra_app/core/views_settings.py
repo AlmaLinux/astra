@@ -1487,6 +1487,7 @@ def _build_settings_route_config(request: HttpRequest, *, context: dict[str, obj
         "avatar_upload_url": reverse("settings-avatar-upload"),
         "avatar_delete_url": reverse("settings-avatar-delete"),
         "account_deletion_submit_url": reverse("settings-account-deletion-request"),
+        "account_deletion_cancel_url": reverse("settings-account-deletion-cancel"),
         "otp_enable_url": reverse("security-otp-enable"),
         "otp_disable_url": reverse("security-otp-disable"),
         "otp_delete_url": reverse("security-otp-delete"),
@@ -2226,6 +2227,50 @@ def settings_account_deletion_request(request: HttpRequest) -> HttpResponse:
         messages.info(request, "Your existing account deletion request is still pending review.")
 
     return redirect(settings_url(tab="privacy", status="deletion-requested"))
+
+
+@login_required
+@csrf_protect
+def settings_account_deletion_cancel(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return redirect(settings_url(tab="privacy"))
+
+    username = get_username(request)
+
+    try:
+        with transaction.atomic():
+            active_request = (
+                AccountDeletionRequest.objects.select_for_update()
+                .filter(
+                    username=username,
+                    status__in=(
+                        AccountDeletionRequest.Status.pending_review,
+                        AccountDeletionRequest.Status.pending_privilege_check,
+                    ),
+                )
+                .order_by("-created_at", "-pk")
+                .first()
+            )
+            if active_request is None:
+                messages.info(request, "There is no pending account deletion request to cancel.")
+                return redirect(settings_url(tab="privacy"))
+
+            active_request.status = AccountDeletionRequest.Status.cancelled
+            active_request.save(update_fields=["status", "reason_cleanup_due_at", "updated_at"])
+            cancelled_request_id = active_request.pk
+            transaction.on_commit(
+                lambda: astra_signals.account_deletion_cancelled.send(
+                    sender=AccountDeletionRequest,
+                    account_deletion_request=AccountDeletionRequest.objects.get(pk=cancelled_request_id),
+                    actor=username,
+                )
+            )
+    except IntegrityError:
+        messages.error(request, "Unable to cancel your account deletion request right now.")
+        return redirect(settings_url(tab="privacy", status="deletion-requested"))
+
+    messages.success(request, "Your account deletion request has been cancelled.")
+    return redirect(settings_url(tab="privacy", status="deletion-cancelled"))
 
 
 def _otp_preamble(request: HttpRequest) -> HttpResponse | None:

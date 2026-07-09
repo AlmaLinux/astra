@@ -30,6 +30,7 @@ const bootstrap: SettingsBootstrap = {
     agreementsUrl: "/settings/?tab=agreements",
     userProfileUrl: "/users/alice/profile/",
     accountDeletionSubmitUrl: "/settings/privacy/delete-request/",
+    accountDeletionCancelUrl: "/settings/privacy/delete-request/cancel/",
     otpEnableUrl: "/settings/security/otp/enable/",
     otpDisableUrl: "/settings/security/otp/disable/",
     otpDeleteUrl: "/settings/security/otp/delete/",
@@ -285,6 +286,32 @@ describe("SettingsPage", () => {
 
     expect(checkbox.element.checked).toBe(true);
     expect(new FormData(form as HTMLFormElement).has("acknowledge_retained_data")).toBe(true);
+  });
+
+  it("renders a cancel form for pending account deletion requests", () => {
+    const wrapper = mount(SettingsPage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          initialPayload: {
+            ...initialPayload,
+            activeTab: "privacy",
+            privacy: {
+              form: { isBound: false, nonFieldErrors: [], fields: [] },
+              accountDeletionForm: null,
+              activeDeletionRequest: { status: "pending_review" },
+              privacyWarnings: [],
+            },
+          },
+        },
+      },
+      attachTo: document.body,
+    });
+
+    expect(wrapper.text()).toContain("Your current deletion request status is");
+    expect(wrapper.text()).toContain("Pending review");
+    expect(wrapper.find('form[action="/settings/privacy/delete-request/cancel/"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("Cancel deletion request");
   });
 
   it("does not crash when modal enhancement is unavailable during agreements-tab render", async () => {

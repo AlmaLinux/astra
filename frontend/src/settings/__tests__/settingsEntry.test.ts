@@ -68,6 +68,7 @@ describe("settings entrypoint", () => {
         agreements_url: "/settings/?tab=agreements",
         user_profile_url: "/users/alice/profile/",
         account_deletion_submit_url: "/settings/privacy/delete-request/",
+        account_deletion_cancel_url: "/settings/privacy/delete-request/cancel/",
         otp_enable_url: "/settings/security/otp/enable/",
         otp_disable_url: "/settings/security/otp/disable/",
         otp_delete_url: "/settings/security/otp/delete/",

@@ -34,6 +34,7 @@ export interface SettingsRouteConfig {
   avatarUploadUrl?: string;
   avatarDeleteUrl?: string;
   accountDeletionSubmitUrl: string;
+  accountDeletionCancelUrl: string;
   otpEnableUrl: string;
   otpDisableUrl: string;
   otpDeleteUrl: string;
@@ -277,6 +278,7 @@ function normalizeRouteConfig(payload: any): SettingsRouteConfig {
     avatarUploadUrl: payload.avatar_upload_url,
     avatarDeleteUrl: payload.avatar_delete_url,
     accountDeletionSubmitUrl: payload.account_deletion_submit_url,
+    accountDeletionCancelUrl: payload.account_deletion_cancel_url,
     otpEnableUrl: payload.otp_enable_url,
     otpDisableUrl: payload.otp_disable_url,
     otpDeleteUrl: payload.otp_delete_url,

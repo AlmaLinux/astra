@@ -319,6 +319,11 @@ urlpatterns = [
         views_settings.settings_account_deletion_request,
         name="settings-account-deletion-request",
     ),
+    path(
+        "settings/privacy/delete-request/cancel/",
+        views_settings.settings_account_deletion_cancel,
+        name="settings-account-deletion-cancel",
+    ),
     path("settings/emails/validate/", views_settings.settings_email_validate, name="settings-email-validate"),
     path("settings/security/otp/enable/", views_settings.security_otp_enable, name="security-otp-enable"),
     path("settings/security/otp/disable/", views_settings.security_otp_disable, name="security-otp-disable"),
