@@ -2,10 +2,14 @@ from types import SimpleNamespace
 from typing import override
 from unittest.mock import patch
 
+from django.conf import settings
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from core import signals as astra_signals
+from core.freeipa.cache import _user_cache_key
+from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
 from core.freeipa.user import FreeIPAUser
 from core.membership_notes import CUSTOS
 from core.models import MembershipRequest, MembershipType, MembershipTypeCategory, Note, Organization
@@ -104,6 +108,80 @@ class MembershipNotesReceiversEmbargoedTests(TestCase):
         self.assertEqual(
             notes[0].content,
             "This user's declared country, Cuba, is on the list of embargoed countries.",
+        )
+
+    def test_user_signal_embargo_note_created_for_private_applicant_non_self_viewer(self) -> None:
+        """Compliance embargo checks must bypass fasIsPrivate redaction.
+
+        A private applicant's country attribute is stripped by anonymize() for
+        any viewer other than the applicant. If the request is submitted by
+        someone else (committee/admin), the compliance receiver must still see
+        the declared country and create the warning note.
+        """
+        request = self._create_user_request(username="kinan-wehba")
+
+        cache_key = _user_cache_key("kinan-wehba")
+        cache.set(
+            cache_key,
+            {
+                "uid": ["kinan-wehba"],
+                settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR: ["IR"],
+                "fasIsPrivate": ["TRUE"],
+            },
+        )
+        self.addCleanup(cache.delete, cache_key)
+
+        set_current_viewer_username("committee-admin")
+        try:
+            astra_signals.membership_request_submitted.send(
+                sender=MembershipRequest,
+                membership_request=request,
+                actor="committee-admin",
+            )
+        finally:
+            clear_current_viewer_username()
+
+        notes = list(Note.objects.filter(membership_request=request, username=CUSTOS).order_by("pk"))
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(
+            notes[0].content,
+            "This user's declared country, Iran (IR), is on the list of embargoed countries.",
+        )
+
+    def test_org_signal_rep_embargo_note_created_for_private_rep_non_self_viewer(self) -> None:
+        """Org representative embargo checks must also bypass privacy redaction."""
+        request = self._create_org_request(representative="kinan-wehba", country_code="US")
+        organization = request.requested_organization
+        assert organization is not None
+
+        cache_key = _user_cache_key("kinan-wehba")
+        cache.set(
+            cache_key,
+            {
+                "uid": ["kinan-wehba"],
+                settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR: ["IR"],
+                "fasIsPrivate": ["TRUE"],
+            },
+        )
+        self.addCleanup(cache.delete, cache_key)
+
+        set_current_viewer_username("committee-admin")
+        try:
+            astra_signals.organization_membership_request_submitted.send(
+                sender=MembershipRequest,
+                membership_request=request,
+                actor="committee-admin",
+                organization_id=organization.pk,
+                organization_display_name=organization.name,
+            )
+        finally:
+            clear_current_viewer_username()
+
+        notes = list(Note.objects.filter(membership_request=request, username=CUSTOS).order_by("pk"))
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(
+            notes[0].content,
+            "This organization's representative's declared country, Iran (IR), is on the list of embargoed countries.",
         )
 
     def test_user_signal_without_match_creates_no_note(self) -> None:

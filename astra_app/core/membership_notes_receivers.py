@@ -78,7 +78,10 @@ def record_embargoed_country_note_for_user_submission(
         return
 
     try:
-        freeipa_user = FreeIPAUser.get(requested_username)
+        # Compliance embargo checks must bypass fasIsPrivate redaction: a private
+        # applicant's country attribute is stripped by anonymize() for non-self
+        # viewers, which would silently defeat the sanctions/embargo check.
+        freeipa_user = FreeIPAUser.get(requested_username, respect_privacy=False)
     except Exception:
         logger.exception(
             "membership_request.note.error",
@@ -201,7 +204,9 @@ def record_embargoed_country_note_for_org_submission(
             return
 
         try:
-            representative_user = FreeIPAUser.get(representative_username)
+            # Bypass fasIsPrivate redaction so the representative's declared
+            # country is always available for the compliance embargo check.
+            representative_user = FreeIPAUser.get(representative_username, respect_privacy=False)
         except Exception:
             logger.exception(
                 "membership_request.note.error",
