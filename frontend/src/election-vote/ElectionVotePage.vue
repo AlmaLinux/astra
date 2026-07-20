@@ -487,7 +487,7 @@ onMounted(async () => {
                 <li>Your 1st choice counts first.</li>
                 <li>If your top choice is elected with enough support, or is eliminated, your vote can transfer to your next ranked choice.</li>
                 <li>If you stop ranking, your vote will no longer transfer.</li>
-                <li>All rankings are treated equally — ranking additional candidates does not disadvantage your higher preferences.</li>
+                <li>All rankings are treated equally: ranking additional candidates does not disadvantage your higher preferences.</li>
               </ul>
               <p class="mt-2 mb-0">Votes are weighted according to membership or sponsorship level. You submit one ranked ballot, and all rankings follow the same rules.</p>
             </div>

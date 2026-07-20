@@ -245,24 +245,24 @@ onMounted(async () => {
             <div class="card-body">
               <dl v-if="activeContactKey === 'representative'" class="row mb-0">
                 <dt class="col-sm-4">Name</dt>
-                <dd class="col-sm-8">{{ payload.organization.representative.full_name || '—' }}</dd>
+                <dd class="col-sm-8">{{ payload.organization.representative.full_name || 'Not provided.' }}</dd>
                 <dt class="col-sm-4">Username</dt>
                 <dd class="col-sm-8">
                   <a v-if="payload.organization.representative.username" :href="userProfileUrl(payload.organization.representative.username)">{{ payload.organization.representative.username }}</a>
-                  <template v-else>—</template>
+                  <template v-else>Not provided.</template>
                 </dd>
               </dl>
 
               <dl v-else-if="visibleContactGroup" class="row mb-0">
                 <dt class="col-sm-4">Name</dt>
-                <dd class="col-sm-8">{{ visibleContactGroup.name || '—' }}</dd>
+                <dd class="col-sm-8">{{ visibleContactGroup.name || 'Not provided.' }}</dd>
                 <dt class="col-sm-4">Email</dt>
                 <dd class="col-sm-8">
                   <a v-if="visibleContactGroup.email" :href="sendMailUrl(visibleContactGroup.email)">{{ visibleContactGroup.email }}</a>
-                  <template v-else>—</template>
+                  <template v-else>Not provided.</template>
                 </dd>
                 <dt class="col-sm-4">Phone</dt>
-                <dd class="col-sm-8">{{ visibleContactGroup.phone || '—' }}</dd>
+                <dd class="col-sm-8">{{ visibleContactGroup.phone || 'Not provided.' }}</dd>
               </dl>
             </div>
           </div>
@@ -291,7 +291,7 @@ onMounted(async () => {
                     <div v-if="payload.organization.website" class="small">
                       <a :href="payload.organization.website" rel="noopener noreferrer">{{ payload.organization.website }}</a>
                     </div>
-                    <div v-else class="text-muted">—</div>
+                    <div v-else class="text-muted">Not provided.</div>
                   </div>
                 </div>
 

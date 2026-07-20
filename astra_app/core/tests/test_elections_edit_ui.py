@@ -172,6 +172,8 @@ class ElectionEditPermissionTests(_CoreCategoriesTestCase):
         self.assertContains(resp, "Save the draft to enable starting the election")
         self.assertNotContains(resp, 'data-target="#start-election-modal"')
         self.assertNotContains(resp, 'id="start-election-modal"')
+        self.assertNotContains(resp, "btn-success")
+        self.assertContains(resp, 'class="btn btn-primary btn-block"', html=False)
 
     def test_new_election_save_draft_button_allows_invalid_submit_without_formnovalidate(self) -> None:
         self._login_as_freeipa_user("admin")
@@ -218,6 +220,11 @@ class ElectionEditPermissionTests(_CoreCategoriesTestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "This election has 3 seats but only 1 candidate")
+        self.assertNotContains(resp, "btn-success")
+        self.assertContains(resp, 'title="Open the election and send credentials"', html=False)
+        self.assertContains(resp, 'class="btn btn-primary btn-block"', html=False)
+        self.assertContains(resp, 'title="Start the election and send credentials"', html=False)
+        self.assertContains(resp, 'class="btn btn-primary"', html=False)
         self.assertContains(resp, "vacant seat")
 
 

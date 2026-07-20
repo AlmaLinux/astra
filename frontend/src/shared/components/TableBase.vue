@@ -283,7 +283,7 @@ defineSlots<{
         <div v-if="showFooter" class="border-top p-2 clearfix">
           <div class="float-left text-muted small">
             <template v-if="pageSize && count > 0">
-              Showing {{ (currentPage - 1) * pageSize + 1 }}–{{ Math.min(currentPage * pageSize, count) }} of {{ count }}
+              Showing {{ (currentPage - 1) * pageSize + 1 }} to {{ Math.min(currentPage * pageSize, count) }} of {{ count }}
             </template>
             <slot name="footer-meta" :selected-count="selectedIds.length" />
           </div>

@@ -106,7 +106,7 @@
               <select id="id_email_template" name="email_template" class="custom-select" aria-label="Email template">
                 {% for tpl in email_templates %}
                   <option value="{{ tpl.name }}"{% if tpl.name == default_template_name %} selected{% endif %}>
-                    {{ tpl.name }}{% if tpl.description %} — {{ tpl.description }}{% endif %}
+                    {{ tpl.name }}{% if tpl.description %}: {{ tpl.description }}{% endif %}
                   </option>
                 {% endfor %}
               </select>

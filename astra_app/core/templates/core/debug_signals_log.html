@@ -22,7 +22,7 @@
         <div class="form-group">
           <label for="event-key-select">Event key</label>
           <select id="event-key-select" name="event_key" class="form-control form-control-sm" required>
-            <option value="" disabled selected>— select an event key —</option>
+            <option value="" disabled selected>Select an event key</option>
             {% for key in event_keys %}
               <option value="{{ key }}">{{ key }}</option>
             {% endfor %}
@@ -30,13 +30,13 @@
         </div>
         <div class="form-group">
           <label for="kwargs-json">
-            Kwargs <span class="text-muted small">(JSON object — merged with <code>actor</code>, <code>debug</code>, <code>event_key</code>)</span>
+            Kwargs <span class="text-muted small">(JSON object: merged with <code>actor</code>, <code>debug</code>, <code>event_key</code>)</span>
           </label>
           <textarea id="kwargs-json" name="kwargs_json" class="form-control form-control-sm"
                     rows="6" placeholder="{}"
-                    style="font-family: monospace; font-size: 0.85em;"></textarea>
+                    style="font-family: var(--bs-font-monospace); font-size: 0.85em;"></textarea>
           <small class="form-text text-muted">
-            Selecting an event key above auto-fills a template. Edit freely. Scalars only — ORM instances are not available in this debug form.
+            Selecting an event key above auto-fills a template. Edit freely. Scalars only: ORM instances are not available in this debug form.
           </small>
         </div>
         <button type="submit" class="btn btn-sm btn-warning">Send</button>

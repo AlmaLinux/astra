@@ -440,7 +440,7 @@ onBeforeUnmount(() => {
                             <li v-for="entry in item.ballot_entries || []" :key="ballotEntryKey(entry)">
                               <span class="text-muted">{{ formatTime(entry.timestamp) }}</span>
                               <template v-if="entry.ballot_hash">
-                                — <code :title="entry.ballot_hash">{{ shortHash(entry.ballot_hash) }}</code>
+                                : <code :title="entry.ballot_hash">{{ shortHash(entry.ballot_hash) }}</code>
                                 <span v-if="entry.supersedes_ballot_hash" class="text-muted small">
                                   (supersedes <code :title="entry.supersedes_ballot_hash">{{ shortHash(entry.supersedes_ballot_hash) }}</code>)
                                 </span>

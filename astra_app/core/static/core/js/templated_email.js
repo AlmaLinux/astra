@@ -787,7 +787,7 @@
       // Keep links from navigating inside the iframe.
       '<base target="_blank">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-      '<style>html,body{margin:0;padding:0;background:#fff;}body{padding:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.35;}</style>' +
+      '<style>html,body{margin:0;padding:0;background:#fff;}body{padding:8px;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:14px;line-height:1.35;}</style>' +
       '</head>' +
       '<body>' + body + '</body>' +
       '</html>'
@@ -802,7 +802,7 @@
       '<head>' +
       '<meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-      '<style>html,body{margin:0;padding:0;background:#fff;}body{padding:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.35;}pre{margin:0;white-space:pre-wrap;font-family:inherit;}</style>' +
+      '<style>html,body{margin:0;padding:0;background:#fff;}body{padding:8px;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:14px;line-height:1.35;}pre{margin:0;white-space:pre-wrap;font-family:inherit;}</style>' +
       '</head>' +
       '<body><pre>' + body + '</pre></body>' +
       '</html>'

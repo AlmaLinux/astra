@@ -12,7 +12,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="{% static 'core/images/fav/favicon-32x32.png' %}">
   <link rel="icon" type="image/png" sizes="16x16" href="{% static 'core/images/fav/favicon-16x16.png' %}">
   <link rel="manifest" href="{% static 'core/images/fav/site.webmanifest' %}">
-  <link rel="mask-icon" href="{% static 'core/images/fav/safari-pinned-tab.svg' %}" color="#5bbad5">
+  <link rel="mask-icon" href="{% static 'core/images/fav/safari-pinned-tab.svg' %}" color="#082336">
   <link rel="stylesheet" href="{% static 'vendor/fontawesome-free/css/all.min.css' %}" />
   <link rel="stylesheet" href="{% static 'vendor/adminlte/css/adminlte.min.css' %}" />
   <link rel="stylesheet" href="{% static 'core/css/base.css' %}" />
@@ -193,16 +193,16 @@
     </nav>
     <!-- /.navbar -->
   {% else %}
-    <nav class="main-header navbar navbar-expand-md navbar-dark navbar-gray-dark">
+    <nav class="main-header navbar navbar-expand-md navbar-light alx-public-navbar">
       <div class="container">
-        <a href="{% url 'login' %}" class="navbar-brand d-flex align-items-center">
+        <a href="{% url 'login' %}" class="navbar-brand d-flex align-items-center" aria-label="AlmaLinux Account Services home">
           <img
             src="{% static 'core/images/almalinux-logo.svg' %}"
             alt="AlmaLinux"
-            class="brand-image img-circle"
-            height="32"
+            class="alx-brand-mark alx-brand-mark--public"
+            height="34"
           >
-          <span class="ml-2">Account Services</span>
+          <span class="alx-brand-product ml-3">Account Services</span>
         </a>
       </div>
     </nav>
@@ -211,13 +211,13 @@
   <!-- Main Sidebar Container -->
   <aside class="main-sidebar sidebar-dark-primary elevation-4 {% if not request.user.is_authenticated %}d-none{% endif %}" aria-label="Main navigation">
     {% if request.user.is_authenticated %}
-      <a href="{% url 'user-profile' request.user.get_username %}" class="brand-link">
+      <a href="{% url 'user-profile' request.user.get_username %}" class="brand-link alx-sidebar-brand">
         <img
           src="{% static 'core/images/almalinux-logo.svg' %}"
           alt="AlmaLinux"
-          class="brand-image img-circle"
+          class="alx-brand-mark alx-brand-mark--sidebar"
         >
-        <span class="brand-text font-weight-bold">Account Services</span>
+        <span class="brand-text font-weight-bold alx-brand-product alx-brand-product--sidebar">Account Services</span>
       </a>
 
       <div class="sidebar">
@@ -432,7 +432,7 @@
 
   <footer class="main-footer">
     <div class="container {% if request.user.is_authenticated %}text-right{% else %}text-center{% endif %}">
-      <small class="text-muted">
+      <small class="text-muted d-inline-flex align-items-center flex-wrap">
         <a class="text-muted" href="{% url 'privacy-policy' %}">Privacy Policy</a>
         {% if request.user.is_authenticated %}
           <span class="mx-2">·</span>

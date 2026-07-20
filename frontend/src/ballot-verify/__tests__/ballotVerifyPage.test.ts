@@ -64,7 +64,7 @@ describe("BallotVerifyPage", () => {
     expect(wrapper.text()).toContain(
       "Enter the 64-character ballot receipt code you received after submitting your ballot. This page confirms whether a ballot with that code is recorded. It does not show your selections, your identity, or exact timestamps.",
     );
-    expect(wrapper.text()).toContain("Yes — a ballot with this receipt code is recorded for this election.");
+    expect(wrapper.text()).toContain("Yes: a ballot with this receipt code is recorded for this election.");
     expect(wrapper.text()).toContain("included in the final tally");
     expect(wrapper.find('a[href="/elections/1/public/ballots.json"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/elections/1/"]').exists()).toBe(true);
@@ -108,7 +108,7 @@ describe("BallotVerifyPage", () => {
       "Enter the 64-character ballot receipt code you received after submitting your ballot. This page confirms whether a ballot with that code is recorded. It does not show your selections, your identity, or exact timestamps.",
     );
     expect(wrapper.text()).toContain("recorded and locked");
-    expect(wrapper.text()).toContain("Yes — a ballot with this receipt code is recorded for this election.");
+    expect(wrapper.text()).toContain("Yes: a ballot with this receipt code is recorded for this election.");
     expect(wrapper.text()).toContain("Public verification");
     expect(wrapper.find('a[href="/elections/1/public/ballots.json"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/elections/1/audit/"]').exists()).toBe(true);

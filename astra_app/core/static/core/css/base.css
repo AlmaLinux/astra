@@ -5,20 +5,102 @@
 */
 
 :root {
-  --alx-navy: #082336;
-  --alx-blue: #004bbc;
-  --alx-ink: #000518;
-  --alx-link: #264154;
+  --al-c-science-blue: #0069da;
+  --al-c-science-blue-dark: #004bbc;
+  --al-c-cta-blue: #24c2ff;
+  --al-c-cta-blue-dark: #0bbbff;
+  --al-c-atlantis: #86da2f;
+  --al-c-atlantis-dark: #68bc11;
+  --al-c-candlelight: #ffcb12;
+  --al-c-candlelight-dark: #e1ad00;
+  --al-c-sunburnt-cyclops: #ff4649;
+  --al-c-sunburnt-cyclops-dark: #e1282b;
+  --al-c-black-pearl: #082336;
+  --al-c-black-pearl-dark: #000518;
+  --al-c-black-pearl-lighter: #264154;
+  --al-c-black-pearl-light: #304b5e;
+  --al-c-soft-peach: #faf5f5;
+  --al-c-soft-peach-dark: #dcd7d7;
+  --al-c-soft-peach-light: #ffffff;
+  --al-c-tier-silver: #14b8a6;
+  --al-c-tier-ruby: #ff6e71;
+  --al-c-tier-gold: #e9b94a;
+  --al-c-tier-platinum: #e8eef5;
+  --alx-navy: var(--al-c-black-pearl);
+  --alx-blue: var(--al-c-science-blue);
+  --alx-ink: var(--al-c-black-pearl-dark);
+  --alx-link: var(--al-c-science-blue);
   --alx-border: #d8dde6;
-  --alx-red: #ff0018;
+  --alx-red: var(--al-c-sunburnt-cyclops);
+  --alx-neutral-muted: #6c757d;
+  --alx-neutral-strong: #848484;
+  --alx-neutral-light: #d0d0d0;
 }
 
-@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap");
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/montserrat-400.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/montserrat-600.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../fonts/montserrat-700.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Montserrat";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("../fonts/montserrat-800.ttf") format("truetype");
+}
 
 body {
   color: var(--alx-ink);
-  background: #f5f5f5;
+  background: var(--al-c-soft-peach);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: Montserrat, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Shell typography: keep heading and primary nav text on the accent family. */
+.content-header h1,
+.content-header h2,
+.content-header h3,
+.content-header h4,
+.content-header h5,
+.content-header h6,
+.main-header .nav-link,
+.main-header .navbar-nav .nav-link,
+.main-header .navbar-brand,
+.alx-brand-product {
+  font-family: Montserrat, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.wrapper,
+.content-wrapper {
+  background: var(--al-c-soft-peach);
 }
 
 .form-required-indicator {
@@ -92,6 +174,99 @@ body.layout-top-nav .main-footer {
   vertical-align: middle;
 }
 
+.main-header.navbar-dark.navbar-gray-dark {
+  background: var(--al-c-black-pearl);
+  border-bottom: 1px solid var(--al-c-black-pearl-light);
+}
+
+.main-header.navbar-dark.navbar-gray-dark .nav-link,
+.main-header.navbar-dark.navbar-gray-dark .navbar-nav .nav-link {
+  color: var(--al-c-soft-peach-light);
+}
+
+.alx-public-navbar {
+  background: var(--al-c-soft-peach-light);
+  border-bottom: 1px solid var(--al-c-soft-peach-dark);
+}
+
+.alx-public-navbar .navbar-brand,
+.alx-sidebar-brand {
+  gap: 0.75rem;
+}
+
+.alx-sidebar-brand {
+  display: flex;
+  align-items: center;
+  min-height: 57px;
+  background: var(--alx-navy);
+  border-bottom: 1px solid var(--al-c-black-pearl-light);
+}
+
+.main-sidebar.sidebar-dark-primary,
+.main-sidebar.sidebar-dark-primary .sidebar,
+.main-sidebar.sidebar-dark-primary .brand-link {
+  background: var(--al-c-black-pearl);
+}
+
+.sidebar-dark-primary .nav-sidebar > .nav-item > .nav-link {
+  color: var(--al-c-soft-peach-light);
+}
+
+.sidebar-dark-primary .nav-sidebar > .nav-item > .nav-link:hover,
+.sidebar-dark-primary .nav-sidebar > .nav-item > .nav-link:focus-visible {
+  background-color: var(--al-c-science-blue-dark);
+  color: #fff;
+}
+
+.sidebar-dark-primary .nav-sidebar > .nav-item > .nav-link.active,
+.sidebar-dark-primary .nav-sidebar > .nav-item.menu-open > .nav-link {
+  background: var(--al-c-science-blue);
+  color: #fff;
+}
+
+.content-header,
+.content-wrapper > .content {
+  background: transparent;
+}
+
+.alx-brand-mark {
+  display: block;
+  width: auto;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.alx-brand-mark--public {
+  height: 34px;
+}
+
+.alx-brand-mark--sidebar {
+  height: 32px;
+}
+
+.alx-brand-product {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--alx-ink);
+}
+
+.alx-brand-product--sidebar {
+  color: #fff;
+  opacity: 0.94;
+}
+
+.alx-powered-by-badge {
+  display: inline-block;
+  height: 1.35rem;
+  width: auto;
+}
+
+.main-footer {
+  background: color-mix(in srgb, white 88%, var(--al-c-soft-peach) 12%);
+  border-top: 1px solid color-mix(in srgb, var(--al-c-black-pearl) 14%, white);
+}
+
 .card .nav.nav-tabs {
   padding-left: 10px;
 }
@@ -105,7 +280,7 @@ a {
 }
 
 a:hover {
-  color: #304b5e;
+  color: var(--al-c-black-pearl-light);
 }
 
 /* Make regular in-content links clearly identifiable.
@@ -153,17 +328,27 @@ a:hover {
 
 .btn.btn-primary,
 .btn.btn-outline-primary {
-  color: #264154;
-  background-color: #fff;
-  border-color: #264154;
+  font-weight: 600;
+}
+
+.btn.btn-primary {
+  color: #fff;
+  background-color: var(--al-c-science-blue);
+  border-color: var(--al-c-science-blue);
+}
+
+.btn.btn-outline-primary {
+  color: var(--al-c-science-blue);
+  background-color: transparent;
+  border-color: var(--al-c-science-blue);
   font-weight: 600;
 }
 
 .btn.btn-primary:hover,
 .btn.btn-outline-primary:hover {
   color: #fff;
-  background-color: var(--alx-blue);
-  border-color: var(--alx-blue);
+  background-color: var(--al-c-science-blue-dark);
+  border-color: var(--al-c-science-blue-dark);
 }
 
 /* Bootstrap tooltips default to ~200px max-width.
@@ -514,7 +699,7 @@ a:hover {
 }
 
 .organization-page .nav-tabs .nav-link.alx-tab-error {
-  color: #b02a37;
+  color: var(--al-c-sunburnt-cyclops-dark);
   font-weight: 600;
   position: relative;
 }
@@ -526,12 +711,12 @@ a:hover {
   right: 0.75rem;
   bottom: 0.2rem;
   height: 2px;
-  background: #dc3545;
+  background: var(--alx-red);
   border-radius: 2px;
 }
 
 .organization-page .nav-tabs .nav-link.alx-tab-error.active {
-  color: #b02a37;
+  color: var(--al-c-sunburnt-cyclops-dark);
 }
 
 .alx-status-badge {
@@ -558,49 +743,48 @@ a.alx-status-badge:focus-visible {
   outline-offset: 2px;
 }
 
-/* Membership badge palette is app-owned so theme changes do not remap tier meaning. */
+/* Membership tier palette aligns with Phase 5 brand accents. */
 .membership-under-review{
   color: #fff;
-  background-color: #6c757d;
+  background-color: var(--alx-neutral-muted);
 }
 
-.membership-action-required,
-.membership-ruby {
+.membership-action-required {
   color: #fff;
-  background-color: #dc3545;
+  background-color: var(--alx-red);
+}
+
+.membership-ruby {
+  color: var(--al-c-black-pearl-dark);
+  background-color: var(--al-c-tier-ruby);
 }
 
 .membership-platinum {
-  color: #000;
-  background-color: #d0d0d0;
-  box-shadow: 3px 3px 2px rgba(0,0,0,.16),0 3px 6px rgba(0,0,0,.23);
+  color: var(--al-c-black-pearl-dark);
+  background-color: var(--al-c-tier-platinum);
+  box-shadow: 3px 3px 2px rgba(0, 0, 0, 0.16),0 3px 6px rgba(0, 0, 0, 0.23);
 }
 
 .membership-gold {
-  color: #000;
-  background-color: #ffc107;
+  color: var(--al-c-black-pearl-dark);
+  background-color: var(--al-c-tier-gold);
 }
 
 .membership-silver {
-  color: #fff;
-  background-color: #848484;
+  color: var(--al-c-black-pearl-dark);
+  background-color: var(--al-c-tier-silver);
 }
 
 .membership-standard {
-  color: #fff;
-  background-color: #28a745;
+  color: var(--al-c-black-pearl-dark);
+  background-color: var(--al-c-atlantis);
 }
 
 .organization-form-footer .card-footer {
   background: rgba(0, 0, 0, 0.02);
 }
 
-/* Sidebar brand image opacity */
-.main-sidebar .brand-image {
-  opacity: .8;
-}
-
-/* Public top-navigation brand image opacity */
-.main-header .brand-image {
-  opacity: .9;
+.main-sidebar .alx-brand-mark,
+.main-header .alx-brand-mark {
+  opacity: 1;
 }

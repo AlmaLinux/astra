@@ -24,7 +24,7 @@ function formatGroupSelect2Text(text: string): string {
     return "";
   }
 
-  const separator = " — ";
+  const separator = ": ";
   const separatorIndex = normalized.indexOf(separator);
   if (separatorIndex === -1) {
     return normalized;

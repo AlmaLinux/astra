@@ -32,11 +32,11 @@ defineProps<{
                 <dt class="col-sm-4">Website</dt>
                 <dd class="col-sm-8">
                   <a v-if="bootstrap.organizationWebsite" :href="bootstrap.organizationWebsite" rel="noopener noreferrer">{{ bootstrap.organizationWebsite }}</a>
-                  <template v-else>—</template>
+                  <template v-else>Not provided.</template>
                 </dd>
 
                 <dt class="col-sm-4">Contact email</dt>
-                <dd class="col-sm-8">{{ bootstrap.organizationContactEmail || '—' }}</dd>
+                <dd class="col-sm-8">{{ bootstrap.organizationContactEmail || 'Not provided.' }}</dd>
               </dl>
 
               <form method="post" :action="bootstrap.formAction">

@@ -75,9 +75,9 @@ defineProps<{
             <h4>Independent verification tools</h4>
             <p>For maximum transparency, you can download and run these verification scripts locally:</p>
             <ul>
-              <li><a :href="bootstrap.verifyBallotHashUrl">verify-ballot-hash.py</a> — Verify your ballot hash matches your voting intent (uses values from your receipt)</li>
-              <li><a :href="bootstrap.verifyBallotChainUrl">verify-ballot-chain.py</a> — Verify the complete ballot chain is unbroken and includes your ballot</li>
-              <li><a :href="bootstrap.verifyAuditLogUrl">verify-audit-log.py</a> — Verify Rekor transparency-log attestations in the public audit log (offline digest check; optional online Rekor query)</li>
+              <li><a :href="bootstrap.verifyBallotHashUrl">verify-ballot-hash.py</a>: Verify your ballot hash matches your voting intent (uses values from your receipt)</li>
+              <li><a :href="bootstrap.verifyBallotChainUrl">verify-ballot-chain.py</a>: Verify the complete ballot chain is unbroken and includes your ballot</li>
+              <li><a :href="bootstrap.verifyAuditLogUrl">verify-audit-log.py</a>: Verify Rekor transparency log attestations in the public audit log (offline digest check; optional online Rekor query)</li>
             </ul>
             <p>
               These scripts run locally on your computer and use the same algorithms as the election system. By default they do not contact any server; <code>verify-audit-log.py</code> can optionally query Rekor online when you set <code>verify_rekor_online = True</code>.

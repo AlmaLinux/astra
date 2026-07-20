@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
                 <div class="card-body">
                   <h5>Ballot status</h5>
                   <div class="alert alert-success mb-3" role="alert">
-                    Yes — a ballot with this receipt code is recorded for this election.
+                    Yes: a ballot with this receipt code is recorded for this election.
                   </div>
 
                   <h5>Tally status</h5>

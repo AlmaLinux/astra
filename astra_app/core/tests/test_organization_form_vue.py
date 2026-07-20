@@ -38,6 +38,8 @@ class OrganizationFormVueTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "data-organization-form-root")
         self.assertContains(response, 'src="http://localhost:5173/src/entrypoints/organizationForm.ts"')
+        self.assertNotContains(response, "btn-success")
+        self.assertContains(response, 'class="btn btn-primary"', html=False)
 
     @override_settings(
         DJANGO_VITE={
@@ -75,3 +77,5 @@ class OrganizationFormVueTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "data-organization-form-root")
         self.assertContains(response, 'src="http://localhost:5173/src/entrypoints/organizationForm.ts"')
+        self.assertNotContains(response, "btn-success")
+        self.assertContains(response, 'class="btn btn-primary"', html=False)

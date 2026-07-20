@@ -52,13 +52,13 @@ describe("GroupDetailPage", () => {
       results: [
         {
           id: "infra-very-long-group",
-          text: `infra-very-long-group — ${"A very long description ".repeat(8).trim()}`,
+          text: `infra-very-long-group: ${"A very long description ".repeat(8).trim()}`,
         },
       ],
     }, "groups");
 
     expect(payload.results).toHaveLength(1);
-    expect(payload.results[0]?.text).toContain("infra-very-long-group — ");
+    expect(payload.results[0]?.text).toContain("infra-very-long-group: ");
     expect(payload.results[0]?.text.endsWith("...")).toBe(true);
     expect(payload.results[0]?.text.length).toBeLessThan(100);
   });

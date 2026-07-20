@@ -6,7 +6,7 @@ page_url_prefix should end with the page param name= (e.g. "?page=" or "?q=foo&p
 
 <div class="float-left text-muted small">
   {% if paginator.count %}
-    Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ paginator.count }}
+    Showing {{ page_obj.start_index }} to {{ page_obj.end_index }} of {{ paginator.count }}
   {% endif %}
 </div>
 

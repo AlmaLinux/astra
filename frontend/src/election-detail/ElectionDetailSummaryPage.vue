@@ -552,7 +552,7 @@ onBeforeUnmount(() => {
                       <hr class="candidate-card-divider" />
                       <p class="mb-0">
                         <strong>Nominated by</strong>
-                        —
+                        :
                         {{ candidate.nominator_display_name }}
                         <template v-if="candidate.nominator_profile_username">
                           (<a :href="profileUrl(candidate.nominator_profile_username)">{{ candidate.nominator_profile_username }}</a>)
