@@ -520,6 +520,8 @@ def register(request: HttpRequest) -> HttpResponse:
         last_unauthorized_phase: str | None = None
         get_client_calls = 0
         stageuser_add_calls = 0
+        duplicate_stageuser_result = object()
+        duplicate_entry_error: exceptions.DuplicateEntry | None = None
 
         def _get_service_client() -> ClientMeta:
             nonlocal freeipa_phase, get_client_calls, last_unauthorized_phase
@@ -533,7 +535,7 @@ def register(request: HttpRequest) -> HttpResponse:
                 raise
 
         def _create_stageuser(client: ClientMeta) -> object:
-            nonlocal freeipa_phase, stageuser_add_calls, last_unauthorized_phase
+            nonlocal freeipa_phase, stageuser_add_calls, last_unauthorized_phase, duplicate_entry_error
 
             freeipa_phase = "stageuser_add"
             stageuser_add_calls += 1
@@ -551,10 +553,21 @@ def register(request: HttpRequest) -> HttpResponse:
             except exceptions.Unauthorized:
                 last_unauthorized_phase = freeipa_phase
                 raise
+            except exceptions.DuplicateEntry as e:
+                duplicate_entry_error = e
+                return duplicate_stageuser_result
 
         try:
             result = _with_freeipa_service_client_retry(_get_service_client, _create_stageuser)
-            _ = result
+            if result is duplicate_stageuser_result:
+                logger.info(
+                    "Registration duplicate entry username=%s email=%s error=%s",
+                    username,
+                    email,
+                    duplicate_entry_error,
+                )
+                form.add_error(None, f"The username '{username}' or the email address '{email}' are already taken.")
+                return _render_register_page(request, form=form, registration_open=settings.REGISTRATION_OPEN)
         except exceptions.DuplicateEntry:
             form.add_error(None, f"The username '{username}' or the email address '{email}' are already taken.")
             return _render_register_page(request, form=form, registration_open=settings.REGISTRATION_OPEN)

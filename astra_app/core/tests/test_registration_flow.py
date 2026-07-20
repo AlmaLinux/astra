@@ -697,6 +697,50 @@ class RegistrationFlowTests(TestCase):
         self.assertEqual(log_extra["request_id"], "req-169-stageuser-failed")
         self.assertNotIn("alice@example.com", str(log_extra).lower())
 
+    @override_settings(REGISTRATION_OPEN=True, DEFAULT_FROM_EMAIL="noreply@example.com")
+    def test_register_post_duplicate_entry_logs_without_exception(self) -> None:
+        client = Client()
+
+        duplicate_error = exceptions.DuplicateEntry(
+            "Login 'alice' or email address 'alice@example.com' are already registered.",
+            4002,
+        )
+        ipa_client = SimpleNamespace()
+        ipa_client.stageuser_add = Mock(side_effect=duplicate_error)
+
+        with (
+            patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client),
+            patch("core.views_registration._send_registration_email", autospec=True) as send_email_mock,
+            patch("core.views_registration.logger.info") as info_mock,
+            patch("core.freeipa.client.logger.exception") as backend_exception_mock,
+        ):
+            response = client.post(
+                "/register/",
+                data={
+                    "username": "alice",
+                    "first_name": "Alice",
+                    "last_name": "User",
+                    "email": "alice@example.com",
+                    "over_16": "on",
+                },
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "The username 'alice' or the email address 'alice@example.com' are already taken.")
+        send_email_mock.assert_not_called()
+        backend_exception_mock.assert_not_called()
+        info_mock.assert_called_once()
+        self.assertEqual(
+            info_mock.call_args.args,
+            (
+                "Registration duplicate entry username=%s email=%s error=%s",
+                "alice",
+                "alice@example.com",
+                duplicate_error,
+            ),
+        )
+
     @override_settings(
         REGISTRATION_OPEN=True,
         DEFAULT_FROM_EMAIL="noreply@example.com",
