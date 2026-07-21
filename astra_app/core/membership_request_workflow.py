@@ -345,7 +345,7 @@ def _create_status_change_log(
     return log
 
 
-def _emit_membership_request_signal_on_commit(
+def emit_membership_request_signal_on_commit(
     *,
     membership_request: MembershipRequest,
     actor_username: str,
@@ -488,7 +488,7 @@ def _execute_membership_grant(
         new_group_cn = str(membership_type.group_cn or "").strip()
         if new_group_cn and target_organization.representative:
             try:
-                representative = FreeIPAUser.get(target_organization.representative)
+                representative = FreeIPAUser.get(target_organization.representative, respect_privacy=False)
             except Exception:
                 logger.exception(
                     "%s: FreeIPAUser.get failed (org representative) request_id=%s org_id=%s representative=%r",
@@ -569,7 +569,7 @@ def _execute_membership_grant(
         def _on_commit_add_user_to_group() -> None:
             callback_should_run = False
             try:
-                user_for_group_add = FreeIPAUser.get(username_to_add)
+                user_for_group_add = FreeIPAUser.get(username_to_add, respect_privacy=False)
             except Exception:
                 logger.exception(
                     "%s: on_commit FreeIPAUser.get failed request_id=%s target=%r",
@@ -835,7 +835,7 @@ def record_membership_request_created(
             )
             raise
 
-        _emit_membership_request_signal_on_commit(
+        emit_membership_request_signal_on_commit(
             membership_request=membership_request,
             actor_username=actor_username,
             user_signal=astra_signals.membership_request_submitted,
@@ -932,7 +932,7 @@ def record_membership_request_created(
         )
         raise
 
-    _emit_membership_request_signal_on_commit(
+    emit_membership_request_signal_on_commit(
         membership_request=membership_request,
         actor_username=actor_username,
         user_signal=astra_signals.membership_request_submitted,
@@ -1078,7 +1078,7 @@ def approve_membership_request(
         log_prefix=log_prefix,
     )
 
-    _emit_membership_request_signal_on_commit(
+    emit_membership_request_signal_on_commit(
         membership_request=membership_request,
         actor_username=actor_username,
         user_signal=astra_signals.membership_request_approved,
@@ -1200,7 +1200,7 @@ def reject_membership_request(
         log_prefix=log_prefix,
     )
 
-    _emit_membership_request_signal_on_commit(
+    emit_membership_request_signal_on_commit(
         membership_request=membership_request,
         actor_username=actor_username,
         user_signal=astra_signals.membership_request_rejected,
@@ -1410,7 +1410,7 @@ def put_membership_request_on_hold(
         log_prefix=log_prefix,
     )
 
-    _emit_membership_request_signal_on_commit(
+    emit_membership_request_signal_on_commit(
         membership_request=membership_request,
         actor_username=actor_username,
         user_signal=astra_signals.membership_rfi_sent,
@@ -1494,7 +1494,7 @@ def resubmit_membership_request(
         log_prefix="resubmit_membership_request",
     )
 
-    _emit_membership_request_signal_on_commit(
+    emit_membership_request_signal_on_commit(
         membership_request=membership_request,
         actor_username=actor_username,
         user_signal=astra_signals.membership_rfi_replied,
@@ -1552,7 +1552,7 @@ def rescind_membership_request(
         log_prefix="rescind_membership_request",
     )
 
-    _emit_membership_request_signal_on_commit(
+    emit_membership_request_signal_on_commit(
         membership_request=membership_request,
         actor_username=actor_username,
         user_signal=astra_signals.membership_request_rescinded,

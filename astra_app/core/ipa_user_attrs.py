@@ -219,7 +219,7 @@ def _form_label_for_attr(form: object, attr: str) -> str | None:
 
 
 def _get_full_user(username: str) -> FreeIPAUser | None:
-    return FreeIPAUser.get(username)
+    return FreeIPAUser.get(username, respect_privacy=False)
 
 
 def _get_freeipa_timezone_name(user: FreeIPAUser) -> str | None:
@@ -277,7 +277,7 @@ def _update_user_attrs(
     # touch givenname/sn. Self-service settings use ``user_mod`` directly (not
     # FreeIPAUser.save), so this is the central enforcement point.
     if "o_givenname" in direct_updates or "o_sn" in direct_updates:
-        existing = FreeIPAUser.get(username)
+        existing = FreeIPAUser.get(username, respect_privacy=False)
         current_first = existing.first_name if existing is not None else ""
         current_last = existing.last_name if existing is not None else ""
         new_first = str(direct_updates.get("o_givenname", current_first) or "")
@@ -435,7 +435,7 @@ def _update_user_attrs(
 
     # Re-warm the user object so the next page load reflects the change.
     try:
-        FreeIPAUser.get(username)
+        FreeIPAUser.get(username, respect_privacy=False)
     except Exception:
         pass
 

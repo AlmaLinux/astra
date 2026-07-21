@@ -429,7 +429,7 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             _invalidate_user_cache(username)
             _invalidate_groups_list_cache()
             fresh_group = FreeIPAGroup.get(self.cn)
-            fresh_user = FreeIPAUser.get(username)
+            fresh_user = FreeIPAUser.get(username, respect_privacy=False)
             if fresh_group and username not in fresh_group.members:
                 raise FreeIPAOperationFailed(
                     "FreeIPA group_add_member reported success but membership not present after refresh "
@@ -564,7 +564,7 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             _invalidate_user_cache(username)
             _invalidate_groups_list_cache()
             fresh_group = FreeIPAGroup.get(self.cn)
-            fresh_user = FreeIPAUser.get(username)
+            fresh_user = FreeIPAUser.get(username, respect_privacy=False)
             if fresh_group and username in fresh_group.members:
                 raise FreeIPAOperationFailed(
                     "FreeIPA group_remove_member reported success but membership still present after refresh "

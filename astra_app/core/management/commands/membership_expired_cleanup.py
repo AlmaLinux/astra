@@ -187,7 +187,7 @@ class Command(BaseCommand):
                     membership.save(update_fields=["expires_at"])
                 continue
 
-            fu = FreeIPAUser.get(membership.target_username)
+            fu = FreeIPAUser.get(membership.target_username, respect_privacy=False)
             logger.info(
                 "membership_expired_cleanup: processing expired membership user=%s membership_type=%s",
                 membership.target_username,
@@ -336,7 +336,7 @@ class Command(BaseCommand):
 
             rep = None
             if group_cn and rep_username:
-                rep = FreeIPAUser.get(rep_username)
+                rep = FreeIPAUser.get(rep_username, respect_privacy=False)
                 if rep is None:
                     sponsorship_failed += 1
                     removal_failed = True

@@ -192,7 +192,7 @@ class Command(BaseCommand):
                 )
                 continue
 
-            fu = FreeIPAUser.get(membership.target_username)
+            fu = FreeIPAUser.get(membership.target_username, respect_privacy=False)
             if fu is None or not fu.email:
                 continue
 
@@ -316,7 +316,7 @@ class Command(BaseCommand):
                 rep_timezone: str = "UTC"
                 representative_username = str(target_organization.representative or "").strip()
                 if representative_username:
-                    rep_user = FreeIPAUser.get(representative_username)
+                    rep_user = FreeIPAUser.get(representative_username, respect_privacy=False)
                     if rep_user is not None:
                         candidate_tz = str(_first(rep_user._user_data, "fasTimezone", "") or "").strip()
                         if candidate_tz:

@@ -490,7 +490,7 @@ def confirm_existing_usernames(usernames: list[str]) -> tuple[list[str], bool]:
         if not normalized or normalized in seen:
             continue
         try:
-            user = FreeIPAUser.get(normalized)
+            user = FreeIPAUser.get(normalized, respect_privacy=False)
         except Exception:
             logger.exception("Account invitation FreeIPA user lookup failed", extra=current_exception_log_fields())
             return [], False

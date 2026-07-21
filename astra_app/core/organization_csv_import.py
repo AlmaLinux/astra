@@ -445,7 +445,7 @@ class OrganizationCSVImportResource(resources.ModelResource):
                 self._suggested_usernames_cache[cache_key] = suggestions
                 return suggestions
 
-            user = FreeIPAUser.get(username_hint)
+            user = FreeIPAUser.get(username_hint, respect_privacy=False)
             if user is not None and _normalize_str(user.username):
                 normalized_username = _normalize_str(user.username).lower()
                 self._username_lookup_cache[username_hint] = user
@@ -506,7 +506,7 @@ class OrganizationCSVImportResource(resources.ModelResource):
         if selected in self._username_lookup_cache:
             candidate = self._username_lookup_cache[selected]
         else:
-            candidate = FreeIPAUser.get(selected)
+            candidate = FreeIPAUser.get(selected, respect_privacy=False)
             self._username_lookup_cache[selected] = candidate
 
         if candidate is None:

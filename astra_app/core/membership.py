@@ -221,8 +221,8 @@ def sync_organization_representative_groups(
     normalized_new = str(new_representative or "").strip()
     targeted_group_cns, skipped_group_cns = _normalized_group_cns(group_cns)
 
-    old_user = FreeIPAUser.get(normalized_old) if normalized_old else None
-    new_user = FreeIPAUser.get(normalized_new) if normalized_new else None
+    old_user = FreeIPAUser.get(normalized_old, respect_privacy=False) if normalized_old else None
+    new_user = FreeIPAUser.get(normalized_new, respect_privacy=False) if normalized_new else None
     old_groups = set(old_user.groups_list) if old_user is not None else set()
     new_groups = set(new_user.groups_list) if new_user is not None else set()
 
@@ -390,7 +390,7 @@ def rollback_organization_representative_groups(
         if not normalized_new or not group_cn:
             continue
         try:
-            new_user = FreeIPAUser.get(normalized_new)
+            new_user = FreeIPAUser.get(normalized_new, respect_privacy=False)
             if new_user is None:
                 continue
             new_user.remove_from_group(group_name=group_cn)
@@ -406,7 +406,7 @@ def rollback_organization_representative_groups(
         if not normalized_old or not group_cn:
             continue
         try:
-            old_user = FreeIPAUser.get(normalized_old)
+            old_user = FreeIPAUser.get(normalized_old, respect_privacy=False)
             if old_user is None:
                 continue
             old_user.add_to_group(group_name=group_cn)
@@ -431,7 +431,7 @@ def remove_organization_representative_from_group_if_present(
     if not normalized_username or not normalized_group_cn:
         return FreeIPAGroupRemovalOutcome.noop_blank_input
 
-    representative = FreeIPAUser.get(normalized_username)
+    representative = FreeIPAUser.get(normalized_username, respect_privacy=False)
     if representative is None:
         outcome = FreeIPAGroupRemovalOutcome.user_not_found
         if (
@@ -560,7 +560,7 @@ def remove_user_from_group(*, username: str, group_cn: str) -> bool:
     if not normalized_username or not normalized_group_cn:
         return False
 
-    user = FreeIPAUser.get(normalized_username)
+    user = FreeIPAUser.get(normalized_username, respect_privacy=False)
     if user is None:
         logger.warning(
             "remove_user_from_group: user not found username=%s group_cn=%s",

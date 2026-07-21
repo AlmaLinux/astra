@@ -22,6 +22,7 @@ from core.csv_import_utils import (
     sanitize_csv_cell,
     set_form_column_field_choices,
 )
+from core import signals as astra_signals
 from core.forms_membership import MembershipRequestForm
 from core.logging_extras import current_exception_log_fields
 from core.membership import (
@@ -30,6 +31,7 @@ from core.membership import (
     sync_organization_representative_membership_groups,
 )
 from core.membership_notes import add_note
+from core.membership_request_workflow import emit_membership_request_signal_on_commit
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 from core.views_utils import _normalize_str
 
@@ -780,6 +782,22 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
                 username=self._actor_username,
                 content=f"[Import] {row_note}",
             )
+
+        # Emit the standard lifecycle events so downstream receivers (compliance
+        # embargo notes, Mattermost, etc.) fire for imported memberships exactly
+        # as they do for the individual importer and the interactive UI flow.
+        emit_membership_request_signal_on_commit(
+            membership_request=membership_request,
+            actor_username=self._actor_username,
+            user_signal=astra_signals.membership_request_submitted,
+            organization_signal=astra_signals.organization_membership_request_submitted,
+        )
+        emit_membership_request_signal_on_commit(
+            membership_request=membership_request,
+            actor_username=self._actor_username,
+            user_signal=astra_signals.membership_request_approved,
+            organization_signal=astra_signals.organization_membership_request_approved,
+        )
 
     @override
     def save_instance(self, instance: Any, is_create: bool, row: Any, **kwargs: Any) -> None:
