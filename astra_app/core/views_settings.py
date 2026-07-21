@@ -669,7 +669,7 @@ def _apply_and_report_profile_update(
             messages.warning(request, f"Saved, but '{label or attr}' is not editable on this FreeIPA server.")
     if applied:
         messages.success(request, "Profile updated in FreeIPA.")
-        if old_country and new_country and old_country != new_country and country_attr not in (skipped or []):
+        if new_country and old_country != new_country and country_attr not in (skipped or []):
             _old = old_country
             _new = new_country
             _u = username

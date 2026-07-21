@@ -105,6 +105,33 @@ class MembershipNotesReceiversTests(TestCase):
         self.assertEqual([note.username for note in notes], [CUSTOS, CUSTOS])
         self.assertEqual([note.content for note in notes], [expected, expected])
 
+    def test_country_first_assignment_signal_creates_notes_for_pending_requests(self) -> None:
+        from core import membership_notes_receivers
+
+        membership_notes_receivers.connect_membership_notes_receivers()
+
+        membership_request = MembershipRequest.objects.create(
+            requested_username="alice",
+            membership_type_id="individual",
+        )
+
+        with patch("core.mattermost_webhooks.dispatch_mattermost_event", autospec=True):
+            astra_signals.user_country_changed.send(
+                sender=self.__class__,
+                username="alice",
+                old_country="",
+                new_country="SY",
+                actor="alice",
+            )
+
+        notes = list(Note.objects.filter(membership_request=membership_request).order_by("pk"))
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0].username, CUSTOS)
+        self.assertEqual(
+            notes[0].content,
+            f"alice set their country to {country_label_from_code('SY')}.",
+        )
+
     def test_country_change_note_failure_logs_and_continues(self) -> None:
         from core import membership_notes_receivers
 

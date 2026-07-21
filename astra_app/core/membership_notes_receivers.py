@@ -30,7 +30,6 @@ def record_country_change_notes_for_pending_membership_requests(
         isinstance(username, str)
         and username
         and isinstance(old_country, str)
-        and old_country
         and isinstance(new_country, str)
         and new_country
     ):
@@ -45,13 +44,17 @@ def record_country_change_notes_for_pending_membership_requests(
 
     for membership_request in pending:
         try:
+            if old_country:
+                content = (
+                    f"{username} updated their country from {country_label_from_code(old_country)} "
+                    f"to {country_label_from_code(new_country)}."
+                )
+            else:
+                content = f"{username} set their country to {country_label_from_code(new_country)}."
             add_note(
                 membership_request=membership_request,
                 username=CUSTOS,
-                content=(
-                    f"{username} updated their country from {country_label_from_code(old_country)} "
-                    f"to {country_label_from_code(new_country)}."
-                ),
+                content=content,
             )
         except Exception:
             logger.exception(
