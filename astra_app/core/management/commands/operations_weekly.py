@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
     help = (
-        "Run the daily operations: expiration warnings, expired cleanup, "
-        "team-leads sync, lifecycle cleanup, and invitation refresh."
+        "Run the weekly operations: committee pending-request notifications "
+        "and embargoed-members notifications."
     )
 
     @override
@@ -32,20 +32,16 @@ class Command(BaseCommand):
         dry_run: bool = bool(options.get("dry_run"))
 
         logger.info(
-            "operations_daily: start force=%s dry_run=%s",
+            "operations_weekly: start force=%s dry_run=%s",
             force,
             dry_run,
         )
 
         for command_name, command_kwargs in (
-            ("membership_expired_cleanup", {"force": force, "dry_run": dry_run}),
-            ("membership_expiration_notifications", {"force": force, "dry_run": dry_run}),
-            ("freeipa_membership_reconcile", {"report": True, "dry_run": dry_run}),
-            ("freeipa_team_leads_sync", {"dry_run": dry_run}),
-            ("selfservice_lifecycle_cleanup", {"dry_run": dry_run}),
-            ("account_invitations_refresh", {}),
+            ("membership_pending_requests", {"force": force, "dry_run": dry_run}),
+            ("membership_embargoed_members", {"force": force, "dry_run": dry_run}),
         ):
-            logger.info("operations_daily: running %s", command_name)
+            logger.info("operations_weekly: running %s", command_name)
             call_command(command_name, **command_kwargs)
 
-        logger.info("operations_daily: complete")
+        logger.info("operations_weekly: complete")

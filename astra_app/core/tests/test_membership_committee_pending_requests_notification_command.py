@@ -190,7 +190,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
             ).exists()
         )
 
-    def test_command_dedupes_same_day_without_force(self) -> None:
+    def test_command_sends_on_every_run_without_force(self) -> None:
         frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         with patch("django.utils.timezone.now", return_value=frozen_now):
             self._create_membership_type()
@@ -218,9 +218,9 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
                         call_command("membership_pending_requests")
                     second = Email.objects.count()
 
-        self.assertEqual(first, second)
+        self.assertEqual(first + 1, second)
 
-    def test_force_sends_even_if_already_sent_today(self) -> None:
+    def test_force_also_sends_on_repeat_runs(self) -> None:
         frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
         with patch("django.utils.timezone.now", return_value=frozen_now):
             self._create_membership_type()
@@ -250,7 +250,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         self.assertEqual(first + 1, second)
 
-    def test_command_skips_if_already_sent_since_monday(self) -> None:
+    def test_command_sends_again_later_in_week(self) -> None:
         frozen_monday = datetime.datetime(2026, 1, 5, 12, tzinfo=datetime.UTC)
         frozen_tuesday = datetime.datetime(2026, 1, 6, 12, tzinfo=datetime.UTC)
 
@@ -281,9 +281,9 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
                         call_command("membership_pending_requests")
                 second = Email.objects.count()
 
-        self.assertEqual(first, second)
+        self.assertEqual(first + 1, second)
 
-    def test_command_sends_midweek_if_monday_had_no_pending(self) -> None:
+    def test_command_sends_midweek_when_requests_appear(self) -> None:
         frozen_monday = datetime.datetime(2026, 1, 5, 12, tzinfo=datetime.UTC)
         frozen_tuesday = datetime.datetime(2026, 1, 6, 12, tzinfo=datetime.UTC)
 

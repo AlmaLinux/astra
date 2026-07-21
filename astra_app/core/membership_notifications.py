@@ -69,30 +69,6 @@ def organization_sponsor_notification_recipient_email(
     )
 
 
-def would_queue_membership_pending_requests_notification(
-    *, force: bool, template_name: str, today: datetime.date | None = None,
-) -> bool:
-    if force:
-        return True
-
-    from post_office.models import Email
-
-    target_date = today if today is not None else timezone.localdate()
-    if target_date.weekday() == 3:
-        # Thursday cadence is once per day.
-        return not Email.objects.filter(
-            template__name=template_name,
-            created__date=target_date,
-        ).exists()
-
-    this_weeks_thursday = target_date - datetime.timedelta(days=(target_date.weekday() - 3) % 7)
-    # Fri-Wed cadence is once since the most recent Thursday.
-    return not Email.objects.filter(
-        template__name=template_name,
-        created__date__gte=this_weeks_thursday,
-    ).exists()
-
-
 def oldest_pending_membership_request_wait_time(
     *,
     live_usernames: Iterable[str] | None = None,

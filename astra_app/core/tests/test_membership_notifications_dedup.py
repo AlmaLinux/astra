@@ -13,7 +13,6 @@ from core.membership_notifications import (
     membership_requests_url,
     oldest_pending_membership_request_wait_time,
     organization_sponsor_notification_recipient_email,
-    would_queue_membership_pending_requests_notification,
 )
 from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP
@@ -90,62 +89,6 @@ class AlreadySentTodayTests(TestCase):
         self.assertEqual(
             membership_requests_url(base_url=settings.PUBLIC_BASE_URL),
             f"{base}/membership/requests/",
-        )
-
-    def test_pending_requests_dedupe_policy_uses_thursday_anchor(self) -> None:
-        template = EmailTemplate.objects.create(
-            name="membership-committee-pending-requests-dedupe",
-            subject="Pending requests",
-            content="Pending requests",
-        )
-
-        thursday = datetime.date(2026, 1, 8)
-        next_monday = datetime.date(2026, 1, 12)
-
-        self.assertTrue(
-            would_queue_membership_pending_requests_notification(
-                force=False,
-                template_name=template.name,
-                today=thursday,
-            )
-        )
-
-        email = Email.objects.create(
-            from_email="noreply@example.com",
-            to="committee@example.com",
-            subject="Pending requests",
-            message="Queued",
-            template=template,
-        )
-        Email.objects.filter(pk=email.pk).update(
-            created=timezone.make_aware(datetime.datetime(2026, 1, 5, 10, 0, 0)),
-        )
-
-        self.assertTrue(
-            would_queue_membership_pending_requests_notification(
-                force=False,
-                template_name=template.name,
-                today=thursday,
-            )
-        )
-
-        email = Email.objects.create(
-            from_email="noreply@example.com",
-            to="committee@example.com",
-            subject="Pending requests",
-            message="Queued",
-            template=template,
-        )
-        Email.objects.filter(pk=email.pk).update(
-            created=timezone.make_aware(datetime.datetime(2026, 1, 8, 10, 0, 0)),
-        )
-
-        self.assertFalse(
-            would_queue_membership_pending_requests_notification(
-                force=False,
-                template_name=template.name,
-                today=next_monday,
-            )
         )
 
     def test_oldest_pending_membership_request_wait_time_uses_pending_requests_only(self) -> None:

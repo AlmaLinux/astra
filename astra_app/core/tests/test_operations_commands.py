@@ -19,8 +19,6 @@ class OperationsDailyCommandTests(TestCase):
                 call("membership_expiration_notifications", force=False, dry_run=False),
                 call("freeipa_membership_reconcile", report=True, dry_run=False),
                 call("freeipa_team_leads_sync", dry_run=False),
-                call("membership_pending_requests", force=False, dry_run=False),
-                call("membership_embargoed_members", force=False, dry_run=False),
                 call("selfservice_lifecycle_cleanup", dry_run=False),
                 call("account_invitations_refresh"),
             ],
@@ -43,8 +41,6 @@ class OperationsDailyCommandTests(TestCase):
                 call("membership_expiration_notifications", force=True, dry_run=False),
                 call("freeipa_membership_reconcile", report=True, dry_run=False),
                 call("freeipa_team_leads_sync", dry_run=False),
-                call("membership_pending_requests", force=True, dry_run=False),
-                call("membership_embargoed_members", force=True, dry_run=False),
                 call("selfservice_lifecycle_cleanup", dry_run=False),
                 call("account_invitations_refresh"),
             ],
@@ -63,10 +59,57 @@ class OperationsDailyCommandTests(TestCase):
                 call("membership_expiration_notifications", force=False, dry_run=True),
                 call("freeipa_membership_reconcile", report=True, dry_run=True),
                 call("freeipa_team_leads_sync", dry_run=True),
-                call("membership_pending_requests", force=False, dry_run=True),
-                call("membership_embargoed_members", force=False, dry_run=True),
                 call("selfservice_lifecycle_cleanup", dry_run=True),
                 call("account_invitations_refresh"),
+            ],
+        )
+
+
+class OperationsWeeklyCommandTests(TestCase):
+    def test_command_runs_weekly_jobs(self) -> None:
+        with (
+            patch("core.management.commands.operations_weekly.call_command") as cc,
+            self.assertLogs("core.management.commands.operations_weekly", level="INFO") as logs,
+        ):
+            call_command("operations_weekly")
+
+        self.assertEqual(
+            cc.mock_calls,
+            [
+                call("membership_pending_requests", force=False, dry_run=False),
+                call("membership_embargoed_members", force=False, dry_run=False),
+            ],
+        )
+        self.assertTrue(
+            any("operations_weekly" in line for line in logs.output),
+            f"Expected weekly operations logs, got: {logs.output}",
+        )
+
+    def test_force_is_passed_through(self) -> None:
+        with patch(
+            "core.management.commands.operations_weekly.call_command",
+        ) as cc:
+            call_command("operations_weekly", "--force")
+
+        self.assertEqual(
+            cc.mock_calls,
+            [
+                call("membership_pending_requests", force=True, dry_run=False),
+                call("membership_embargoed_members", force=True, dry_run=False),
+            ],
+        )
+
+    def test_dry_run_is_passed_through(self) -> None:
+        with patch(
+            "core.management.commands.operations_weekly.call_command",
+        ) as cc:
+            call_command("operations_weekly", "--dry-run")
+
+        self.assertEqual(
+            cc.mock_calls,
+            [
+                call("membership_pending_requests", force=False, dry_run=True),
+                call("membership_embargoed_members", force=False, dry_run=True),
             ],
         )
 
