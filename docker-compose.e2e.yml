@@ -1,8 +1,18 @@
 version: '3.8'
 
 services:
+  db:
+    # Dedicated E2E database so the E2E fixture/reset seeding can never write
+    # into the dev database (almalinux_members). On a fresh E2E volume Postgres
+    # creates this DB automatically; if the E2E stack is ever pointed at the dev
+    # volume by mistake, the web service fails to connect to a missing DB
+    # instead of silently polluting dev data.
+    environment:
+      - POSTGRES_DB=almalinux_members_e2e
   web:
     environment:
+      # Must match the db POSTGRES_DB above; keeps E2E off the dev database.
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/almalinux_members_e2e
       - ASTRA_E2E_MODE=True
       - ASTRA_E2E_FAKE_FREEIPA_ENABLED=True
       - DJANGO_VITE_DEV_MODE=False
