@@ -109,8 +109,8 @@ services:
       - AWS_S3_ENDPOINT_URL=http://minio:9000
       - AWS_S3_ADDRESSING_STYLE=path
       - AWS_QUERYSTRING_AUTH=False
-      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://127.0.0.1:8000}
-      - AWS_S3_DOMAIN=${AWS_S3_DOMAIN:-http://127.0.0.1:9000}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:8000}
+      - AWS_S3_DOMAIN=${AWS_S3_DOMAIN:-http://localhost:9000}
       - SELF_SERVICE_ADDRESS_COUNTRY_ATTR=fasstatusnote
       - ELECTION_REKOR_ENDPOINT=https://rekor.sigstore.dev
       - ELECTION_REKOR_SIGNING_KEY=/run/secrets/rekor-signing-key.pem

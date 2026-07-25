@@ -1394,6 +1394,10 @@ def put_membership_request_on_hold(
         actor_username=actor_username,
         membership_type=membership_type,
         action=MembershipLog.Action.on_hold,
+        # Persist the RFI message on the log so it can be surfaced later (e.g.
+        # in the committee minutes). The field is a generic reason column shared
+        # with rejections.
+        rejection_reason=message,
     )
 
     _try_add_note(

@@ -1,0 +1,21 @@
+{% extends 'core/base.html' %}
+{% load django_vite %}
+
+{% block title %}Minutes Generator{% endblock %}
+
+{% block extra_head %}
+  {{ block.super }}
+  {% vite_hmr_client %}
+  {% vite_asset 'src/entrypoints/membershipMinutes.ts' %}
+{% endblock %}
+
+{% block header %}
+  <h1 class="m-0">Minutes Generator</h1>
+{% endblock %}
+
+{% block content %}
+  <div
+    data-membership-minutes-root
+    data-membership-minutes-api-url="{{ api_url }}"
+  ></div>
+{% endblock %}

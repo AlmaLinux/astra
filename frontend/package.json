@@ -12,6 +12,7 @@
     "e2e:auth-profile": "playwright test e2e/auth --project=chromium",
     "e2e:membership-committee": "playwright test e2e/membership/committee-queue.spec.ts --project=chromium",
     "e2e:membership-invitations": "playwright test e2e/membership/account-invitations.spec.ts --project=chromium",
+    "e2e:membership-minutes": "playwright test e2e/membership/minutes-generator.spec.ts --project=chromium",
     "e2e:organizations": "playwright test e2e/organizations/list-detail.spec.ts e2e/organizations/claim.spec.ts --project=chromium",
     "e2e:groups": "playwright test e2e/groups/list-detail.spec.ts e2e/groups/management.spec.ts --project=chromium",
     "e2e:elections": "playwright test e2e/elections/list-detail.spec.ts e2e/elections/routes-shell.spec.ts e2e/elections/ballot-verify.spec.ts e2e/elections/lifecycle.spec.ts --project=chromium --workers=1",

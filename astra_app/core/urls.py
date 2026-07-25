@@ -294,6 +294,9 @@ urlpatterns = [
     path("membership/stats/", views_membership.membership_stats, name="membership-stats"),
     path("membership/sponsors/", views_membership.membership_sponsors_list, name="membership-sponsors"),
 
+    path("membership/minutes/", views_membership.membership_minutes, name="membership-minutes"),
+    path("membership/minutes/data/", views_membership.membership_minutes_api, name="membership-minutes-data"),
+
     path(
         "membership/manage/<str:username>/<str:membership_type_code>/expiry/",
         views_membership.membership_set_expiry,

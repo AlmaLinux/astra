@@ -22,6 +22,7 @@ from django.utils import timezone
 from core.country_codes import country_code_status_from_user_data
 from core.freeipa.user import FreeIPAUser
 from core.membership import visible_committee_membership_requests
+from core.membership_minutes import build_minutes_data
 from core.models import Membership, MembershipLog, MembershipRequest
 from core.permissions import (
     ASTRA_VIEW_MEMBERSHIP,
@@ -469,6 +470,51 @@ def membership_audit_log_organization(request: HttpRequest, organization_id: int
 def membership_audit_log_user(request: HttpRequest, username: str) -> HttpResponse:
     query = urlencode({"username": _normalize_str(username)})
     return redirect(f"{reverse('membership-audit-log')}?{query}")
+
+
+# Cap the minutes range to keep aggregation bounded (about 18 months).
+MEMBERSHIP_MINUTES_MAX_RANGE_DAYS = 550
+
+
+def _parse_membership_minutes_range(request: HttpRequest) -> tuple[datetime.date, datetime.date]:
+    """Validate ?start=/?end= (YYYY-MM-DD). Raises ValueError on invalid input."""
+    raw_start = _normalize_str(request.GET.get("start"))
+    raw_end = _normalize_str(request.GET.get("end"))
+    if not raw_start or not raw_end:
+        raise ValueError("Both start and end dates are required.")
+    try:
+        start_date = datetime.date.fromisoformat(raw_start)
+        end_date = datetime.date.fromisoformat(raw_end)
+    except ValueError as exc:
+        raise ValueError("Dates must be in YYYY-MM-DD format.") from exc
+    if start_date > end_date:
+        raise ValueError("Start date must not be after end date.")
+    if end_date > timezone.localdate():
+        raise ValueError("End date must not be in the future.")
+    if (end_date - start_date).days > MEMBERSHIP_MINUTES_MAX_RANGE_DAYS:
+        raise ValueError(f"Date range must not exceed {MEMBERSHIP_MINUTES_MAX_RANGE_DAYS} days.")
+    return start_date, end_date
+
+
+@user_passes_test(has_any_membership_permission, login_url=reverse_lazy("users"))
+def membership_minutes(request: HttpRequest) -> HttpResponse:
+    return render(
+        request,
+        "core/membership_minutes_vue.html",
+        {
+            "api_url": reverse("membership-minutes-data"),
+        },
+    )
+
+
+@json_permission_required_any(MEMBERSHIP_PERMISSIONS)
+def membership_minutes_api(request: HttpRequest) -> JsonResponse:
+    try:
+        start_date, end_date = _parse_membership_minutes_range(request)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    return JsonResponse(build_minutes_data(start_date, end_date))
 
 
 def _parse_membership_stats_days_param(request: HttpRequest) -> tuple[str, int | None]:

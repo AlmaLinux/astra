@@ -26,6 +26,7 @@ MAIL_TOOLS_THEME="mail-tools"
 SHELL_ROUTES_THEME="shell-routes"
 REPORTS_ADMIN_THEME="reports-admin"
 SELF_SERVICE_THEME="membership-self-service"
+MINUTES_THEME="membership-minutes"
 RAW_PLAYWRIGHT_SCRIPT="e2e:raw"
 AUTH_RESET_STATE_ROOT="$REPO_ROOT/.e2e-reset-state"
 AUTH_RESET_STATE_FILE=""
@@ -65,6 +66,7 @@ ALL_THEME_NAMES=(
   "$SHELL_ROUTES_THEME"
   "$REPORTS_ADMIN_THEME"
   "$SELF_SERVICE_THEME"
+  "$MINUTES_THEME"
 )
 
 declare -A THEME_SCRIPT_NAMES=(
@@ -79,6 +81,7 @@ declare -A THEME_SCRIPT_NAMES=(
   ["$SHELL_ROUTES_THEME"]="e2e:shell-routes"
   ["$REPORTS_ADMIN_THEME"]="e2e:reports-admin"
   ["$SELF_SERVICE_THEME"]="e2e:membership-self-service"
+  ["$MINUTES_THEME"]="e2e:membership-minutes"
 )
 declare -A THEME_SPEC_PATHS=(
   ["$AUTH_THEME"]="e2e/auth"
@@ -92,6 +95,7 @@ declare -A THEME_SPEC_PATHS=(
   ["$SHELL_ROUTES_THEME"]="$SHELL_ROUTES_SPEC"
   ["$REPORTS_ADMIN_THEME"]="$REPORTS_ADMIN_SPEC"
   ["$SELF_SERVICE_THEME"]="$SELF_SERVICE_ENTRY_SPEC $SELF_SERVICE_DETAIL_SPEC"
+  ["$MINUTES_THEME"]="e2e/membership/minutes-generator.spec.ts"
 )
 declare -A SCENARIO_THEME_NAMES=(
   ["auth-login-shell"]="$AUTH_THEME"
@@ -162,9 +166,9 @@ COMPOSE_CMD+=(
 
 usage() {
   cat <<'EOF'
-Usage: scripts/auth-profile-e2e.sh [run] [--theme <theme>] [--scenario <scenario>] [--no-reset] [--no-rebuild] [--headed] [--ui] [spec-path ...]
-       scripts/auth-profile-e2e.sh up [--no-rebuild]
-       scripts/auth-profile-e2e.sh reset [--theme <theme>] [--no-rebuild]
+Usage: scripts/auth-profile-e2e.sh [run] [--theme <theme>] [--scenario <scenario>] [--no-reset] [--no-rebuild] [--no-cache] [--headed] [--ui] [spec-path ...]
+       scripts/auth-profile-e2e.sh up [--no-rebuild] [--no-cache]
+       scripts/auth-profile-e2e.sh reset [--theme <theme>] [--no-rebuild] [--no-cache]
        scripts/auth-profile-e2e.sh install
        scripts/auth-profile-e2e.sh down
        scripts/auth-profile-e2e.sh list-projects
@@ -189,10 +193,12 @@ Commands:
   help     Show this help output.
 
 Options:
-  --theme <theme>       Theme: auth, membership-committee, membership-invitations, organizations, groups, elections, membership-settings, mail-tools, shell-routes, reports-admin, or membership-self-service. May be repeated.
+  --theme <theme>       Theme: auth, membership-committee, membership-invitations, organizations, groups, elections, membership-settings, mail-tools, shell-routes, reports-admin, membership-self-service, or membership-minutes. May be repeated.
   --scenario <scenario> Named scenario. Maps to exactly one theme.
   --no-reset  Skip resets for default all-tests or explicit auth-only run commands.
   --no-rebuild Skip the web rebuild/recreate step when reusing or starting the E2E stack.
+  --no-cache  Force a from-scratch web image rebuild (implies a rebuild), busting the
+              layer cache so the Vite manifest picks up newly added entrypoints.
   --headed    Forward Playwright's --headed flag for the default run command.
   --ui        Forward Playwright's --ui flag for the default run command.
 
@@ -372,6 +378,12 @@ wait_until_ready() {
 }
 
 refresh_web_service() {
+  if [[ "$no_cache_requested" == "yes" ]]; then
+    # Bust the layer cache so the frontend build (npm run build) re-runs and the
+    # Vite manifest picks up newly added entrypoints.
+    echo "Rebuilding astra-e2e web image from scratch (--no-cache)"
+    compose build --no-cache web
+  fi
   echo "Refreshing astra-e2e web service to rebuild and recreate code changes"
   compose up -d --build --force-recreate --no-deps web
 }
@@ -835,6 +847,12 @@ run_theme_resets() {
         include_auth_reset="yes"
         include_membership_reset="yes"
         ;;
+      "$MINUTES_THEME")
+        # Minutes are generated from committee audit-log data, so reuse the
+        # committee reset to seed decided/pending requests.
+        include_auth_reset="yes"
+        include_membership_committee_reset="yes"
+        ;;
     esac
   done
 
@@ -947,6 +965,7 @@ run_selected_playwright() {
 command_name="run"
 reset_requested="yes"
 rebuild_requested="yes"
+no_cache_requested="no"
 playwright_args=()
 requested_themes=()
 requested_scenarios=()
@@ -967,6 +986,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-rebuild)
       rebuild_requested="no"
+      shift
+      ;;
+    --no-cache)
+      no_cache_requested="yes"
       shift
       ;;
     --theme)
@@ -1015,6 +1038,12 @@ fi
 
 if [[ "$rebuild_requested" == "no" && "$command_name" != "run" && "$command_name" != "up" && "$command_name" != "reset" ]]; then
   echo "--no-rebuild is only supported for run, up, and reset commands" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ "$no_cache_requested" == "yes" && "$rebuild_requested" == "no" ]]; then
+  echo "--no-cache cannot be combined with --no-rebuild" >&2
   usage >&2
   exit 1
 fi

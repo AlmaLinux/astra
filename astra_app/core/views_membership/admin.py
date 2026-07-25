@@ -34,6 +34,8 @@ from core.views_membership_admin import (
     membership_audit_log_api,
     membership_audit_log_organization,
     membership_audit_log_user,
+    membership_minutes,
+    membership_minutes_api,
     membership_stats,
     stats_membership_summary_api,
 )
@@ -564,6 +566,8 @@ __all__ = [
     "membership_audit_log_api",
     "membership_audit_log_organization",
     "membership_audit_log_user",
+    "membership_minutes",
+    "membership_minutes_api",
     "membership_sponsors_api",
     "membership_set_expiry",
     "membership_sponsors_list",

@@ -319,6 +319,13 @@
                     </li>
                   {% endif %}
 
+                  <li class="nav-item">
+                    <a href="{% url 'membership-sponsors' %}" class="nav-link {% if current_url_name == 'membership-sponsors' %}active{% endif %}">
+                      <i class="nav-icon fas fa-building"></i>
+                      <p>Sponsors</p>
+                    </a>
+                  </li>
+
                   {% if membership_can_view %}
                     <li class="nav-item">
                       <a href="{% url 'membership-audit-log' %}" class="nav-link {% if current_url_name == 'membership-audit-log' or current_url_name == 'membership-audit-log-user' %}active{% endif %}">
@@ -326,14 +333,14 @@
                         <p>Audit Log</p>
                       </a>
                     </li>
-                  {% endif %}
 
-                  <li class="nav-item">
-                    <a href="{% url 'membership-sponsors' %}" class="nav-link {% if current_url_name == 'membership-sponsors' %}active{% endif %}">
-                      <i class="nav-icon fas fa-building"></i>
-                      <p>Sponsors</p>
-                    </a>
-                  </li>
+                    <li class="nav-item">
+                      <a href="{% url 'membership-minutes' %}" class="nav-link {% if current_url_name == 'membership-minutes' %}active{% endif %}">
+                        <i class="nav-icon fas fa-file-lines"></i>
+                        <p>Minutes Generator</p>
+                      </a>
+                    </li>
+                  {% endif %}
 
                   <li class="nav-item">
                     <a href="{% url 'membership-stats' %}" class="nav-link {% if current_url_name == 'membership-stats' %}active{% endif %}">
