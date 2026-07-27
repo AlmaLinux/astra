@@ -35,6 +35,7 @@ class _QuestionSpec:
     required: bool
     answer_kind: _AnswerKind = _AnswerKind.text
     url_assume_scheme: str | None = None
+    placeholder: str = ""
     csv_header_aliases: tuple[str, ...] = ()
 
     @property
@@ -83,6 +84,7 @@ class MembershipRequestForm(StyledForm):
             required=True,
             answer_kind=_AnswerKind.url,
             url_assume_scheme="https",
+            placeholder="https://almalinux.mydomain.com",
         ),
         _QuestionSpec(
             name="Pull request",
@@ -90,6 +92,7 @@ class MembershipRequestForm(StyledForm):
             required=True,
             answer_kind=_AnswerKind.url,
             url_assume_scheme="https",
+            placeholder="https://github.com/AlmaLinux/mirrors/pull/620",
         ),
         _QuestionSpec(
             name=ADDITIONAL_INFORMATION_QUESTION,
@@ -133,15 +136,16 @@ class MembershipRequestForm(StyledForm):
     def _field_for_spec(cls, spec: _QuestionSpec) -> forms.Field:
         if spec.answer_kind != _AnswerKind.url:
             raise ValueError(f"Spec {spec.name!r} is not a URL question")
+        placeholder_attrs = {"placeholder": spec.placeholder} if spec.placeholder else {}
         if spec.url_assume_scheme:
             # Use a plain text input so browsers don't reject bare domains.
             # We still validate on submit via Django, and add client-side JS validation.
             return _AssumedSchemeURLField(
                 required=False,
                 assume_scheme=spec.url_assume_scheme,
-                widget=forms.TextInput(attrs={"inputmode": "url", "autocomplete": "url"}),
+                widget=forms.TextInput(attrs={"inputmode": "url", "autocomplete": "url", **placeholder_attrs}),
             )
-        return _HttpURLField(required=False)
+        return _HttpURLField(required=False, widget=forms.URLInput(attrs=placeholder_attrs))
 
     @classmethod
     def question_specs_for_membership_type(cls, membership_type: MembershipType) -> tuple[_QuestionSpec, ...]:

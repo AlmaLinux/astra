@@ -497,6 +497,44 @@ class MembershipRequestsFlowTests(TestCase):
         ]
         self.assertEqual(option_values, ["individual", "mirror"])
 
+    def test_membership_request_form_api_exposes_mirror_question_placeholders(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={
+                "name": "Mirror",
+                "group_cn": "almalinux-mirror",
+                "category_id": "mirror",
+                "sort_order": 0,
+                "enabled": True,
+            },
+        )
+
+        alice = FreeIPAUser(
+            "alice",
+            {
+                "uid": ["alice"],
+                "givenname": ["Alice"],
+                "sn": ["User"],
+                "mail": ["alice@example.com"],
+                "fasstatusnote": ["US"],
+                "memberof_group": [],
+            },
+        )
+        self._login_as_freeipa_user("alice")
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch("core.views_utils.has_signed_coc", return_value=True),
+        ):
+            api_resp = self.client.get(reverse("api-membership-request-form-detail"))
+
+        self.assertEqual(api_resp.status_code, 200)
+        placeholders = {field["name"]: field["attrs"].get("placeholder") for field in api_resp.json()["form"]["fields"]}
+        self.assertEqual(placeholders["q_domain"], "https://almalinux.mydomain.com")
+        self.assertEqual(placeholders["q_pull_request"], "https://github.com/AlmaLinux/mirrors/pull/620")
+
     def test_membership_request_post_blocks_when_eligibility_marks_category_under_review(self) -> None:
         from core.models import MembershipRequest, MembershipType
 
