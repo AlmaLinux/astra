@@ -152,8 +152,8 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
       </div>
       <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
         <component :is="badgeTag(entry.requestId)" :href="requestDetailUrl(entry.requestId) || undefined" :class="membershipBadgeClass(entry)">{{ entry.membershipType.name }}</component>
-        <a v-if="entry.canRenew" :href="membershipRequestActionUrl(entry.membershipType.code)" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
-        <a v-if="entry.canRequestTierChange" :href="membershipRequestActionUrl(entry.membershipType.code)" class="btn btn-sm btn-outline-primary" title="Request a change of tier">Change tier</a>
+        <a v-if="entry.canRenew" :href="membershipRequestActionUrl(entry.renewalMembershipTypeCode)" class="btn btn-sm btn-primary" title="Request renewal for this membership">Request renewal</a>
+        <a v-if="entry.canRequestTierChange" :href="membershipRequestActionUrl(entry.tierChangeMembershipTypeCode)" class="btn btn-sm btn-outline-primary" title="Request a change of tier">Change tier</a>
         <button
           v-if="entry.canManage"
           type="button"

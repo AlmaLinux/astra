@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 from typing import cast
 from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
@@ -11,7 +10,6 @@ from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.formats import date_format
 from django.views.decorators.http import require_GET
 
 from core.agreements import (
@@ -33,13 +31,17 @@ from core.membership import (
     get_membership_request_eligibility,
     get_valid_memberships,
     resolve_request_ids_by_membership_type,
+    suggest_tier_change_membership_type_code,
 )
 from core.membership_notifications import membership_extend_url
+from core.membership_payloads import (
+    serialize_membership_entry,
+    serialize_pending_membership_entry,
+)
 from core.models import MembershipRequest, MembershipType
 from core.permissions import can_view_user_directory, membership_review_permissions
 from core.templatetags._grid_tag_utils import parse_grid_query
 from core.templatetags._user_helpers import try_get_full_name
-from core.templatetags.core_dict import membership_tier_class
 from core.templatetags.core_user_grid import build_user_grid_page
 from core.views_utils import (
     _normalize_str,
@@ -469,6 +471,10 @@ def _profile_context_for_user(
                     )
                     and not has_pending_request_in_category
                 ),
+                "tier_change_membership_type_code": suggest_tier_change_membership_type_code(
+                    current_membership_type=membership.membership_type,
+                    requestable_codes=requestable_codes_by_category.get(membership_category_id, set()),
+                ),
                 "request_id": request_id_by_membership_type_id.get(membership.membership_type_id),
             }
         )
@@ -847,154 +853,12 @@ def _serialize_user_profile_account_setup_data(context: dict[str, object]) -> di
     }
 
 
-def _serialize_profile_datetime(value: object) -> str | None:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, str):
-        normalized = value.strip()
-        return normalized or None
-    return None
 
 
-def _serialize_user_profile_membership_type_data(membership_type: MembershipType | dict[str, object]) -> dict[str, str]:
-    if isinstance(membership_type, MembershipType):
-        return {
-            "name": membership_type.name,
-            "code": membership_type.code,
-            "description": membership_type.description,
-        }
-    if isinstance(membership_type, dict):
-        return {
-            "name": str(membership_type.get("name", "")),
-            "code": str(membership_type.get("code", "")),
-            "description": str(membership_type.get("description", "")),
-        }
-    raise TypeError("Expected MembershipType data")
 
 
-def _format_profile_membership_date(value: object, *, timezone_name: str, fmt: str) -> str:
-    if not isinstance(value, datetime):
-        return ""
-
-    if timezone_name:
-        try:
-            value = timezone.localtime(value, timezone=ZoneInfo(timezone_name))
-        except Exception:
-            value = timezone.localtime(value, timezone=ZoneInfo("UTC"))
-    else:
-        value = timezone.localtime(value, timezone=ZoneInfo("UTC"))
-
-    return date_format(value, fmt)
 
 
-def _serialize_user_profile_membership_type(membership_type: MembershipType) -> dict[str, str]:
-    return {
-        **_serialize_user_profile_membership_type_data(membership_type),
-        "className": membership_tier_class(membership_type.code),
-    }
-
-
-def _serialize_user_profile_membership_badge(membership_type: MembershipType) -> dict[str, object]:
-    tier_class = membership_tier_class(membership_type.code)
-    return {
-        "label": membership_type.name,
-        "className": f"badge alx-status-badge {tier_class} alx-status-badge--active",
-    }
-
-
-def _serialize_user_profile_pending_badge(status: str, *, is_owner: bool) -> dict[str, object]:
-    is_on_hold = status == MembershipRequest.Status.on_hold
-    label = "Action required" if is_on_hold and is_owner else "On hold" if is_on_hold else "Under review"
-    status_class = "alx-status-badge--action" if is_on_hold else "alx-status-badge--review"
-    legacy_class = "membership-action-required" if is_on_hold else "membership-under-review"
-    return {
-        "label": label,
-        "className": f"badge {legacy_class} alx-status-badge {status_class}",
-    }
-
-
-def _serialize_user_profile_membership_entry(
-    entry: dict[str, object],
-    *,
-    index: int,
-    timezone_name: str,
-    is_owner: bool,
-    can_view: bool,
-    can_manage: bool,
-    username: str,
-    csrf_token: str,
-    next_url: str,
-) -> dict[str, object]:
-    membership_type = cast(MembershipType, entry["membership_type"])
-    is_expiring_soon = bool(entry["is_expiring_soon"])
-    expires_label = _format_profile_membership_date(
-        entry["expires_at"],
-        timezone_name=timezone_name,
-        fmt="M j, Y H:i" if is_expiring_soon else "M j, Y",
-    )
-    if is_expiring_soon and expires_label:
-        expires_label = f"{expires_label} ({timezone_name or 'UTC'})"
-
-    request_id = entry["request_id"]
-    management = None
-    if can_manage:
-        modal_id = f"expiry-modal-{index}"
-        input_id = f"expires-on-{index}"
-        initial_value = _format_profile_membership_date(entry["expires_at"], timezone_name="UTC", fmt="Y-m-d")
-        current_expiration = _format_profile_membership_date(entry["expires_at"], timezone_name="UTC", fmt="M j, Y")
-        management = {
-            "modalId": modal_id,
-            "inputId": input_id,
-            "expiryActionUrl": reverse("membership-set-expiry", args=[username, membership_type.code]),
-            "terminateActionUrl": reverse("membership-terminate", args=[username, membership_type.code]),
-            "csrfToken": csrf_token,
-            "nextUrl": next_url,
-            "initialValue": initial_value,
-            "minValue": _format_profile_membership_date(timezone.now(), timezone_name="UTC", fmt="Y-m-d"),
-            "currentText": f"Current expiration: {current_expiration}" if current_expiration else "",
-            "terminator": username,
-        }
-
-    return {
-        "kind": "membership",
-        "key": f"membership-{membership_type.code}",
-        "requestId": int(request_id) if request_id and (is_owner or can_view) else None,
-        "membershipType": _serialize_user_profile_membership_type(membership_type),
-        "badge": _serialize_user_profile_membership_badge(membership_type),
-        "memberSinceLabel": _format_profile_membership_date(
-            entry["created_at"],
-            timezone_name=timezone_name,
-            fmt="F Y",
-        ),
-        "expiresLabel": expires_label if is_owner or can_view else "",
-        "expiresTone": "danger" if is_expiring_soon else "muted",
-        "canRenew": bool(is_owner and is_expiring_soon and not bool(entry["has_pending_request_in_category"])),
-        "canRequestTierChange": bool(is_owner and bool(entry["can_request_tier_change"])),
-        "management": management,
-    }
-
-
-def _serialize_user_profile_pending_membership_entry(
-    entry: dict[str, object],
-    *,
-    is_owner: bool,
-    can_view: bool,
-) -> dict[str, object]:
-    membership_type = cast(MembershipType, entry["membership_type"])
-    request_id = int(entry["request_id"])
-    status = str(entry["status"])
-    return {
-        "kind": "pending",
-        "key": f"pending-{request_id}",
-        "membershipType": _serialize_user_profile_membership_type(membership_type),
-        "requestId": request_id,
-        "status": status,
-        "organizationName": str(entry["organization_name"]),
-        "badge": _serialize_user_profile_pending_badge(
-            status,
-            is_owner=is_owner,
-        ),
-    }
 
 
 def _user_profile_membership_permissions(request: HttpRequest) -> tuple[bool, bool, bool]:
@@ -1030,52 +894,6 @@ def _build_user_profile_membership_notes_bootstrap(
     }
 
 
-def _serialize_user_profile_membership(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
-    fu = cast(FreeIPAUser, context["fu"])
-    membership_can_view, membership_can_write, membership_can_manage = _user_profile_membership_permissions(request)
-    is_owner = bool(context["is_self"])
-    timezone_name = str(context["timezone_name"])
-    membership_entries = cast(list[dict[str, object]], context["memberships"])
-    pending_entries = cast(list[dict[str, object]], context["membership_pending_requests"])
-    csrf_token = get_token(request)
-
-    notes = None
-    if membership_can_view:
-        notes = _build_user_profile_membership_notes_bootstrap(
-            request=request,
-            username=fu.username,
-            membership_can_view=membership_can_view,
-            membership_can_write=membership_can_write,
-        )
-
-    visible_pending_entries = pending_entries if is_owner or membership_can_view else []
-    return {
-        "showCard": bool(context["show_membership_card"]),
-        "username": fu.username,
-        "canViewHistory": membership_can_view,
-        "canRequestAny": bool(context["membership_can_request_any"]),
-        "isOwner": is_owner,
-        "entries": [
-            _serialize_user_profile_membership_entry(
-                entry,
-                index=index,
-                timezone_name=timezone_name,
-                is_owner=is_owner,
-                can_view=membership_can_view,
-                can_manage=membership_can_manage,
-                username=fu.username,
-                csrf_token=csrf_token,
-                next_url=request.get_full_path(),
-            )
-            for index, entry in enumerate(membership_entries, start=1)
-        ],
-        "pendingEntries": [
-            _serialize_user_profile_pending_membership_entry(entry, is_owner=is_owner, can_view=membership_can_view)
-            for entry in visible_pending_entries
-        ],
-        "notes": notes,
-    }
-
 
 def _serialize_user_profile_membership_entry_data(
     entry: dict[str, object],
@@ -1085,40 +903,28 @@ def _serialize_user_profile_membership_entry_data(
     can_manage: bool,
 ) -> dict[str, object]:
     membership_type = cast(MembershipType | dict[str, object], entry["membership_type"])
-    membership_type_data = _serialize_user_profile_membership_type_data(membership_type)
-    request_id = entry["request_id"]
-
-    return {
-        "kind": "membership",
-        "key": f"membership-{membership_type_data['code']}",
-        "requestId": int(request_id) if request_id and (is_owner or can_view) else None,
-        "membershipType": membership_type_data,
-        "createdAt": _serialize_profile_datetime(entry.get("created_at")),
-        "expiresAt": _serialize_profile_datetime(entry.get("expires_at")),
-        "isExpiringSoon": bool(entry["is_expiring_soon"]),
-        "canRenew": bool(is_owner and bool(entry["is_expiring_soon"]) and not bool(entry["has_pending_request_in_category"])),
-        "canRequestTierChange": bool(is_owner and bool(entry["can_request_tier_change"])),
-        "canManage": can_manage,
-    }
+    return serialize_membership_entry(
+        membership_type=membership_type,
+        created_at=entry.get("created_at"),
+        expires_at=entry.get("expires_at"),
+        request_id=entry["request_id"],
+        is_expiring_soon=bool(entry["is_expiring_soon"]),
+        has_pending_request_in_category=bool(entry["has_pending_request_in_category"]),
+        can_request_tier_change=bool(entry["can_request_tier_change"]),
+        tier_change_membership_type_code=str(entry["tier_change_membership_type_code"]),
+        can_act=is_owner,
+        can_view=can_view,
+        can_manage=can_manage,
+    )
 
 
-def _serialize_user_profile_pending_membership_entry_data(
-    entry: dict[str, object],
-    *,
-    is_owner: bool,
-    can_view: bool,
-) -> dict[str, object]:
-    membership_type = cast(MembershipType | dict[str, object], entry["membership_type"])
-    request_id = int(entry["request_id"])
-    status = str(entry["status"])
-    return {
-        "kind": "pending",
-        "key": f"pending-{request_id}",
-        "membershipType": _serialize_user_profile_membership_type_data(membership_type),
-        "requestId": request_id,
-        "status": status,
-        "organizationName": str(entry["organization_name"]),
-    }
+def _serialize_user_profile_pending_membership_entry_data(entry: dict[str, object]) -> dict[str, object]:
+    return serialize_pending_membership_entry(
+        membership_type=cast(MembershipType | dict[str, object], entry["membership_type"]),
+        request_id=entry["request_id"],
+        status=str(entry["status"]),
+        organization_name=str(entry["organization_name"]),
+    )
 
 
 def _serialize_user_profile_membership_data(context: dict[str, object], request: HttpRequest) -> dict[str, object]:
@@ -1145,7 +951,7 @@ def _serialize_user_profile_membership_data(context: dict[str, object], request:
             for entry in membership_entries
         ],
         "pendingEntries": [
-            _serialize_user_profile_pending_membership_entry_data(entry, is_owner=is_owner, can_view=membership_can_view)
+            _serialize_user_profile_pending_membership_entry_data(entry)
             for entry in visible_pending_entries
         ],
     }

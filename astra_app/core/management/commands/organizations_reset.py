@@ -26,6 +26,7 @@ REPRESENTATIVE_OBSERVER_USERNAME: Final[str] = "regular11"
 CLAIM_HAPPY_USERNAME: Final[str] = "regular12"
 CLAIM_REJECTION_USERNAME: Final[str] = "regular13"
 NO_ORG_USERNAME: Final[str] = "regular14"
+RENEWAL_REPRESENTATIVE_USERNAME: Final[str] = "regular26"
 CLAIMED_OWNER_USERNAME: Final[str] = "wave4-claimed-owner"
 ACTOR_PASSWORD: Final[str] = "password"
 
@@ -37,6 +38,7 @@ MIRROR_SHELL_ALIAS: Final[str] = "mirror_shell_observer"
 CLAIMABLE_ALIAS: Final[str] = "claimable_org"
 ALREADY_CLAIMED_ALIAS: Final[str] = "already_claimed_org"
 DETAIL_PENDING_REQUEST_ALIAS: Final[str] = "detail_pending_request"
+RENEWAL_FOCUS_ALIAS: Final[str] = "renewal_focus_org"
 SPONSOR_PAGE_TWO_ALIAS: Final[str] = "sponsor_page_two_org"
 MIRROR_PAGE_TWO_ALIAS: Final[str] = "mirror_page_two_org"
 
@@ -103,6 +105,17 @@ ORGANIZATION_DEFINITIONS: Final[tuple[dict[str, object], ...]] = (
         "memberships": ["mirror"],
     },
     {
+        "alias": RENEWAL_FOCUS_ALIAS,
+        "name": "Wave 4 Renewal Focus Org",
+        "representative": RENEWAL_REPRESENTATIVE_USERNAME,
+        "website": "https://wave4-renewal-focus.example.test",
+        "business_contact_email": "renewal-focus@example.test",
+        "memberships": ["gold"],
+        # Inside MEMBERSHIP_EXPIRING_SOON_DAYS (90), so the representative gets
+        # the renewal CTA on the detail page.
+        "membership_expires_in_days": 30,
+    },
+    {
         "alias": CLAIMABLE_ALIAS,
         "name": "Wave 4 Claimable Org",
         "representative": "",
@@ -156,6 +169,12 @@ SCENARIO_ALIAS_MATRIX: Final[dict[str, dict[str, object]]] = {
         "aliases": [DETAIL_FOCUS_ALIAS, DETAIL_PENDING_REQUEST_ALIAS],
         "destructive": False,
         "route_target_alias": DETAIL_FOCUS_ALIAS,
+    },
+    "organizations-detail-renewal-cta": {
+        "actor": RENEWAL_REPRESENTATIVE_USERNAME,
+        "aliases": [RENEWAL_FOCUS_ALIAS],
+        "destructive": False,
+        "route_target_alias": RENEWAL_FOCUS_ALIAS,
     },
     "organizations-claim-happy-path": {
         "actor": CLAIM_HAPPY_USERNAME,
@@ -282,7 +301,13 @@ class Command(BaseCommand):
         if agreement is None:
             agreement = FreeIPAFASAgreement.create(agreement_cn, description="CoC")
 
-        for username in [REPRESENTATIVE_OBSERVER_USERNAME, CLAIM_HAPPY_USERNAME, CLAIM_REJECTION_USERNAME, NO_ORG_USERNAME]:
+        for username in [
+            REPRESENTATIVE_OBSERVER_USERNAME,
+            CLAIM_HAPPY_USERNAME,
+            CLAIM_REJECTION_USERNAME,
+            NO_ORG_USERNAME,
+            RENEWAL_REPRESENTATIVE_USERNAME,
+        ]:
             client.user_mod(username, **{country_attr: "US"})
             if username not in agreement.users:
                 agreement.add_user(username)
@@ -386,6 +411,13 @@ class Command(BaseCommand):
                     "password": ACTOR_PASSWORD,
                     "organization_aliases": {},
                 },
+                "renewal_representative": {
+                    "username": RENEWAL_REPRESENTATIVE_USERNAME,
+                    "password": ACTOR_PASSWORD,
+                    "organization_aliases": {
+                        RENEWAL_FOCUS_ALIAS: organizations_by_alias[RENEWAL_FOCUS_ALIAS].pk,
+                    },
+                },
             },
             "claim_routes": claim_routes,
             "organizations": organizations_payload,
@@ -419,11 +451,12 @@ class Command(BaseCommand):
                 created_at=timezone.now() - datetime.timedelta(days=480)
             )
         else:
+            expires_in_days = int(definition.get("membership_expires_in_days") or 180)
             for membership_type_code in definition["memberships"]:
                 Membership.objects.create(
                     target_organization=organization,
                     membership_type_id=str(membership_type_code),
-                    expires_at=timezone.now() + datetime.timedelta(days=180),
+                    expires_at=timezone.now() + datetime.timedelta(days=expires_in_days),
                 )
         return organization
 

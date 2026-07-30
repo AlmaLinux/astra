@@ -210,6 +210,7 @@ class UserProfileVueTests(TestCase):
                     "is_expiring_soon": True,
                     "has_pending_request_in_category": False,
                     "can_request_tier_change": True,
+                    "tier_change_membership_type_code": "platinum",
                     "request_id": 17,
                 }
             ],

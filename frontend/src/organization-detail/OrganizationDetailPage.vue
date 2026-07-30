@@ -80,18 +80,32 @@ function sendMailUrl(email: string): string {
 }
 
 function membershipTypeCode(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
-  return membership.membership_type.code || "";
+  return membership.membershipType.code || "";
+}
+
+function membershipRequestActionUrl(membershipTypeCodeValue: string): string {
+  if (!membershipTypeCodeValue) {
+    return "";
+  }
+  return `${props.bootstrap.membershipRequestUrl}?membership_type=${encodeURIComponent(membershipTypeCodeValue)}`;
+}
+
+function renewalUrl(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
+  if (!membership.canRenew) {
+    return "";
+  }
+  return membershipRequestActionUrl(membership.renewalMembershipTypeCode);
 }
 
 function tierChangeUrl(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
-  if (!membership.can_request_tier_change || !membership.tier_change_membership_type_code) {
+  if (!membership.canRequestTierChange) {
     return "";
   }
-  return `${props.bootstrap.membershipRequestUrl}?membership_type=${encodeURIComponent(membership.tier_change_membership_type_code)}`;
+  return membershipRequestActionUrl(membership.tierChangeMembershipTypeCode);
 }
 
 function canManageExpiration(membership: OrganizationDetailResponse["organization"]["memberships"][number]): boolean {
-  return Boolean(membership.can_manage_expiration && membershipTypeCode(membership) && membership.expires_at);
+  return Boolean(membership.canManage && membershipTypeCode(membership) && membership.expiresAt);
 }
 
 function managementModalId(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
@@ -117,11 +131,11 @@ function organizationName(): string {
 }
 
 function membershipLabel(membership: OrganizationDetailMembership): string {
-  return membership.membership_type.name;
+  return membership.membershipType.name;
 }
 
 function membershipDescription(membership: OrganizationDetailMembership): string {
-  return membership.membership_type.description;
+  return membership.membershipType.description;
 }
 
 function membershipBadgeClass(membership: OrganizationDetailMembership): string {
@@ -129,15 +143,15 @@ function membershipBadgeClass(membership: OrganizationDetailMembership): string 
 }
 
 function memberSinceLabel(membership: OrganizationDetailMembership): string {
-  return formatMonthYear(membership.created_at);
+  return formatMonthYear(membership.createdAt);
 }
 
 function expiresLabel(membership: OrganizationDetailMembership): string {
-  return formatShortDate(membership.expires_at);
+  return formatShortDate(membership.expiresAt);
 }
 
 function expiresToneClass(membership: OrganizationDetailMembership): string {
-  return membership.is_expiring_soon ? "text-danger" : "text-muted";
+  return membership.isExpiringSoon ? "text-danger" : "text-muted";
 }
 
 function expirationCurrentText(membership: OrganizationDetailMembership): string {
@@ -320,9 +334,24 @@ onMounted(async () => {
             :notes="membershipNotes"
             :request-detail-template="bootstrap.membershipRequestDetailTemplate"
           >
+            <template #actions>
+              <a
+                v-if="payload.organization.can_view_history"
+                :href="bootstrap.membershipHistoryUrl"
+                class="btn btn-sm btn-outline-secondary"
+                title="View membership history"
+              >History</a>
+              <a
+                v-if="payload.organization.can_request_membership && payload.organization.can_request_any"
+                :href="bootstrap.membershipRequestUrl"
+                class="btn btn-sm btn-outline-primary"
+                title="Request membership"
+              >Request membership</a>
+            </template>
+
             <li
               v-for="membership in payload.organization.memberships"
-              :key="membershipTypeCode(membership) || membershipLabel(membership)"
+              :key="membership.key"
               class="list-group-item d-flex justify-content-between align-items-center"
             >
               <div>
@@ -330,13 +359,19 @@ onMounted(async () => {
                 <div v-if="membershipDescription(membership)" class="text-muted small">{{ membershipDescription(membership) }}</div>
                 <div v-if="memberSinceLabel(membership)" class="text-muted small">Member since {{ memberSinceLabel(membership) }}</div>
                 <div v-if="expiresLabel(membership)" class="small" :class="expiresToneClass(membership)">
-                  <i v-if="membership.is_expiring_soon" class="fas fa-exclamation-triangle mr-1" />
+                  <i v-if="membership.isExpiringSoon" class="fas fa-exclamation-triangle mr-1" />
                   Expires {{ expiresLabel(membership) }}
                 </div>
               </div>
 
               <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
                 <span :class="membershipBadgeClass(membership)">{{ membershipLabel(membership) }}</span>
+                <a
+                  v-if="renewalUrl(membership)"
+                  :href="renewalUrl(membership)"
+                  class="btn btn-sm btn-primary"
+                  title="Request renewal for this membership"
+                >Request renewal</a>
                 <a
                   v-if="tierChangeUrl(membership)"
                   :href="tierChangeUrl(membership)"
@@ -387,7 +422,7 @@ onMounted(async () => {
                             name="expires_on"
                             type="date"
                             class="form-control"
-                            :value="formatDateInputValue(membership.expires_at)"
+                            :value="formatDateInputValue(membership.expiresAt)"
                             :min="bootstrap.expiryMinDate"
                             required
                           >
@@ -468,16 +503,16 @@ onMounted(async () => {
 
             <li
               v-for="pendingMembership in payload.organization.pending_memberships"
-              :key="pendingMembership.request_id"
+              :key="pendingMembership.key"
               class="list-group-item d-flex justify-content-between align-items-center"
             >
               <div>
-                <div class="font-weight-bold">{{ pendingMembership.membership_type.name }}</div>
+                <div class="font-weight-bold">{{ pendingMembership.membershipType.name }}</div>
                 <div class="small text-muted">
-                  <a :href="requestDetailUrl(pendingMembership.request_id)">Request #{{ pendingMembership.request_id }}</a>
+                  <a :href="requestDetailUrl(pendingMembership.requestId)">Request #{{ pendingMembership.requestId }}</a>
                 </div>
-                <div v-if="pendingMembership.membership_type.description" class="small text-muted">
-                  {{ pendingMembership.membership_type.description }}
+                <div v-if="pendingMembership.membershipType.description" class="small text-muted">
+                  {{ pendingMembership.membershipType.description }}
                 </div>
               </div>
               <span :class="pendingBadge(pendingMembership.status).className">{{ pendingBadge(pendingMembership.status).label }}</span>

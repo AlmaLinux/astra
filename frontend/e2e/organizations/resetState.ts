@@ -23,6 +23,11 @@ export type OrganizationsResetState = {
       password: string;
       organization_aliases: Record<string, number>;
     };
+    renewal_representative: {
+      username: string;
+      password: string;
+      organization_aliases: Record<string, number>;
+    };
   };
   claim_routes: Record<string, string>;
   organizations: Record<string, {

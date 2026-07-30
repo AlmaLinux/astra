@@ -848,6 +848,53 @@ def get_membership_review_badge_counts() -> dict[str, int]:
     return counts
 
 
+def suggest_tier_change_membership_type_code(
+    *,
+    current_membership_type: MembershipType,
+    requestable_codes: set[str],
+) -> str:
+    """Suggest which tier a "Change tier" CTA should pre-fill.
+
+    Prefers the next higher tier, falls back to the next lower one, and only
+    returns the held tier when there is genuinely nothing else to move to --
+    callers gate the CTA on `can_request_tier_change` before using this.
+    """
+
+    if not requestable_codes:
+        return current_membership_type.code
+
+    requestable_tiers = list(
+        MembershipType.objects.filter(category=current_membership_type.category)
+        .filter(code__in=requestable_codes)
+        .order_by("sort_order", "code")
+        .values_list("code", "sort_order")
+    )
+    if not requestable_tiers:
+        return current_membership_type.code
+
+    current_sort_order = current_membership_type.sort_order
+
+    # Tiers are ranked by ascending `sort_order` in this codebase, so the next
+    # higher tier has a lower sort_order value.
+    higher_ranked_tiers = [
+        (code, sort_order)
+        for code, sort_order in requestable_tiers
+        if sort_order < current_sort_order
+    ]
+    if higher_ranked_tiers:
+        return max(higher_ranked_tiers, key=lambda tier: (tier[1], tier[0]))[0]
+
+    lower_ranked_tiers = [
+        (code, sort_order)
+        for code, sort_order in requestable_tiers
+        if sort_order > current_sort_order
+    ]
+    if lower_ranked_tiers:
+        return min(lower_ranked_tiers, key=lambda tier: (tier[1], tier[0]))[0]
+
+    return requestable_tiers[0][0]
+
+
 def expiring_soon_cutoff(*, now: datetime.datetime | None = None) -> datetime.datetime:
     """Return the timestamp for the expiring-soon cutoff window."""
 

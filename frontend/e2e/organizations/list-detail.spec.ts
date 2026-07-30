@@ -68,6 +68,10 @@ test("organizations-detail-membership-state shows active membership metadata and
   await detailResponse;
 
   await expect(page.locator("[data-membership-card-root]")).toBeVisible();
+  // Header actions live in the shared membership-card actions slot.
+  await expect(
+    page.locator("[data-membership-card-root]").getByRole("link", { name: "History", exact: true }),
+  ).toHaveAttribute("href", `/membership/log/org/${resetState.organizations.detail_focus_org.organization_id}/`);
   await expect(
     page.locator("[data-membership-card-root] .badge").filter({ hasText: /^Gold Sponsor Member$/ }),
   ).toBeVisible();
@@ -206,6 +210,53 @@ test("organizations-detail-sponsorship-actions expose tier-change and typed term
 
   await managementModal.getByRole("button", { name: "Cancel termination", exact: true }).click();
   await expect(terminateInput).toHaveValue("");
+});
+
+// As a representative, I can request a renewal of a sponsorship that is about to expire.
+test("organizations-detail-renewal-cta offers the representative a same-tier renewal link", async ({ page }) => {
+  const resetState = readOrganizationsResetState();
+  const actor = resetState.actors.renewal_representative;
+  const renewalOrg = resetState.organizations.renewal_focus_org;
+  const detailTarget = resetState.scenarios["organizations-detail-renewal-cta"].route_target;
+
+  await loginViaForm(page, actor.username, actor.password);
+
+  const detailResponse = page.waitForResponse((response) => {
+    return response.url().includes(`/api/v1/organizations/${renewalOrg.organization_id}/detail`)
+      && response.request().method() === "GET";
+  });
+
+  await page.goto(detailTarget);
+  await expect(page.locator("[data-organization-detail-root]")).toBeVisible();
+  await detailResponse;
+
+  // The expiring sponsorship must surface the warning styling and the renewal CTA.
+  await expect(page.locator("[data-membership-card-root] .text-danger")).toContainText(/Expires/);
+
+  const renewalLink = page.getByRole("link", { name: "Request renewal", exact: true });
+  await expect(renewalLink).toBeVisible();
+  // Renewal targets the tier the organization already holds, not a suggested different tier.
+  await expect(renewalLink).toHaveAttribute("href", /membership_type=gold/);
+
+  await renewalLink.click();
+  await expect(page).toHaveURL(
+    new RegExp(`/organization/${renewalOrg.organization_id}/membership/request/\\?membership_type=gold$`),
+  );
+  await expect(page.locator("[data-membership-request-form-root]")).toBeVisible();
+});
+
+// As a representative, I do not see a renewal CTA for a sponsorship that is not close to expiring.
+test("organizations-detail-membership-state withholds the renewal CTA outside the expiring-soon window", async ({ page }) => {
+  const resetState = readOrganizationsResetState();
+  const observer = resetState.actors.representative_observer;
+  const detailTarget = resetState.scenarios["organizations-detail-membership-state"].route_target;
+
+  await loginViaForm(page, observer.username, observer.password);
+  await page.goto(detailTarget);
+  await expect(page.locator("[data-membership-card-root]")).toBeVisible();
+
+  await expect(page.getByRole("link", { name: "Request renewal", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Change tier", exact: true })).toBeVisible();
 });
 
 // As a privileged user, I can create or edit an organization profile using the dedicated form.

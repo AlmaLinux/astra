@@ -209,6 +209,9 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertEqual(entry["membershipType"]["name"], "Individual")
         self.assertFalse(entry["canRenew"])
         self.assertTrue(entry["canRequestTierChange"])
+        # The CTA must pre-fill a tier the user does not already hold.
+        self.assertEqual(entry["tierChangeMembershipTypeCode"], "individual_plus")
+        self.assertNotEqual(entry["tierChangeMembershipTypeCode"], entry["membershipType"]["code"])
         self.assertFalse(membership["canRequestAny"])
 
     def test_membership_request_prefills_mirror_type(self) -> None:

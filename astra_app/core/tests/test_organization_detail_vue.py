@@ -136,6 +136,7 @@ class OrganizationDetailVueTests(TestCase):
                     "is_expiring_soon": True,
                     "can_request_tier_change": True,
                     "tier_change_membership_type_code": "ruby",
+                    "has_pending_request_in_category": False,
                 }
             ],
             "pending_requests": [
@@ -158,6 +159,7 @@ class OrganizationDetailVueTests(TestCase):
             ],
             "is_representative": True,
             "can_request_membership": True,
+            "membership_can_request_any": True,
         }
 
         with (
@@ -178,10 +180,11 @@ class OrganizationDetailVueTests(TestCase):
         self.assertTrue(payload["organization"]["is_representative"])
         membership = payload["organization"]["memberships"][0]
         pending_membership = payload["organization"]["pending_memberships"][0]
-        self.assertEqual(membership["membership_type"]["code"], sponsor_type.code)
-        self.assertEqual(membership["created_at"], "2024-01-15T12:00:00+00:00")
-        self.assertEqual(membership["expires_at"], "2026-04-30T00:00:00+00:00")
-        self.assertTrue(membership["is_expiring_soon"])
+        self.assertEqual(membership["membershipType"]["code"], sponsor_type.code)
+        self.assertEqual(membership["createdAt"], "2024-01-15T12:00:00+00:00")
+        self.assertEqual(membership["expiresAt"], "2026-04-30T00:00:00+00:00")
+        self.assertTrue(membership["isExpiringSoon"])
+        self.assertTrue(membership["canRenew"])
         self.assertNotIn("label", membership)
         self.assertNotIn("class_name", membership)
         self.assertNotIn("member_since_label", membership)
@@ -226,15 +229,19 @@ class OrganizationDetailVueTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
         self.assertFalse(payload["organization"]["is_representative"])
+        request_id = payload["organization"]["pending_memberships"][0]["requestId"]
         self.assertEqual(payload["organization"]["pending_memberships"], [
             {
-                "request_id": payload["organization"]["pending_memberships"][0]["request_id"],
+                "kind": "pending",
+                "key": f"pending-{request_id}",
+                "requestId": request_id,
                 "status": "on_hold",
-                "membership_type": {
+                "membershipType": {
                     "name": sponsor_type.name,
                     "code": sponsor_type.code,
                     "description": sponsor_type.description,
                 },
+                "organizationName": "",
             }
         ])
 

@@ -40,7 +40,9 @@ function makeMembershipSection(overrides: Partial<UserProfileMembershipSection> 
         expiresAt: "2026-04-30T00:00:00Z",
         isExpiringSoon: true,
         canRenew: true,
+        renewalMembershipTypeCode: "individual",
         canRequestTierChange: true,
+        tierChangeMembershipTypeCode: "individual_plus",
         canManage: false,
       },
     ],
@@ -85,8 +87,11 @@ describe("UserProfileMembershipPanel", () => {
       },
     });
 
-    expect(wrapper.find('a[href="/membership/request/?membership_type=individual"]').exists()).toBe(true);
-    expect(wrapper.findAll('a[href="/membership/request/?membership_type=individual"]').length).toBe(2);
+    // Renewal re-requests the held tier; tier change targets a different one.
+    const renewalLink = wrapper.findAll("a").find((link) => link.text() === "Request renewal");
+    expect(renewalLink?.attributes("href")).toBe("/membership/request/?membership_type=individual");
+    const tierChangeLink = wrapper.findAll("a").find((link) => link.text() === "Change tier");
+    expect(tierChangeLink?.attributes("href")).toBe("/membership/request/?membership_type=individual_plus");
   });
 
   it("hides renewal and tier-change buttons when the payload capabilities are false", () => {
@@ -103,7 +108,9 @@ describe("UserProfileMembershipPanel", () => {
               expiresAt: null,
               isExpiringSoon: false,
               canRenew: false,
+        renewalMembershipTypeCode: "",
               canRequestTierChange: false,
+        tierChangeMembershipTypeCode: "",
               canManage: false,
             },
           ],
@@ -193,7 +200,9 @@ describe("UserProfileMembershipPanel", () => {
               expiresAt: "2026-04-30T00:00:00Z",
               isExpiringSoon: true,
               canRenew: true,
+        renewalMembershipTypeCode: "individual",
               canRequestTierChange: true,
+        tierChangeMembershipTypeCode: "individual_plus",
               canManage: true,
             },
           ],
@@ -225,7 +234,9 @@ describe("UserProfileMembershipPanel", () => {
               expiresAt: "2026-04-30T00:00:00Z",
               isExpiringSoon: true,
               canRenew: true,
+        renewalMembershipTypeCode: "individual",
               canRequestTierChange: true,
+        tierChangeMembershipTypeCode: "individual_plus",
               canManage: true,
             },
           ],
@@ -278,7 +289,9 @@ describe("UserProfileMembershipPanel", () => {
               expiresAt: null,
               isExpiringSoon: false,
               canRenew: false,
+        renewalMembershipTypeCode: "",
               canRequestTierChange: true,
+        tierChangeMembershipTypeCode: "individual_plus",
               canManage: false,
             },
           ],
@@ -292,7 +305,8 @@ describe("UserProfileMembershipPanel", () => {
       },
     });
 
-    expect(wrapper.find('a[href="/membership/request/?membership_type=individual"]').exists()).toBe(true);
+    expect(wrapper.find('a[href="/membership/request/?membership_type=individual_plus"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("Change tier");
+    expect(wrapper.text()).not.toContain("Request renewal");
   });
 });

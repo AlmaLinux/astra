@@ -80,7 +80,9 @@ export interface UserProfileMembershipEntry {
   expiresAt: string | null;
   isExpiringSoon: boolean;
   canRenew: boolean;
+  renewalMembershipTypeCode: string;
   canRequestTierChange: boolean;
+  tierChangeMembershipTypeCode: string;
   canManage: boolean;
 }
 

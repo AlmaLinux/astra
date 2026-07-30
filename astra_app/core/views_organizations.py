@@ -39,8 +39,10 @@ from core.membership import (
     get_valid_memberships_by_organization_ids,
     remove_organization_representative_from_group_if_present,
     resolve_request_ids_by_membership_type,
+    suggest_tier_change_membership_type_code,
 )
 from core.membership_notes import add_note
+from core.membership_payloads import serialize_membership_entry, serialize_pending_membership_entry
 from core.membership_request_workflow import ignore_open_membership_requests_for_target
 from core.models import (
     AccountInvitation,
@@ -69,13 +71,6 @@ from core.permissions import (
     membership_review_permissions,
 )
 from core.templatetags.core_dict import membership_tier_class
-from core.views_users import (
-    _format_profile_membership_date,
-    _serialize_profile_datetime,
-    _serialize_user_profile_membership_type,
-    _serialize_user_profile_membership_type_data,
-    _serialize_user_profile_pending_badge,
-)
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
@@ -841,7 +836,7 @@ def _build_organization_detail_page_context(
     for sponsorship in sponsorships:
         sponsorship_category_id = sponsorship.membership_type.category_id
         has_pending_request_in_category = sponsorship_category_id in pending_request_context.category_ids
-        suggested_tier_code = _suggest_tier_change_membership_type_code(
+        suggested_tier_code = suggest_tier_change_membership_type_code(
             current_membership_type=sponsorship.membership_type,
             requestable_codes=requestable_codes_by_category.get(sponsorship_category_id, set()),
         )
@@ -858,6 +853,7 @@ def _build_organization_detail_page_context(
                 and not has_pending_request_in_category
             ),
             "tier_change_membership_type_code": suggested_tier_code,
+            "has_pending_request_in_category": has_pending_request_in_category,
             "request_id": sponsorship_request_id_by_type.get(sponsorship.membership_type_id),
         })
 
@@ -888,123 +884,13 @@ def _build_organization_detail_page_context(
     }
 
 
-def _serialize_organization_detail_payload(context: dict[str, object]) -> dict[str, object]:
-    organization = context["organization"]
-    if not isinstance(organization, Organization):
-        raise TypeError("Expected organization in detail context")
-
-    sponsorships = cast(list[Membership], context["sponsorships"])
-    sponsorship_entries = cast(list[dict[str, object]], context["sponsorship_entries"])
-    pending_requests = cast(list[dict[str, object]], context["pending_requests"])
-    representative_username = cast(str, context["representative_username"])
-    representative_full_name = cast(str, context["representative_full_name"])
-    contact_display_groups = cast(list[dict[str, object]], context["contact_display_groups"])
-    is_representative = bool(context["is_representative"])
-    return {
-        "organization": {
-            "id": organization.pk,
-            "name": organization.name,
-            "status": organization.status,
-            "is_representative": bool(context["is_representative"]),
-            "website": organization.website,
-            "logo_url": organization.logo.url if organization.logo else "",
-            "memberships": [
-                {
-                    "label": membership.membership_type.name,
-                    "class_name": membership_tier_class(membership.membership_type.code),
-                    "request_url": None,
-                    "description": membership.membership_type.description,
-                    "member_since_label": _format_profile_membership_date(
-                        membership.created_at,
-                        timezone_name="",
-                        fmt="F Y",
-                    ),
-                    "expires_label": _format_profile_membership_date(
-                        membership.expires_at,
-                        timezone_name="",
-                        fmt="M j, Y",
-                    ),
-                    "expires_tone": "danger" if bool(entry["is_expiring_soon"]) else "muted",
-                }
-                for membership, entry in zip(sponsorships, sponsorship_entries, strict=True)
-            ],
-            "pending_memberships": [
-                {
-                    "request_id": cast(int, entry["request_id"]),
-                    "status": str(entry["status"]),
-                    "membership_type": _serialize_user_profile_membership_type(cast(MembershipType, entry["membership_type"])),
-                    "badge_label": _serialize_user_profile_pending_badge(
-                        str(entry["status"]),
-                        is_owner=is_representative,
-                    )["label"],
-                    "badge_class_name": _serialize_user_profile_pending_badge(
-                        str(entry["status"]),
-                        is_owner=is_representative,
-                    )["className"],
-                }
-                for entry in pending_requests
-            ],
-            "representative": {
-                "username": representative_username,
-                "full_name": representative_full_name or representative_username,
-            },
-            "contact_groups": contact_display_groups,
-            "address": {
-                "street": organization.street,
-                "city": organization.city,
-                "state": organization.state,
-                "postal_code": organization.postal_code,
-                "country_code": organization.country_code,
-            },
-        },
-    }
-
-
-def _serialize_organization_detail_membership_entry(
-    entry: dict[str, object],
-    *,
-    can_request_membership: bool,
-    can_manage: bool,
-) -> dict[str, object]:
-    sponsorship = cast(Membership, entry["sponsorship"])
-    is_expiring_soon = bool(entry["is_expiring_soon"])
-    expires_label = _format_profile_membership_date(
-        sponsorship.expires_at,
-        timezone_name="",
-        fmt="M j, Y",
-    )
-    request_id = entry["request_id"]
-    return {
-        "label": sponsorship.membership_type.name,
-        "class_name": membership_tier_class(sponsorship.membership_type.code),
-        "request_url": None,
-        "request_id": cast(int, request_id) if request_id else None,
-        "membership_type": _serialize_user_profile_membership_type(sponsorship.membership_type),
-        "description": sponsorship.membership_type.description,
-        "member_since_label": _format_profile_membership_date(
-            sponsorship.created_at,
-            timezone_name="",
-            fmt="F Y",
-        ),
-        "expires_on": _format_profile_membership_date(
-            sponsorship.expires_at,
-            timezone_name="UTC",
-            fmt="Y-m-d",
-        ),
-        "expires_label": expires_label,
-        "expires_tone": "danger" if is_expiring_soon else "muted",
-        "can_request_tier_change": bool(can_request_membership and entry["can_request_tier_change"]),
-        "tier_change_membership_type_code": str(entry["tier_change_membership_type_code"])
-        if bool(can_request_membership and entry["can_request_tier_change"])
-        else "",
-        "can_manage_expiration": can_manage,
-    }
 
 
 def _serialize_organization_detail_page_membership_entry(
     entry: dict[str, object],
     *,
     can_request_membership: bool,
+    can_view: bool,
     can_manage: bool,
 ) -> dict[str, object]:
     sponsorship = entry["sponsorship"]
@@ -1018,24 +904,27 @@ def _serialize_organization_detail_page_membership_entry(
         created_at = entry.get("created_at")
         expires_at = entry.get("expires_at")
 
-    request_id = entry["request_id"]
-    return {
-        "request_id": cast(int, request_id) if request_id else None,
-        "membership_type": _serialize_user_profile_membership_type_data(membership_type),
-        "created_at": _serialize_profile_datetime(created_at),
-        "expires_at": _serialize_profile_datetime(expires_at),
-        "is_expiring_soon": bool(entry["is_expiring_soon"]),
-        "can_request_tier_change": bool(can_request_membership and entry["can_request_tier_change"]),
-        "tier_change_membership_type_code": str(entry["tier_change_membership_type_code"])
-        if bool(can_request_membership and entry["can_request_tier_change"])
-        else "",
-        "can_manage_expiration": can_manage,
-    }
+    return serialize_membership_entry(
+        membership_type=membership_type,
+        created_at=created_at,
+        expires_at=expires_at,
+        request_id=entry["request_id"],
+        is_expiring_soon=bool(entry["is_expiring_soon"]),
+        has_pending_request_in_category=bool(entry["has_pending_request_in_category"]),
+        can_request_tier_change=bool(entry["can_request_tier_change"]),
+        # The organization page suggests a neighbouring tier to move to.
+        tier_change_membership_type_code=str(entry["tier_change_membership_type_code"]),
+        can_act=can_request_membership,
+        can_view=can_view,
+        can_manage=can_manage,
+    )
+
 
 
 def _serialize_organization_detail_page_payload(
     context: dict[str, object],
     *,
+    can_view: bool,
     can_manage: bool,
 ) -> dict[str, object]:
     organization = context["organization"]
@@ -1046,6 +935,7 @@ def _serialize_organization_detail_page_payload(
     representative_username = cast(str, context["representative_username"])
     representative_full_name = cast(str, context["representative_full_name"])
     contact_display_groups = cast(list[dict[str, object]], context["contact_display_groups"])
+    can_request_membership = bool(context["can_request_membership"])
     return {
         "organization": {
             "id": organization.pk,
@@ -1054,22 +944,25 @@ def _serialize_organization_detail_page_payload(
             "is_representative": bool(context["is_representative"]),
             "website": organization.website,
             "logo_url": organization.logo.url if organization.logo else "",
+            # Header actions, mirroring the user profile membership card.
+            "can_view_history": can_view,
+            "can_request_any": bool(context["membership_can_request_any"]),
+            "can_request_membership": can_request_membership,
             "memberships": [
                 _serialize_organization_detail_page_membership_entry(
                     entry,
-                    can_request_membership=bool(context["can_request_membership"]),
+                    can_request_membership=can_request_membership,
+                    can_view=can_view,
                     can_manage=can_manage,
                 )
                 for entry in cast(list[dict[str, object]], context["sponsorship_entries"])
             ],
             "pending_memberships": [
-                {
-                    "request_id": cast(int, entry["request_id"]),
-                    "status": str(entry["status"]),
-                    "membership_type": _serialize_user_profile_membership_type_data(
-                        cast(MembershipType | dict[str, object], entry["membership_type"])
-                    ),
-                }
+                serialize_pending_membership_entry(
+                    membership_type=cast(MembershipType | dict[str, object], entry["membership_type"]),
+                    request_id=entry["request_id"],
+                    status=str(entry["status"]),
+                )
                 for entry in pending_requests
             ],
             "representative": {
@@ -1102,8 +995,9 @@ def organization_detail_page_api(request: HttpRequest, organization_id: int) -> 
     _require_organization_access(request, organization)
     context = _build_organization_detail_page_context(request, organization=organization)
     review_permissions = membership_review_permissions(request.user)
+    can_view = bool(review_permissions["membership_can_view"])
     can_manage = bool(review_permissions["membership_can_change"] and review_permissions["membership_can_delete"])
-    payload = _serialize_organization_detail_page_payload(context, can_manage=can_manage)
+    payload = _serialize_organization_detail_page_payload(context, can_view=can_view, can_manage=can_manage)
     return JsonResponse(payload)
 
 
@@ -1279,6 +1173,7 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
                 args=[membership_request_id_sentinel],
             ).replace(str(membership_request_id_sentinel), "__request_id__"),
             "membership_request_url": reverse("organization-membership-request", args=[organization.pk]),
+            "membership_history_url": reverse("membership-audit-log-organization", args=[organization.pk]),
             "sponsorship_set_expiry_url_template": reverse(
                 "organization-sponsorship-set-expiry",
                 args=[organization.pk, membership_type_code_sentinel],
@@ -1300,44 +1195,6 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
     )
 
 
-def _suggest_tier_change_membership_type_code(
-    *,
-    current_membership_type: MembershipType,
-    requestable_codes: set[str],
-) -> str:
-    if not requestable_codes:
-        return current_membership_type.code
-
-    requestable_tiers = list(
-        MembershipType.objects.filter(category=current_membership_type.category)
-        .filter(code__in=requestable_codes)
-        .order_by("sort_order", "code")
-        .values_list("code", "sort_order")
-    )
-    if not requestable_tiers:
-        return current_membership_type.code
-
-    current_sort_order = current_membership_type.sort_order
-
-    # Sponsorship tiers are ranked by ascending `sort_order` in this codebase,
-    # so the next higher tier has a lower sort_order value.
-    higher_ranked_tiers = [
-        (code, sort_order)
-        for code, sort_order in requestable_tiers
-        if sort_order < current_sort_order
-    ]
-    if higher_ranked_tiers:
-        return max(higher_ranked_tiers, key=lambda tier: (tier[1], tier[0]))[0]
-
-    lower_ranked_tiers = [
-        (code, sort_order)
-        for code, sort_order in requestable_tiers
-        if sort_order > current_sort_order
-    ]
-    if lower_ranked_tiers:
-        return min(lower_ranked_tiers, key=lambda tier: (tier[1], tier[0]))[0]
-
-    return requestable_tiers[0][0]
 
 @post_only_404
 def organization_delete(request: HttpRequest, organization_id: int) -> HttpResponse:

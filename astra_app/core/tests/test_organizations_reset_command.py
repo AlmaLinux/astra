@@ -45,7 +45,13 @@ class OrganizationsResetCommandTests(TestCase):
         self.assertEqual(second_payload["scenario"], "organizations")
         self.assertEqual(
             set(first_payload["actors"].keys()),
-            {"representative_observer", "claim_happy_actor", "claim_rejection_actor", "no_org_actor"},
+            {
+                "representative_observer",
+                "claim_happy_actor",
+                "claim_rejection_actor",
+                "no_org_actor",
+                "renewal_representative",
+            },
         )
         self.assertEqual(
             set(first_payload["actors"]["representative_observer"]["organization_aliases"].keys()),
@@ -71,8 +77,12 @@ class OrganizationsResetCommandTests(TestCase):
         )
         self.assertEqual(first_payload["actors"]["no_org_actor"]["organization_aliases"], {})
         self.assertEqual(
+            set(first_payload["actors"]["renewal_representative"]["organization_aliases"].keys()),
+            {"renewal_focus_org"},
+        )
+        self.assertEqual(
             {actor["username"] for actor in first_payload["actors"].values()},
-            {"regular11", "regular12", "regular13", "regular14"},
+            {"regular11", "regular12", "regular13", "regular14", "regular26"},
         )
         self.assertEqual(
             set(first_payload["claim_routes"].keys()),
@@ -84,6 +94,7 @@ class OrganizationsResetCommandTests(TestCase):
                 "organizations-list-shell",
                 "organizations-sponsor-search-mirror-stability",
                 "organizations-detail-membership-state",
+                "organizations-detail-renewal-cta",
                 "organizations-claim-happy-path",
                 "organizations-claim-already-claimed",
                 "organizations-list-pagination-and-create-cta",
@@ -133,7 +144,7 @@ class OrganizationsResetCommandTests(TestCase):
 
         client = get_e2e_service_client()
         country_attr = settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR
-        for username in ["regular11", "regular12", "regular13", "regular14"]:
+        for username in ["regular11", "regular12", "regular13", "regular14", "regular26"]:
             user = client.user_show(username)["result"]
             self.assertEqual(user.get(country_attr), ["US"])
 
@@ -143,6 +154,7 @@ class OrganizationsResetCommandTests(TestCase):
         self.assertIn("regular12", agreement.users)
         self.assertIn("regular13", agreement.users)
         self.assertIn("regular14", agreement.users)
+        self.assertIn("regular26", agreement.users)
 
         self.assertTrue(MembershipType.objects.filter(code="gold", category_id="sponsorship", enabled=True).exists())
         self.assertTrue(MembershipType.objects.filter(code="mirror", category_id="mirror", enabled=True).exists())
@@ -250,9 +262,36 @@ class OrganizationsResetCommandTests(TestCase):
         detail_payload = detail_response.json()["organization"]
         self.assertTrue(detail_payload["memberships"])
         first_membership = detail_payload["memberships"][0]
-        self.assertTrue(first_membership["can_request_tier_change"])
-        self.assertEqual(first_membership["tier_change_membership_type_code"], "ruby")
-        self.assertTrue(first_membership["can_manage_expiration"])
+        self.assertTrue(first_membership["canRequestTierChange"])
+        self.assertEqual(first_membership["tierChangeMembershipTypeCode"], "ruby")
+        self.assertTrue(first_membership["canManage"])
+        # detail_focus_org expires outside the expiring-soon window, so no renewal CTA here.
+        self.assertFalse(first_membership["isExpiringSoon"])
+        self.assertFalse(first_membership["canRenew"])
+
+    @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
+    def test_command_seeds_an_expiring_sponsorship_that_offers_renewal(self) -> None:
+        stdout = io.StringIO()
+
+        call_command("organizations_reset", stdout=stdout)
+        payload = json.loads(stdout.getvalue())
+
+        renewal_username = payload["actors"]["renewal_representative"]["username"]
+        renewal_org_id = payload["organizations"]["renewal_focus_org"]["organization_id"]
+
+        self._login_as_freeipa_user(renewal_username)
+        detail_response = self.client.get(
+            reverse("api-organization-detail-page", args=[renewal_org_id]),
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(detail_response.status_code, 200)
+        memberships = detail_response.json()["organization"]["memberships"]
+        self.assertTrue(memberships)
+        membership = memberships[0]
+        self.assertEqual(membership["membershipType"]["code"], "gold")
+        self.assertTrue(membership["isExpiringSoon"])
+        self.assertTrue(membership["canRenew"])
 
     @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
     def test_command_keeps_shell_and_search_aliases_visible_on_first_card_pages(self) -> None:

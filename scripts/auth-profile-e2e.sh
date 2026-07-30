@@ -117,6 +117,7 @@ declare -A SCENARIO_THEME_NAMES=(
   ["organizations-list-shell"]="$ORGANIZATIONS_THEME"
   ["organizations-sponsor-search-mirror-stability"]="$ORGANIZATIONS_THEME"
   ["organizations-detail-membership-state"]="$ORGANIZATIONS_THEME"
+  ["organizations-detail-renewal-cta"]="$ORGANIZATIONS_THEME"
   ["organizations-claim-happy-path"]="$ORGANIZATIONS_THEME"
   ["organizations-claim-already-claimed"]="$ORGANIZATIONS_THEME"
   ["groups-list-shell"]="$GROUPS_THEME"
@@ -236,6 +237,7 @@ Scenarios:
   organizations-list-shell
   organizations-sponsor-search-mirror-stability
   organizations-detail-membership-state
+  organizations-detail-renewal-cta
   organizations-claim-happy-path
   organizations-claim-already-claimed
   groups-list-shell

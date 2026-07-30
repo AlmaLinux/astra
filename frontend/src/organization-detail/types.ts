@@ -1,3 +1,6 @@
+// The membership entries below are the shared membership-panel wire shape
+// (see core/membership_payloads.py), so they are camelCase like the user
+// profile payload. The organization-only envelope keys stay snake_case.
 export interface OrganizationDetailMembershipType {
   name: string;
   code: string;
@@ -5,20 +8,27 @@ export interface OrganizationDetailMembershipType {
 }
 
 export interface OrganizationDetailMembership {
-  request_id: number | null;
-  membership_type: OrganizationDetailMembershipType;
-  created_at: string | null;
-  expires_at: string | null;
-  is_expiring_soon: boolean;
-  can_request_tier_change?: boolean;
-  tier_change_membership_type_code?: string;
-  can_manage_expiration?: boolean;
+  kind: "membership";
+  key: string;
+  requestId: number | null;
+  membershipType: OrganizationDetailMembershipType;
+  createdAt: string | null;
+  expiresAt: string | null;
+  isExpiringSoon: boolean;
+  canRenew: boolean;
+  renewalMembershipTypeCode: string;
+  canRequestTierChange: boolean;
+  tierChangeMembershipTypeCode: string;
+  canManage: boolean;
 }
 
 export interface OrganizationDetailPendingMembership {
-  request_id: number;
+  kind: "pending";
+  key: string;
+  requestId: number;
   status: string;
-  membership_type: OrganizationDetailMembershipType;
+  membershipType: OrganizationDetailMembershipType;
+  organizationName: string;
 }
 
 export interface OrganizationDetailRepresentative {
@@ -58,6 +68,9 @@ export interface OrganizationDetailOrganization {
   is_representative?: boolean;
   website: string;
   logo_url: string;
+  can_view_history?: boolean;
+  can_request_any?: boolean;
+  can_request_membership?: boolean;
   memberships: OrganizationDetailMembership[];
   pending_memberships: OrganizationDetailPendingMembership[];
   representative: OrganizationDetailRepresentative;
@@ -73,6 +86,7 @@ export interface OrganizationDetailBootstrap {
   apiUrl: string;
   membershipRequestDetailTemplate: string;
   membershipRequestUrl: string;
+  membershipHistoryUrl: string;
   sponsorshipSetExpiryUrlTemplate: string;
   sponsorshipTerminateUrlTemplate: string;
   csrfToken: string;
@@ -91,6 +105,7 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
   const apiUrl = String(root.dataset.organizationDetailApiUrl || "").trim();
   const membershipRequestDetailTemplate = String(root.dataset.organizationDetailMembershipRequestDetailTemplate || "").trim();
   const membershipRequestUrl = String(root.dataset.organizationDetailMembershipRequestUrl || "").trim();
+  const membershipHistoryUrl = String(root.dataset.organizationDetailMembershipHistoryUrl || "").trim();
   const sponsorshipSetExpiryUrlTemplate = String(root.dataset.organizationDetailSponsorshipSetExpiryUrlTemplate || "").trim();
   const sponsorshipTerminateUrlTemplate = String(root.dataset.organizationDetailSponsorshipTerminateUrlTemplate || "").trim();
   const csrfToken = String(root.dataset.organizationDetailCsrfToken || "").trim();
@@ -102,6 +117,7 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
     !apiUrl
     || !membershipRequestDetailTemplate
     || !membershipRequestUrl
+    || !membershipHistoryUrl
     || !sponsorshipSetExpiryUrlTemplate
     || !sponsorshipTerminateUrlTemplate
     || !csrfToken
@@ -135,6 +151,7 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
     apiUrl,
     membershipRequestDetailTemplate,
     membershipRequestUrl,
+    membershipHistoryUrl,
     sponsorshipSetExpiryUrlTemplate,
     sponsorshipTerminateUrlTemplate,
     csrfToken,
