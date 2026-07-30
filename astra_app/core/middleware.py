@@ -448,7 +448,7 @@ class LoginRequiredMiddleware:
     - Registration pages and canonical read endpoints
     - SES webhook
     - Django admin and static/media
-    - Election public exports (ballots/audit JSON)
+    - Election public exports (ballots/audit JSON) and the public algorithm docs page
 
     For JSON endpoints, return a JSON 403 instead of redirecting.
     """
@@ -487,6 +487,7 @@ class LoginRequiredMiddleware:
             "/readyz",
             "/privacy-policy",
             "/coc",
+            "/elections/algorithm",
         })
 
     def __call__(self, request):

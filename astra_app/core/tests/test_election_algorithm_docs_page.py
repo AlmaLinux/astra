@@ -22,3 +22,16 @@ class ElectionAlgorithmDocsPageTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Meek STV (High-Precision Variant)")
         self.assertContains(resp, "80-digit precision")
+
+    def test_algorithm_docs_page_is_public(self) -> None:
+        """Anonymous visitors must reach the page without hitting the login wall."""
+        resp = self.client.get(reverse("election-algorithm"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Meek STV (High-Precision Variant)")
+
+    def test_algorithm_docs_page_is_public_without_trailing_slash(self) -> None:
+        resp = self.client.get("/elections/algorithm", follow=True)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Meek STV (High-Precision Variant)")
