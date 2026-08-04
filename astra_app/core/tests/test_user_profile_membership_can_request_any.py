@@ -319,7 +319,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, respect_privacy: bool = True) -> FreeIPAUser | None:
             return {"alex": alex, "reviewer": reviewer}.get(username)
 
         self._login_as_freeipa_user("reviewer")

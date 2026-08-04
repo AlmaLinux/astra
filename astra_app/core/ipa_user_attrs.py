@@ -218,8 +218,8 @@ def _form_label_for_attr(form: object, attr: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _get_full_user(username: str) -> FreeIPAUser | None:
-    return FreeIPAUser.get(username, respect_privacy=False)
+def _get_full_user(username: str, *, respect_privacy: bool = False) -> FreeIPAUser | None:
+    return FreeIPAUser.get(username, respect_privacy=respect_privacy)
 
 
 def _get_freeipa_timezone_name(user: FreeIPAUser) -> str | None:

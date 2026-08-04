@@ -10,6 +10,7 @@ from django.urls import reverse
 from core import views_users
 from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
 from core.freeipa.user import FreeIPAUser
+from core.permissions import ASTRA_VIEW_MEMBERSHIP
 
 
 class FASIsPrivateAnonymizeTests(TestCase):
@@ -118,6 +119,134 @@ class FASIsPrivateAnonymizeTests(TestCase):
         self.assertEqual(payload["summary"]["websiteUrls"], [])
         self.assertEqual(payload["summary"]["socialProfiles"], [])
         self.assertFalse(payload["membership"]["showCard"])
+
+    def test_user_profile_detail_redacts_private_fields_from_full_loader_for_non_reviewer(self) -> None:
+        factory = RequestFactory()
+        request = factory.get(reverse("api-user-profile-detail", args=["bob"]))
+        request.user = SimpleNamespace(
+            is_authenticated=True,
+            get_username=lambda: "alice",
+            groups_list=[],
+        )
+
+        full_user_data = {
+            "uid": ["bob"],
+            "givenname": ["Bob"],
+            "sn": ["User"],
+            "mail": ["bob@example.org"],
+            "fasPronoun": ["they/them"],
+            "fasWebsiteUrl": ["https://example.invalid"],
+            "fasGitHubUsername": ["bobgh"],
+            "fasIsPrivate": ["TRUE"],
+            "memberof_group": ["packagers"],
+        }
+
+        def load_user(username: str, *, respect_privacy: bool = False) -> FreeIPAUser:
+            return FreeIPAUser(username, full_user_data, respect_privacy=respect_privacy)
+
+        set_current_viewer_username("alice")
+        try:
+            with (
+                patch("core.views_users._get_full_user", side_effect=load_user),
+                patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+                patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+                patch(
+                    "core.views_users.membership_review_permissions",
+                    autospec=True,
+                    return_value={
+                        "membership_can_view": False,
+                        "membership_can_add": False,
+                        "membership_can_change": False,
+                        "membership_can_delete": False,
+                    },
+                ),
+            ):
+                response = views_users.user_profile_detail_api(request, "bob")
+        finally:
+            clear_current_viewer_username()
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["summary"]["fullName"], "bob")
+        self.assertEqual(payload["summary"]["email"], "")
+        self.assertEqual(payload["summary"]["pronouns"], "")
+        self.assertEqual(payload["summary"]["websiteUrls"], [])
+        self.assertEqual(payload["summary"]["githubUsername"], "")
+
+    def test_private_profile_membership_card_uses_effective_membership_permission(self) -> None:
+        factory = RequestFactory()
+        request = factory.get(reverse("api-user-profile-detail", args=["bob"]))
+        request.user = SimpleNamespace(
+            is_authenticated=True,
+            get_username=lambda: "reviewer",
+            groups_list=["astra_admins"],
+            has_perm=lambda permission: permission == ASTRA_VIEW_MEMBERSHIP,
+        )
+
+        bob = FreeIPAUser(
+            "bob",
+            {
+                "uid": ["bob"],
+                "givenname": ["Bob"],
+                "sn": ["User"],
+                "mail": ["bob@example.org"],
+                "fasIsPrivate": ["TRUE"],
+                "memberof_group": ["packagers"],
+            },
+            respect_privacy=False,
+        )
+
+        with (
+            patch("core.views_users._get_full_user", autospec=True, return_value=bob),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            response = views_users.user_profile_detail_api(request, "bob")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertTrue(payload["summary"]["viewerIsMembershipCommittee"])
+        self.assertTrue(payload["membership"]["showCard"])
+        self.assertTrue(payload["membership"]["canViewHistory"])
+
+    def test_private_profile_membership_card_denies_committee_group_without_effective_permission(self) -> None:
+        factory = RequestFactory()
+        request = factory.get(reverse("api-user-profile-detail", args=["bob"]))
+        request.user = SimpleNamespace(
+            is_authenticated=True,
+            get_username=lambda: "reviewer",
+            groups_list=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
+            has_perm=lambda _permission: False,
+        )
+
+        set_current_viewer_username("reviewer")
+        try:
+            bob = FreeIPAUser(
+                "bob",
+                {
+                    "uid": ["bob"],
+                    "givenname": ["Bob"],
+                    "sn": ["User"],
+                    "mail": ["bob@example.org"],
+                    "fasIsPrivate": ["TRUE"],
+                    "memberof_group": ["packagers"],
+                },
+            )
+        finally:
+            clear_current_viewer_username()
+
+        with (
+            patch("core.views_users._get_full_user", autospec=True, return_value=bob),
+            patch("core.views_users.FreeIPAGroup.all", autospec=True, return_value=[]),
+            patch("core.views_users.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            response = views_users.user_profile_detail_api(request, "bob")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertFalse(payload["summary"]["viewerIsMembershipCommittee"])
+        self.assertFalse(payload["membership"]["showCard"])
+        self.assertFalse(payload["membership"]["canViewHistory"])
 
     def test_user_profile_detail_shows_private_user_fields_for_self_viewer(self) -> None:
         factory = RequestFactory()

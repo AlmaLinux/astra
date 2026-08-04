@@ -56,35 +56,7 @@ logger = logging.getLogger(__name__)
 
 
 def _is_membership_committee_viewer(request: HttpRequest) -> bool:
-    committee_group = str(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP or "").strip()
-    if not committee_group:
-        return False
-
-    # Request user can be a test double without FreeIPA group metadata.
-    try:
-        viewer_groups = request.user.groups_list
-    except AttributeError:
-        viewer_groups = None
-
-    if viewer_groups is not None:
-        return committee_group in viewer_groups
-
-    # Fall back to the authenticated FreeIPA user when the request object does
-    # not expose group metadata. That keeps committee-only profile visibility
-    # working in admin-style request doubles and other lightweight auth stubs.
-    viewer_username = get_username(request)
-    if not viewer_username:
-        return False
-
-    try:
-        viewer = FreeIPAUser.get(viewer_username)
-    except Exception:
-        return False
-
-    if viewer is None:
-        return False
-
-    return committee_group in viewer.groups_list
+    return bool(membership_review_permissions(request.user)["membership_can_view"])
 
 
 def _profile_context_for_user(
@@ -783,7 +755,7 @@ def _profile_context_for_request(request: HttpRequest, username: str) -> dict[st
     viewer_username = get_username(request)
     logger.debug("User profile API: username=%s viewer=%s", username, viewer_username)
 
-    fu = _get_full_user(username)
+    fu = _get_full_user(username, respect_privacy=True)
     if not fu:
         raise Http404("User not found")
 
