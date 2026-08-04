@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatMembershipTimestamp } from "../membershipPresentation";
+import { formatFullDate, formatMembershipTimestamp } from "../membershipPresentation";
 
 function expectedLocalTimestamp(value: string): string {
   const parsed = new Date(value);
@@ -26,5 +26,16 @@ describe("formatMembershipTimestamp", () => {
   it("returns an empty string for invalid values", () => {
     expect(formatMembershipTimestamp("not-a-date")).toBe("");
     expect(formatMembershipTimestamp(null)).toBe("");
+  });
+});
+
+describe("formatFullDate", () => {
+  it("formats the full UTC month, day, and year without a comma", () => {
+    expect(formatFullDate("2026-03-06T23:00:00Z")).toBe("March 6 2026");
+  });
+
+  it("returns an empty string for invalid values", () => {
+    expect(formatFullDate("not-a-date")).toBe("");
+    expect(formatFullDate(null)).toBe("");
   });
 });

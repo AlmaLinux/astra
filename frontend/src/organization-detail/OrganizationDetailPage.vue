@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 
 import MembershipCard from "../shared/components/MembershipCard.vue";
-import { formatDateInputValue, formatMonthYear, formatShortDate, membershipTierClass, pendingMembershipBadge } from "../shared/membershipPresentation";
+import { formatDateInputValue, formatFullDate, membershipTierClass, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   OrganizationDetailBootstrap,
@@ -143,11 +143,11 @@ function membershipBadgeClass(membership: OrganizationDetailMembership): string 
 }
 
 function memberSinceLabel(membership: OrganizationDetailMembership): string {
-  return formatMonthYear(membership.createdAt);
+  return formatFullDate(membership.createdAt);
 }
 
 function expiresLabel(membership: OrganizationDetailMembership): string {
-  return formatShortDate(membership.expiresAt);
+  return formatFullDate(membership.expiresAt);
 }
 
 function expiresToneClass(membership: OrganizationDetailMembership): string {

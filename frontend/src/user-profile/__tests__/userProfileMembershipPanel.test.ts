@@ -69,8 +69,8 @@ describe("UserProfileMembershipPanel", () => {
     expect(sharedCard.exists()).toBe(true);
     expect(sharedCard.attributes("data-user-profile-membership-root")).toBe("");
     expect(sharedCard.text()).toContain("Membership");
-    expect(sharedCard.text()).toContain("Member since January 2024");
-    expect(sharedCard.text()).toContain("Expires Apr 30, 2026");
+    expect(sharedCard.text()).toContain("Member since January 15 2024");
+    expect(sharedCard.text()).toContain("Expires April 30 2026 00:00 (UTC)");
     expect(wrapper.find(".membership-standard.alx-status-badge--active").exists()).toBe(true);
   });
 
@@ -216,8 +216,8 @@ describe("UserProfileMembershipPanel", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("Expires Apr 30, 2026 00:00 (UTC)");
-    expect(wrapper.text()).toContain("Current expiration: Apr 30, 2026 00:00 (UTC)");
+    expect(wrapper.text()).toContain("Expires April 30 2026 00:00 (UTC)");
+    expect(wrapper.text()).toContain("Current expiration: April 30 2026 00:00 (UTC)");
   });
 
   it("builds management and notes wiring from the shell bootstrap instead of the API payload", () => {

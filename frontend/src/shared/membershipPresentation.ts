@@ -43,35 +43,30 @@ function partValue(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPa
   return parts.find((part) => part.type === type)?.value || "";
 }
 
+function dateLabelFromParts(parts: Intl.DateTimeFormatPart[]): string {
+  const month = partValue(parts, "month");
+  const day = partValue(parts, "day");
+  const year = partValue(parts, "year");
+
+  return `${month} ${day} ${year}`;
+}
+
 export function membershipTierClass(code: string): string {
   return MEMBERSHIP_TIER_CLASSES[String(code || "").trim().toLowerCase()] || "membership-standard";
 }
 
-export function formatMonthYear(value: string | null): string {
+export function formatFullDate(value: string | null): string {
   const parsed = parseDate(value);
   if (!parsed) {
     return "";
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  const parts = dateTimeParts(parsed, "UTC", {
     month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(parsed);
-}
-
-export function formatShortDate(value: string | null): string {
-  const parsed = parseDate(value);
-  if (!parsed) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
     day: "numeric",
     year: "numeric",
-    timeZone: "UTC",
-  }).format(parsed);
+  });
+  return dateLabelFromParts(parts);
 }
 
 export function formatPreciseDateTime(value: string | null, timezoneName: string): string {
@@ -81,7 +76,7 @@ export function formatPreciseDateTime(value: string | null, timezoneName: string
   }
 
   const parts = dateTimeParts(parsed, timezoneName, {
-    month: "short",
+    month: "long",
     day: "numeric",
     year: "numeric",
     hour: "2-digit",
@@ -89,13 +84,11 @@ export function formatPreciseDateTime(value: string | null, timezoneName: string
     hourCycle: "h23",
   });
   const timeZoneLabel = safeTimeZone(timezoneName);
-  const month = partValue(parts, "month");
-  const day = partValue(parts, "day");
-  const year = partValue(parts, "year");
+  const date = dateLabelFromParts(parts);
   const hour = partValue(parts, "hour");
   const minute = partValue(parts, "minute");
 
-  return `${month} ${day}, ${year} ${hour}:${minute} (${timeZoneLabel})`;
+  return `${date} ${hour}:${minute} (${timeZoneLabel})`;
 }
 
 export function formatMembershipTimestamp(value: string | null): string {

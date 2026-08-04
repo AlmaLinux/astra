@@ -106,8 +106,8 @@ describe("OrganizationDetailPage", () => {
 
     expect(fetchMock).toHaveBeenCalled();
     expect(wrapper.find("[data-membership-card-root]").exists()).toBe(true);
-    expect(wrapper.text()).toContain("Member since January 2024");
-    expect(wrapper.text()).toContain("Expires Apr 30, 2026");
+    expect(wrapper.text()).toContain("Member since January 15 2024");
+    expect(wrapper.text()).toContain("Expires April 30 2026");
     expect(wrapper.text()).toContain("Request #17");
     expect(wrapper.text()).toContain("Pending sponsor tier");
     expect(wrapper.text()).toContain("Under review");
@@ -407,7 +407,7 @@ describe("OrganizationDetailPage", () => {
     await flushPromises();
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Expires Apr 30, 2026");
+    expect(wrapper.text()).toContain("Expires April 30 2026");
     expect(wrapper.text()).not.toContain("Request renewal");
   });
 

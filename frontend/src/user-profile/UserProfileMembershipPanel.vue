@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 
 import MembershipCard from "../shared/components/MembershipCard.vue";
-import { formatDateInputValue, formatMonthYear, formatPreciseDateTime, formatShortDate, membershipTierClass, pendingMembershipBadge } from "../shared/membershipPresentation";
+import { formatDateInputValue, formatFullDate, formatPreciseDateTime, membershipTierClass, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   UserProfileMembershipEntry,
@@ -60,14 +60,14 @@ function membershipBadgeClass(entry: UserProfileMembershipEntry): string {
 }
 
 function memberSinceLabel(entry: UserProfileMembershipEntry): string {
-  return formatMonthYear(entry.createdAt);
+  return formatFullDate(entry.createdAt);
 }
 
 function expiresLabel(entry: UserProfileMembershipEntry): string {
   if (entry.isExpiringSoon) {
     return formatPreciseDateTime(entry.expiresAt, props.timezoneName);
   }
-  return formatShortDate(entry.expiresAt);
+  return formatFullDate(entry.expiresAt);
 }
 
 function expiresToneClass(entry: UserProfileMembershipEntry): string {
