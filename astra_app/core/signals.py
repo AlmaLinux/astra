@@ -47,6 +47,8 @@ organization_created = Signal()
 # Profile changes
 user_country_changed = Signal()
 organization_country_changed = Signal()
+user_embargoed_country_changed = Signal()
+organization_embargoed_country_changed = Signal()
 
 CANONICAL_SIGNALS: dict[str, Signal] = {
     "account_invitation_accepted": account_invitation_accepted,
@@ -80,6 +82,8 @@ CANONICAL_SIGNALS: dict[str, Signal] = {
     "organization_created": organization_created,
     "user_country_changed": user_country_changed,
     "organization_country_changed": organization_country_changed,
+    "user_embargoed_country_changed": user_embargoed_country_changed,
+    "organization_embargoed_country_changed": organization_embargoed_country_changed,
 }
 
 

@@ -121,6 +121,31 @@ def embargoed_country_match_from_country_code(
     )
 
 
+def country_change_involves_embargoed_country(
+    *,
+    old_country: str,
+    new_country: str,
+    embargoed_codes: set[str] | None = None,
+) -> bool:
+    normalized_old_country = normalize_country_alpha2(old_country)
+    normalized_new_country = normalize_country_alpha2(new_country)
+    if normalized_old_country == normalized_new_country:
+        return False
+
+    return (
+        embargoed_country_match_from_country_code(
+            normalized_old_country,
+            embargoed_codes=embargoed_codes,
+        )
+        is not None
+        or embargoed_country_match_from_country_code(
+            normalized_new_country,
+            embargoed_codes=embargoed_codes,
+        )
+        is not None
+    )
+
+
 def embargoed_country_label_from_user_data(
     *,
     user_data: dict | None,

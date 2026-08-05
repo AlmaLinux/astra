@@ -372,6 +372,59 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertEqual(by_title.get("Old country"), "US")
         self.assertEqual(by_title.get("New country"), "FR")
 
+    def test_payload_user_embargoed_country_changed(self) -> None:
+        endpoint = MattermostWebhookEndpoint(
+            label="Compliance",
+            url="https://hooks.example.invalid/abc",
+            events=["user_embargoed_country_changed"],
+        )
+
+        payload = _build_payload(
+            endpoint,
+            "user_embargoed_country_changed",
+            {
+                "username": "carol",
+                "old_country": "US",
+                "new_country": "IR",
+                "actor": "carol",
+            },
+        )
+
+        self.assertEqual(payload["text"], "User country changed to/from embargoed country")
+        fields = payload["attachments"][0]["fields"]
+        by_title = {str(field.get("title")): str(field.get("value")) for field in fields}
+        self.assertEqual(by_title.get("Username"), "carol")
+        self.assertEqual(by_title.get("Old country"), "US")
+        self.assertEqual(by_title.get("New country"), "IR")
+        self.assertEqual(by_title.get("Actor"), "carol")
+
+    def test_payload_organization_embargoed_country_changed(self) -> None:
+        organization = SimpleNamespace(pk=123, name="Example Org")
+        endpoint = MattermostWebhookEndpoint(
+            label="Compliance",
+            url="https://hooks.example.invalid/abc",
+            events=["organization_embargoed_country_changed"],
+        )
+
+        payload = _build_payload(
+            endpoint,
+            "organization_embargoed_country_changed",
+            {
+                "organization": organization,
+                "old_country": "IR",
+                "new_country": "DE",
+                "actor": "alice",
+            },
+        )
+
+        self.assertEqual(payload["text"], "Organization country changed to/from embargoed country")
+        fields = payload["attachments"][0]["fields"]
+        by_title = {str(field.get("title")): str(field.get("value")) for field in fields}
+        self.assertEqual(by_title.get("Organization"), "Example Org")
+        self.assertEqual(by_title.get("Old country"), "IR")
+        self.assertEqual(by_title.get("New country"), "DE")
+        self.assertEqual(by_title.get("Actor"), "alice")
+
     def test_build_payload_account_invitation_accepted_exposes_invitation_context_and_link(self) -> None:
         invitation = SimpleNamespace(
             pk=42,

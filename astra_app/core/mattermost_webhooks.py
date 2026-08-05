@@ -54,6 +54,8 @@ _ORANGE_EVENTS = {
     "membership_self_terminated",
     "user_country_changed",
     "organization_country_changed",
+    "user_embargoed_country_changed",
+    "organization_embargoed_country_changed",
 }
 
 _RED_EVENTS = {
@@ -342,7 +344,19 @@ _EVENT_TEMPLATE_VARIABLES: dict[str, dict[str, str]] = {
         "new_country": "New ISO country code.",
         "actor": "Username of user who made the change.",
     },
+    "user_embargoed_country_changed": {
+        "username": "Username of the user whose country changed.",
+        "old_country": "Previous ISO country code.",
+        "new_country": "New ISO country code.",
+        "actor": "Username of user who made the change.",
+    },
     "organization_country_changed": {
+        "organization": "Organization object (example: {{ organization.name }}, {{ organization.pk }}).",
+        "old_country": "Previous ISO country code.",
+        "new_country": "New ISO country code.",
+        "actor": "Username of user who made the change.",
+    },
+    "organization_embargoed_country_changed": {
         "organization": "Organization object (example: {{ organization.name }}, {{ organization.pk }}).",
         "old_country": "Previous ISO country code.",
         "new_country": "New ISO country code.",
@@ -694,8 +708,12 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
     elif event_key == "organization_created":
         text = "Organization created"
         fields = _organization_fields(kwargs)
-    elif event_key == "organization_country_changed":
-        text = "Organization country changed"
+    elif event_key in {"organization_country_changed", "organization_embargoed_country_changed"}:
+        text = (
+            "Organization country changed to/from embargoed country"
+            if event_key == "organization_embargoed_country_changed"
+            else "Organization country changed"
+        )
         fields = _organization_fields(kwargs)
         old_country = str(kwargs.get("old_country") or "").strip()
         new_country = str(kwargs.get("new_country") or "").strip()
@@ -703,8 +721,12 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
             fields.append({"title": "Old country", "value": old_country, "short": True})
         if new_country:
             fields.append({"title": "New country", "value": new_country, "short": True})
-    elif event_key == "user_country_changed":
-        text = "User country changed"
+    elif event_key in {"user_country_changed", "user_embargoed_country_changed"}:
+        text = (
+            "User country changed to/from embargoed country"
+            if event_key == "user_embargoed_country_changed"
+            else "User country changed"
+        )
         actor = str(kwargs.get("actor") or "system").strip() or "system"
         disp_username = str(kwargs.get("username") or "").strip()
         old_country = str(kwargs.get("old_country") or "").strip()

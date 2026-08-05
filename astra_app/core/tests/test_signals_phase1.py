@@ -69,6 +69,8 @@ class Phase1SignalsRegistryTests(TestCase):
             "organization_created",
             "user_country_changed",
             "organization_country_changed",
+            "user_embargoed_country_changed",
+            "organization_embargoed_country_changed",
             "membership_self_terminated",
             "account_deletion_requested",
             "account_deletion_pending_privilege_check",

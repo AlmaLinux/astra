@@ -83,10 +83,12 @@ def connect_once(fn: Callable[[], None]) -> Callable[[], None]:
     return wrapper
 
 
+from core import country_change_receivers as _country_change_receivers  # noqa: E402
 from core import mattermost_webhooks as _mattermost_webhooks  # noqa: E402
 from core import membership_notes_receivers as _membership_notes_receivers  # noqa: E402
 from core import mirror_membership_validation_receivers as _mirror_membership_validation_receivers  # noqa: E402
 
 _mattermost_webhooks.connect_mattermost_receivers()
+_country_change_receivers.connect_country_change_receivers()
 _mirror_membership_validation_receivers.connect_mirror_membership_validation_receivers()
 _membership_notes_receivers.connect_membership_notes_receivers()

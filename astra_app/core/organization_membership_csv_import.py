@@ -11,6 +11,7 @@ from import_export import fields, resources
 from import_export.forms import ConfirmImportForm, ImportForm
 from tablib import Dataset
 
+from core import signals as astra_signals
 from core.csv_import_utils import (
     attach_unmatched_csv_to_result,
     extract_csv_headers_from_uploaded_file,
@@ -22,7 +23,6 @@ from core.csv_import_utils import (
     sanitize_csv_cell,
     set_form_column_field_choices,
 )
-from core import signals as astra_signals
 from core.forms_membership import MembershipRequestForm
 from core.logging_extras import current_exception_log_fields
 from core.membership import (
