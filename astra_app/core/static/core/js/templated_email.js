@@ -754,6 +754,7 @@
   if (window.TemplatedEmailComposePreview) return;
 
   var timersByContainer = new WeakMap();
+  var previewRequestVersions = new WeakMap();
 
   function getComposeFromEvent(e) {
     if (e && e.detail && e.detail.instance) return e.detail.instance;
@@ -935,6 +936,10 @@
     var url = getPreviewUrl(compose);
     if (!url) return;
 
+    var container = compose.container;
+    var requestVersion = (previewRequestVersions.get(container) || 0) + 1;
+    previewRequestVersions.set(container, requestVersion);
+
     var data = new window.FormData();
     data.append('subject', compose.getField('subject'));
     data.append('html_content', compose.getField('html_content'));
@@ -994,6 +999,8 @@
       } catch (_e2) {
         payload = null;
       }
+
+      if (previewRequestVersions.get(container) !== requestVersion) return;
 
       if (!resp.ok) {
         if (payload && payload.error) {
