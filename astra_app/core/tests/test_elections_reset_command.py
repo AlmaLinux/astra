@@ -319,7 +319,8 @@ class ElectionsResetCommandTests(TestCase):
         edit_response = self.client.get(payload["routes"]["edit_draft"], HTTP_ACCEPT="text/html")
         self.assertEqual(edit_response.status_code, 200)
         self.assertContains(edit_response, "Save Draft", html=False)
-        self.assertContains(edit_response, "Start Election", html=False)
+        self.assertContains(edit_response, "data-election-start-automation-root", html=False)
+        self.assertContains(edit_response, "data-election-auto-start-api-url", html=False)
 
         self._login_as_freeipa(payload["actors"]["viewer"]["username"])
         detail_response = self.client.get(

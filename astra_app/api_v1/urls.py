@@ -22,10 +22,13 @@ from core.views_elections.detail import (
     elections_api,
 )
 from core.views_elections.lifecycle import (
+    election_auto_end_api,
+    election_auto_start_api,
     election_conclude_api,
     election_credential_email_template_api,
     election_extend_end_api,
     election_send_mail_credentials_api,
+    election_start_api,
     election_tally_api,
 )
 from core.views_elections.reporting import elections_turnout_report_api, elections_turnout_report_detail_api
@@ -170,6 +173,9 @@ urlpatterns = [
         election_conclude_api,
         name="api-election-conclude",
     ),
+    path("elections/<int:election_id>/auto-start", election_auto_start_api, name="api-election-auto-start"),
+    path("elections/<int:election_id>/auto-end", election_auto_end_api, name="api-election-auto-end"),
+    path("elections/<int:election_id>/start", election_start_api, name="api-election-start"),
     path(
         "elections/<int:election_id>/tally",
         election_tally_api,

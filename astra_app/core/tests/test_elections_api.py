@@ -1058,6 +1058,35 @@ class ElectionsApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"ok": False, "errors": ["Confirmation required."]})
 
+    def test_election_auto_start_api_toggles_draft_automation_for_manager(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+        election = Election.objects.create(
+            name="API automatic start election",
+            description="",
+            start_datetime=timezone.now() + datetime.timedelta(days=1),
+            end_datetime=timezone.now() + datetime.timedelta(days=2),
+            number_of_seats=1,
+            status=Election.Status.draft,
+        )
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin):
+            enabled = self.client.post(reverse("api-election-auto-start", args=[election.id]))
+            disabled = self.client.post(reverse("api-election-auto-start", args=[election.id]))
+
+        self.assertEqual(enabled.status_code, 200)
+        self.assertTrue(enabled.json()["ok"])
+        self.assertTrue(enabled.json()["election"]["auto_start_enabled"])
+        self.assertEqual(disabled.status_code, 200)
+        self.assertFalse(disabled.json()["election"]["auto_start_enabled"])
+        election.refresh_from_db()
+        self.assertFalse(election.auto_start_enabled)
+
     def test_election_conclude_api_closes_open_election_for_manager(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(

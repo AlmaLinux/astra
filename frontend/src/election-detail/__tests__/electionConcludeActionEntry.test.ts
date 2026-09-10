@@ -22,6 +22,8 @@ describe("mountElectionConcludeAction", () => {
       "data-election-conclude-api-url": "/api/v1/elections/1/conclude",
       "data-election-name": "Board election",
       "data-election-conclude-quorum-warning": "",
+      "data-election-auto-end-api-url": "/api/v1/elections/1/auto-end",
+      "data-election-auto-end-enabled": "false",
     });
 
     const app = mountElectionConcludeAction(root);

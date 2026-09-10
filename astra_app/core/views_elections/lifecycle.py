@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
@@ -412,6 +413,78 @@ def election_conclude_api(request: HttpRequest, election_id: int) -> JsonRespons
         status_code = 400
 
     return JsonResponse(payload, status=status_code)
+
+
+def _automation_payload(*, election: Election, ok: bool, errors: list[str] | None = None) -> dict[str, object]:
+    return {
+        "ok": ok,
+        "errors": errors or [],
+        "election": {
+            "id": election.id,
+            "status": election.status,
+            "auto_start_enabled": election.auto_start_enabled,
+            "auto_end_enabled": election.auto_end_enabled,
+        },
+    }
+
+
+def _toggle_automation(*, election_id: int, field_name: str, required_status: str) -> JsonResponse:
+    with transaction.atomic():
+        election = Election.objects.select_for_update().get(pk=election_id)
+        if election.status != required_status:
+            return JsonResponse(
+                _automation_payload(
+                    election=election,
+                    ok=False,
+                    errors=[f"Automation can only be changed while the election is {required_status}."],
+                ),
+                status=400,
+            )
+        if field_name == "auto_start_enabled":
+            election.auto_start_enabled = not election.auto_start_enabled
+        else:
+            election.auto_end_enabled = not election.auto_end_enabled
+        election.save(update_fields=[field_name, "updated_at"])
+    return JsonResponse(_automation_payload(election=election, ok=True))
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_auto_start_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    return _toggle_automation(
+        election_id=election_id,
+        field_name="auto_start_enabled",
+        required_status=Election.Status.draft,
+    )
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_auto_end_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    return _toggle_automation(
+        election_id=election_id,
+        field_name="auto_end_enabled",
+        required_status=Election.Status.open,
+    )
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_start_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    result = elections_services.start_scheduled_election(election_id=election_id, scheduled=False)
+    election = _get_active_election(election_id)
+    if result["status"] != "started":
+        return JsonResponse(
+            _automation_payload(
+                election=election,
+                ok=False,
+                errors=[str(result.get("reason") or "Election could not be started.")],
+            ),
+            status=400,
+        )
+    payload = _automation_payload(election=election, ok=True)
+    payload["delivery"] = {key: result[key] for key in ("emailed", "skipped", "failures")}
+    return JsonResponse(payload)
 
 
 @require_POST

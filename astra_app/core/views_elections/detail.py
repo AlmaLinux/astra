@@ -23,6 +23,7 @@ from core.models import (
     AuditLogEntry,
     Candidate,
     Election,
+    ElectionAutoEndDeferral,
     ExclusionGroup,
     Organization,
     VotingCredential,
@@ -174,11 +175,12 @@ def _serialize_election_detail_page_payload(
     election: Election,
     *,
     request: HttpRequest,
+    can_manage_elections: bool,
     can_vote: bool,
     credential_issued_at: datetime.datetime | None,
     summary_context: dict[str, object],
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "id": election.id,
         "name": election.name,
         "description": election.description,
@@ -207,7 +209,17 @@ def _serialize_election_detail_page_payload(
             for winner in summary_context["tally_winners"]
         ],
         "empty_seats": summary_context["empty_seats"],
+        "end_deferred_for_quorum": election.status == Election.Status.open
+        and election.auto_end_enabled
+        and ElectionAutoEndDeferral.objects.filter(
+            election=election,
+            scheduled_for=election.end_datetime,
+        ).exists(),
     }
+    if can_manage_elections:
+        payload["auto_start_enabled"] = election.auto_start_enabled
+        payload["auto_end_enabled"] = election.auto_end_enabled
+    return payload
 
 
 def _election_detail_summary_context(
@@ -419,6 +431,7 @@ def election_detail_page_api(request: HttpRequest, election_id: int) -> JsonResp
             "election": _serialize_election_detail_page_payload(
                 election,
                 request=request,
+                can_manage_elections=can_manage_elections,
                 can_vote=bool(vote_access["can_vote"]),
                 credential_issued_at=vote_access["credential_issued_at"],
                 summary_context=summary_context,

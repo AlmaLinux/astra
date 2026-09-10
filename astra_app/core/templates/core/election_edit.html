@@ -117,15 +117,16 @@
                 </button>
               {% endif %}
 
-              <button
-                type="button"
-                class="btn btn-success btn-block"
-                {% if election.status != 'draft' %}disabled{% endif %}
-                {% if election.status == 'draft' %}data-toggle="modal" data-target="#start-election-modal"{% endif %}
-                title="Open the election and send credentials"
-              >
-                Start Election
-              </button>
+              {% if election.status == 'draft' %}
+                <div
+                  data-election-start-automation-root
+                  data-election-start-api-url="{% url 'api-election-start' election.id %}"
+                  data-election-auto-start-api-url="{% url 'api-election-auto-start' election.id %}"
+                  data-election-auto-start-enabled="{% if election.auto_start_enabled %}true{% else %}false{% endif %}"
+                ></div>
+              {% else %}
+                <button type="button" class="btn btn-success btn-block" disabled title="Open the election and send credentials">Start Election</button>
+              {% endif %}
 
               <div class="text-muted small mt-2">
                 Starting an election sends credential emails to all eligible voters and locks settings.

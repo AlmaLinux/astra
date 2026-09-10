@@ -1384,6 +1384,8 @@ class Election(models.Model):
         ),
     )
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.draft)
+    auto_start_enabled = models.BooleanField(default=False)
+    auto_end_enabled = models.BooleanField(default=False)
 
     # Published machine-readable tally output.
     tally_result = models.JSONField(blank=True, default=dict)
@@ -1424,6 +1426,22 @@ class Election(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class ElectionAutoEndDeferral(models.Model):
+    """One unmet-quorum automatic-end deferral per election deadline."""
+
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="auto_end_deferrals")
+    scheduled_for = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["election", "scheduled_for"],
+                name="uniq_election_auto_end_deferral_deadline",
+            ),
+        ]
 
 
 class Candidate(models.Model):

@@ -12,6 +12,9 @@ const confirmValue = ref("");
 const skipTally = ref(false);
 const isSubmitting = ref(false);
 const errors = ref<string[]>([]);
+const autoEndEnabled = ref(props.bootstrap.autoEndEnabled);
+const isTogglingAutoEnd = ref(false);
+const autoEndError = ref("");
 
 const confirmMatches = computed(() => {
   return confirmValue.value.trim().toLowerCase() === props.bootstrap.electionName.trim().toLowerCase();
@@ -77,18 +80,37 @@ async function submit(): Promise<void> {
     isSubmitting.value = false;
   }
 }
+
+async function toggleAutoEnd(): Promise<void> {
+  isTogglingAutoEnd.value = true;
+  autoEndError.value = "";
+  try {
+    const response = await fetch(props.bootstrap.autoEndApiUrl, {
+      method: "POST", credentials: "same-origin", headers: { Accept: "application/json", "X-CSRFToken": readCsrfToken() },
+    });
+    const payload = await response.json() as { ok: boolean; errors?: string[]; election?: { auto_end_enabled: boolean } };
+    if (!response.ok || !payload.ok) {
+      autoEndError.value = payload.errors?.[0] || "Unable to update automatic end.";
+      return;
+    }
+    autoEndEnabled.value = Boolean(payload.election?.auto_end_enabled);
+  } catch {
+    autoEndError.value = "Unable to update automatic end.";
+  } finally {
+    isTogglingAutoEnd.value = false;
+  }
+}
 </script>
 
 <template>
   <div data-election-conclude-action-vue-root>
-    <button
-      type="button"
-      class="btn btn-danger btn-block"
-      title="Conclude the election and stop voting"
-      @click="isOpen = true"
-    >
-      Conclude Election
-    </button>
+    <p v-if="autoEndError" class="alert alert-danger" role="alert">{{ autoEndError }}</p>
+    <div class="btn-group btn-block" role="group" aria-label="Election end actions">
+      <button type="button" class="btn btn-danger" title="Conclude the election and stop voting" @click="isOpen = true">Conclude Election</button>
+      <button type="button" class="btn btn-outline-danger election-automation-toggle" :disabled="isTogglingAutoEnd" :aria-label="autoEndEnabled ? 'Cancel automatic end' : 'Enable automatic end at the scheduled end time'" :aria-pressed="autoEndEnabled" :title="autoEndEnabled ? 'Automatic end is enabled. Click to cancel.' : 'End automatically at the scheduled end time when quorum is met.'" @click="toggleAutoEnd">
+        <i :class="autoEndEnabled ? 'fas fa-pause' : 'fas fa-play'" aria-hidden="true"></i>
+      </button>
+    </div>
 
     <div v-if="isOpen" class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="conclude-election-modal-label">
       <div class="modal-dialog" role="document">
@@ -153,3 +175,9 @@ async function submit(): Promise<void> {
     <div v-if="isOpen" class="modal-backdrop fade show"></div>
   </div>
 </template>
+
+<style scoped>
+.election-automation-toggle {
+  flex: 0 0 42px;
+}
+</style>

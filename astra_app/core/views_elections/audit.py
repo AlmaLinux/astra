@@ -130,6 +130,9 @@ def _serialize_audit_log_payload_for_api(
             return {key: payload[key] for key in allowed_keys if key in payload}
         case "election_started":
             serialized: dict[str, object] = {}
+            for key in ("automation", "scheduled_for", "transitioned_at", "actor"):
+                if key in payload and (key != "actor" or payload[key] == "operations_hourly"):
+                    serialized[key] = payload[key]
             if "genesis_chain_hash" in payload:
                 serialized["genesis_chain_hash"] = payload["genesis_chain_hash"]
             candidates = payload.get("candidates")
@@ -146,12 +149,17 @@ def _serialize_audit_log_payload_for_api(
             return serialized
         case "election_closed":
             serialized = {"chain_head": payload["chain_head"]} if "chain_head" in payload else {}
+            for key in ("automation", "scheduled_for", "transitioned_at", "actor"):
+                if key in payload and (key != "actor" or payload[key] == "operations_hourly"):
+                    serialized[key] = payload[key]
             if not can_manage_elections:
                 if "credentials_affected" in payload:
                     serialized["credentials_affected"] = bool(payload["credentials_affected"])
                 if "emails_scrubbed" in payload:
                     serialized["emails_scrubbed"] = bool(payload["emails_scrubbed"])
             return serialized
+        case "election_auto_end_deferred_quorum" if can_manage_elections:
+            return {key: payload[key] for key in ("scheduled_for", "quorum_percent") if key in payload}
         case "election_anonymized":
             allowed_keys = {"credentials_affected", "emails_scrubbed", "scrub_anomaly"}
             return {key: payload[key] for key in allowed_keys if key in payload}

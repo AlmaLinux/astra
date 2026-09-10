@@ -18,7 +18,7 @@ from django.utils import timezone
 from post_office.models import Email
 
 from core import signals as astra_signals
-from core.elections_eligibility import start_eligible_voters
+from core.elections_eligibility import ElectionEligibilityError, start_eligible_voters, validate_candidates_for_election
 from core.elections_timestamping import get_public_payload, schedule_attestation
 from core.email_context import (
     election_committee_email_context,
@@ -26,6 +26,7 @@ from core.email_context import (
     user_email_context_from_user,
 )
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
+from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.logging_extras import current_exception_log_fields
 from core.models import (
     AuditLogEntry,
@@ -35,7 +36,7 @@ from core.models import (
     VotingCredential,
 )
 from core.public_urls import build_public_absolute_url
-from core.templated_email import queue_composed_email, queue_templated_email
+from core.templated_email import bulk_save_emails, queue_composed_email, queue_templated_email
 from core.tokens import election_chain_next_hash, election_genesis_chain_hash
 
 ELECTION_TALLY_ALGORITHM_NAME = "Meek STV (High-Precision Variant)"
@@ -975,7 +976,12 @@ def scrub_election_emails(*, election: Election) -> int:
     return count
 
 
-def close_election(*, election: Election, actor: str | None = None) -> None:
+def close_election(
+    *,
+    election: Election,
+    actor: str | None = None,
+    scheduled_for: datetime.datetime | None = None,
+) -> None:
     """Close an open election, anonymize credentials, and record a public audit event.
 
     Sequence (all within a single transaction):
@@ -1004,8 +1010,11 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
             chain_head = str(last_chain_hash or genesis_hash)
 
             election.status = Election.Status.closed
-            election.end_datetime = ended_at
-            election.save(update_fields=["status", "end_datetime"])
+            if scheduled_for is None:
+                election.end_datetime = ended_at
+                election.save(update_fields=["status", "end_datetime"])
+            else:
+                election.save(update_fields=["status"])
 
             anonymize = anonymize_election(election=election)
 
@@ -1016,6 +1025,10 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
             }
             if actor:
                 payload["actor"] = actor
+            if scheduled_for is not None:
+                payload["automation"] = True
+                payload["scheduled_for"] = scheduled_for.isoformat()
+                payload["transitioned_at"] = ended_at.isoformat()
 
             audit_entry = AuditLogEntry.objects.create(
                 election=election,
@@ -1062,6 +1075,128 @@ def close_election(*, election: Election, actor: str | None = None) -> None:
             "Contact an administrator if the issue persists"
             f": {exc}"
         ) from exc
+
+
+@transaction.atomic
+def start_scheduled_election(*, election_id: int, scheduled: bool = True) -> dict[str, int | str]:
+    """Open one due opted-in draft election and queue its credential email."""
+    election = Election.objects.select_for_update().get(pk=election_id)
+    now = timezone.now()
+    if election.status != Election.Status.draft:
+        return {"status": "skipped"}
+    if scheduled and (not election.auto_start_enabled or election.start_datetime > now):
+        return {"status": "skipped"}
+    if not Candidate.objects.filter(election=election).exists():
+        return {"status": "invalid", "reason": "Election has no candidates."}
+
+    candidates = list(Candidate.objects.filter(election=election).only("freeipa_username", "nominated_by"))
+    candidate_usernames = [str(candidate.freeipa_username or "").strip() for candidate in candidates]
+    nominator_usernames = [str(candidate.nominated_by or "").strip() for candidate in candidates]
+    try:
+        eligible_voters = start_eligible_voters(election=election, require_fresh=True)
+        validation = validate_candidates_for_election(
+            election=election,
+            candidate_usernames=candidate_usernames,
+            nominator_usernames=nominator_usernames,
+            eligible_group_cn=election.eligible_group_cn,
+            require_fresh=True,
+        )
+    except ElectionEligibilityError as exc:
+        return {"status": "invalid", "reason": str(exc)}
+    if not eligible_voters:
+        return {"status": "invalid", "reason": "No eligible voters were found for this election."}
+    if (
+        validation.disqualified_candidates
+        or validation.disqualified_nominators
+        or validation.ineligible_candidates
+        or validation.ineligible_nominators
+    ):
+        return {"status": "invalid", "reason": "Election candidate eligibility validation failed."}
+
+    credentials = issue_credentials_at_start_transition_for_scheduled_election(election=election)
+    if not scheduled:
+        election.start_datetime = now
+    election.status = Election.Status.open
+    election.auto_start_enabled = False
+    election.save(update_fields=["status", "auto_start_enabled", "start_datetime", "updated_at"])
+
+    pending_emails: list[Email] = []
+    emailed = 0
+    skipped = 0
+    failures = 0
+    FreeIPAUser.warm_user_cache([str(c.freeipa_username) for c in credentials if c.freeipa_username])
+    use_snapshot = bool(
+        election.voting_email_subject.strip()
+        or election.voting_email_html.strip()
+        or election.voting_email_text.strip()
+    )
+    for credential in credentials:
+        username = str(credential.freeipa_username or "").strip()
+        if not username:
+            skipped += 1
+            continue
+        try:
+            user = FreeIPAUser.get(username, respect_privacy=False)
+            if user is None or not user.email:
+                skipped += 1
+                continue
+            queued = send_voting_credential_email(
+                request=None,
+                election=election,
+                username=username,
+                email=user.email,
+                credential_public_id=str(credential.public_id),
+                tz_name=_get_freeipa_timezone_name(user),
+                subject_template=election.voting_email_subject if use_snapshot else None,
+                html_template=election.voting_email_html if use_snapshot else None,
+                text_template=election.voting_email_text if use_snapshot else None,
+                commit=False,
+            )
+            if queued is not None:
+                pending_emails.append(queued)
+            emailed += 1
+        except Exception:
+            failures += 1
+    bulk_save_emails(pending_emails)
+
+    audit_entry = AuditLogEntry.objects.create(
+        election=election,
+        event_type="election_started",
+        payload={
+            "eligible_voters": len(credentials),
+            "emailed": emailed,
+            "skipped": skipped,
+            "failures": failures,
+            "genesis_chain_hash": election_genesis_chain_hash(election.id),
+            "candidates": [
+                {"id": candidate.id, "freeipa_username": candidate.freeipa_username, "tiebreak_uuid": str(candidate.tiebreak_uuid)}
+                for candidate in Candidate.objects.filter(election=election).only("id", "freeipa_username", "tiebreak_uuid")
+            ],
+            "automation": scheduled,
+            "actor": "operations_hourly" if scheduled else "",
+            "scheduled_for": election.start_datetime.isoformat() if scheduled else None,
+            "transitioned_at": now.isoformat(),
+        },
+        is_public=True,
+    )
+    schedule_attestation(audit_entry)
+    transaction.on_commit(
+        lambda: astra_signals.election_opened.send(
+            sender=Election,
+            election=Election.objects.get(pk=election.id),
+            actor="operations_hourly" if scheduled else None,
+        )
+    )
+    return {"status": "started", "emailed": emailed, "skipped": skipped, "failures": failures}
+
+
+def issue_credentials_at_start_transition_for_scheduled_election(*, election: Election) -> list[VotingCredential]:
+    election.status = Election.Status.open
+    election.save(update_fields=["status"])
+    try:
+        return issue_credentials_at_start_transition(election=election)
+    finally:
+        election.status = Election.Status.draft
 
 
 def tally_election(*, election: Election, actor: str | None = None) -> dict[str, object]:

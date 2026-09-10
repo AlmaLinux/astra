@@ -52,10 +52,16 @@ def get_public_payload(entry: AuditLogEntry) -> Any:
                     for candidate in candidates
                     if isinstance(candidate, dict)
                 ]
+            for key in ("automation", "scheduled_for", "transitioned_at"):
+                if key in payload:
+                    public_payload[key] = payload[key]
+            if payload.get("actor") == "operations_hourly":
+                public_payload["actor"] = "operations_hourly"
             return public_payload
 
         public_payload = dict(payload)
-        public_payload.pop("actor", None)
+        if payload.get("actor") != "operations_hourly":
+            public_payload.pop("actor", None)
         if entry.event_type == "election_closed":
             # Keep final chain head public while withholding sensitive close counters.
             public_payload.pop("credentials_affected", None)

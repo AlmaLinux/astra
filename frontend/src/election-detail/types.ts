@@ -63,6 +63,9 @@ export interface ElectionInfoPayload {
   election_is_finished: boolean;
   tally_winners: ElectionWinnerItem[];
   empty_seats: number;
+  end_deferred_for_quorum: boolean;
+  auto_start_enabled?: boolean;
+  auto_end_enabled?: boolean;
 }
 
 export interface ElectionInfoResponse {
@@ -136,6 +139,14 @@ export interface ElectionConcludeActionBootstrap {
   concludeApiUrl: string;
   electionName: string;
   quorumWarning: string;
+  autoEndApiUrl: string;
+  autoEndEnabled: boolean;
+}
+
+export interface ElectionStartAutomationBootstrap {
+  startApiUrl: string;
+  autoStartApiUrl: string;
+  autoStartEnabled: boolean;
 }
 
 export interface ElectionTallyActionBootstrap {
@@ -218,13 +229,29 @@ export function readElectionConcludeActionBootstrap(root: HTMLElement): Election
   const concludeApiUrl = String(root.dataset.electionConcludeApiUrl || "").trim();
   const electionName = String(root.dataset.electionName || "").trim();
   const quorumWarning = String(root.dataset.electionConcludeQuorumWarning || "").trim();
-  if (!concludeApiUrl || !electionName) {
+  const autoEndApiUrl = String(root.dataset.electionAutoEndApiUrl || "").trim();
+  if (!concludeApiUrl || !electionName || !autoEndApiUrl) {
     return null;
   }
   return {
     concludeApiUrl,
     electionName,
     quorumWarning,
+    autoEndApiUrl,
+    autoEndEnabled: root.dataset.electionAutoEndEnabled === "true",
+  };
+}
+
+export function readElectionStartAutomationBootstrap(root: HTMLElement): ElectionStartAutomationBootstrap | null {
+  const startApiUrl = String(root.dataset.electionStartApiUrl || "").trim();
+  const autoStartApiUrl = String(root.dataset.electionAutoStartApiUrl || "").trim();
+  if (!startApiUrl || !autoStartApiUrl) {
+    return null;
+  }
+  return {
+    startApiUrl,
+    autoStartApiUrl,
+    autoStartEnabled: root.dataset.electionAutoStartEnabled === "true",
   };
 }
 

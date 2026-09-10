@@ -92,6 +92,16 @@
               data-election-conclude-api-url="{% url 'api-election-conclude' election.id %}"
               data-election-name="{{ election.name }}"
               data-election-conclude-quorum-warning=""
+              data-election-auto-end-api-url="{% url 'api-election-auto-end' election.id %}"
+              data-election-auto-end-enabled="{% if election.auto_end_enabled %}true{% else %}false{% endif %}"
+            ></div>
+          {% elif can_manage_elections and election.status == 'draft' %}
+            <hr class="my-3" />
+            <div
+              data-election-start-automation-root
+              data-election-start-api-url="{% url 'api-election-start' election.id %}"
+              data-election-auto-start-api-url="{% url 'api-election-auto-start' election.id %}"
+              data-election-auto-start-enabled="{% if election.auto_start_enabled %}true{% else %}false{% endif %}"
             ></div>
           {% elif can_manage_elections and election.status == 'closed' %}
             <hr class="my-3" />

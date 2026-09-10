@@ -1,7 +1,12 @@
+import datetime
+from io import StringIO
 from unittest.mock import call, patch
 
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
+
+from core.models import Election
 
 
 class OperationsDailyCommandTests(TestCase):
@@ -115,6 +120,51 @@ class OperationsWeeklyCommandTests(TestCase):
 
 
 class OperationsHourlyCommandTests(TestCase):
+    def test_election_lifecycle_automation_reports_empty_scan(self) -> None:
+        output = StringIO()
+
+        call_command("election_lifecycle_automation", verbosity=3, stdout=output)
+
+        self.assertIn("Due automatic starts: 0", output.getvalue())
+        self.assertIn("Due automatic ends: 0", output.getvalue())
+
+    def test_election_lifecycle_automation_reports_due_start_schedule(self) -> None:
+        scheduled_for = timezone.now() - datetime.timedelta(hours=1)
+        Election.objects.create(
+            name="Scheduled diagnostic",
+            description="",
+            start_datetime=scheduled_for,
+            end_datetime=scheduled_for + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            auto_start_enabled=True,
+        )
+        output = StringIO()
+
+        call_command("election_lifecycle_automation", "--dry-run", verbosity=3, stdout=output)
+
+        self.assertIn(f"scheduled start: {scheduled_for.isoformat()}", output.getvalue())
+
+    def test_election_lifecycle_automation_closes_due_enabled_no_quorum_election(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Scheduled close",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now - datetime.timedelta(hours=1),
+            number_of_seats=1,
+            quorum=0,
+            status=Election.Status.open,
+        )
+
+        Election.objects.filter(pk=election.pk).update(auto_end_enabled=True)
+
+        call_command("election_lifecycle_automation")
+
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.closed)
+        self.assertFalse(election.auto_end_enabled)
+
     def test_command_runs_hourly_jobs(self) -> None:
         with (
             patch("core.management.commands.operations_hourly.call_command") as cc,
@@ -126,6 +176,7 @@ class OperationsHourlyCommandTests(TestCase):
             cc.mock_calls,
             [
                 call("membership_mirror_validation", force=False, dry_run=False),
+                call("election_lifecycle_automation", force=False, dry_run=False),
             ],
         )
         self.assertTrue(
@@ -143,6 +194,7 @@ class OperationsHourlyCommandTests(TestCase):
             cc.mock_calls,
             [
                 call("membership_mirror_validation", force=True, dry_run=False),
+                call("election_lifecycle_automation", force=True, dry_run=False),
             ],
         )
 
@@ -156,5 +208,6 @@ class OperationsHourlyCommandTests(TestCase):
             cc.mock_calls,
             [
                 call("membership_mirror_validation", force=False, dry_run=True),
+                call("election_lifecycle_automation", force=False, dry_run=True),
             ],
         )
