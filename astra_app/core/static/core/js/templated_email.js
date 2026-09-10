@@ -556,6 +556,21 @@
       }
     }
 
+    function bindModalConfirmation(modalEl, handler) {
+      if (!modalEl) return;
+
+      var formEl = modalEl.querySelector('form');
+      if (formEl) {
+        formEl.addEventListener('submit', handler);
+        return;
+      }
+
+      // The election editor already has an outer form, so the browser drops
+      // nested form elements while parsing the server-rendered modal.
+      var submitButton = modalEl.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.addEventListener('click', handler);
+    }
+
     function bindSaveModalsIfPresent() {
       var saveBtn = q(container, '[data-compose-action="save"]');
       if (saveBtn) {
@@ -606,31 +621,21 @@
       }
 
       var saveModal = getModalEl('save');
-      if (saveModal) {
-        var formEl = saveModal.querySelector('form');
-        if (formEl) {
-          formEl.addEventListener('submit', function (e) {
-            e.preventDefault();
-            hideModal(saveModal);
-            dispatch('templated-email-compose:save-confirmed', { instance: api });
-          });
-        }
-      }
+      bindModalConfirmation(saveModal, function (e) {
+        e.preventDefault();
+        hideModal(saveModal);
+        dispatch('templated-email-compose:save-confirmed', { instance: api });
+      });
 
       var saveAsModal = getModalEl('save-as');
-      if (saveAsModal) {
-        var formEl2 = saveAsModal.querySelector('form');
-        if (formEl2) {
-          formEl2.addEventListener('submit', function (e) {
-            e.preventDefault();
-            var nameEl2 = saveAsModal.querySelector('input[name="name"]');
-            var name2 = nameEl2 ? String(nameEl2.value || '').trim() : '';
-            if (!name2) return;
-            hideModal(saveAsModal);
-            dispatch('templated-email-compose:save-as-confirmed', { instance: api, name: name2 });
-          });
-        }
-      }
+      bindModalConfirmation(saveAsModal, function (e) {
+        e.preventDefault();
+        var nameEl2 = saveAsModal.querySelector('input[name="name"]');
+        var name2 = nameEl2 ? String(nameEl2.value || '').trim() : '';
+        if (!name2) return;
+        hideModal(saveAsModal);
+        dispatch('templated-email-compose:save-as-confirmed', { instance: api, name: name2 });
+      });
     }
 
     var api = {

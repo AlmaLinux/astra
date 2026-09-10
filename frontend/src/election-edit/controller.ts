@@ -521,7 +521,11 @@ export function initElectionEditController(): void {
     const token = composeForEvent?.getCsrfToken?.() ?? "";
 
     void saveComposeTemplate(templateId, { subject: values.subject, html_content: values.html_content ?? values.html ?? "", text_content: values.text_content ?? values.text ?? "" }, token).then((ok) => {
-      if (ok) markComposeBaselineFromFields();
+      if (!ok) {
+        return;
+      }
+      markComposeBaselineFromFields();
+      scheduleEmailPreviewRefresh(composeForEvent, 0);
     });
   });
 

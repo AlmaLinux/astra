@@ -103,6 +103,51 @@ describe("initElectionEditController", () => {
     expect(modal).toHaveBeenCalledWith("show");
   });
 
+  it("refreshes the email preview after saving the existing template", async () => {
+    const compose = {
+      getField: vi.fn((name: string) => ({
+        subject: "Updated subject",
+        html_content: "<p>Updated HTML</p>",
+        text_content: "Updated text",
+      })[name] ?? ""),
+      getValues: vi.fn(() => ({
+        subject: "Updated subject",
+        html_content: "<p>Updated HTML</p>",
+        text_content: "Updated text",
+      })),
+      setRestoreEnabled: vi.fn(),
+      markBaseline: vi.fn(),
+      getCsrfToken: vi.fn(() => "token"),
+      getTemplateId: vi.fn(() => "7"),
+      getTemplateSelectEl: vi.fn(() => null),
+    };
+    const schedulePreviewRefresh = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("TemplatedEmailCompose", compose);
+    vi.stubGlobal("TemplatedEmailComposePreview", {
+      getComposeFromEvent: () => compose,
+      schedulePreviewRefresh,
+    });
+    vi.spyOn(window, "alert").mockImplementation(() => {});
+
+    initElectionEditController();
+
+    document.dispatchEvent(new CustomEvent("templated-email-compose:save-confirmed", {
+      detail: { instance: compose },
+    }));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(compose.markBaseline).toHaveBeenCalled();
+    expect(schedulePreviewRefresh).toHaveBeenCalledWith(compose, 0);
+  });
+
   it("does not prompt when compose registers after init and the template id still matches", () => {
     document.body.innerHTML = `
       <form id="election-edit-form">
