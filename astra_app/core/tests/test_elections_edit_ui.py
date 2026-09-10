@@ -141,6 +141,19 @@ class ElectionEditPermissionTests(_CoreCategoriesTestCase):
         self.assertContains(resp, "-election_name-")
         self.assertContains(resp, "-election_description-")
 
+    def test_new_election_escapes_preview_links_in_iframe_srcdoc(self) -> None:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+
+        resp = self.client.get(reverse("election-edit", args=[0]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "&lt;a href=&quot;-vote_url_with_credential_fragment-&quot;&gt;Open ballot&lt;/a&gt;")
+
     def test_new_election_details_card_shows_draft_badge_and_hides_status_field(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(

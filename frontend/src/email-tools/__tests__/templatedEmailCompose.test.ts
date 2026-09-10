@@ -156,4 +156,5 @@ describe("templated email compose", () => {
     expect(body.get("text_content")).toBe("Changed text");
     expect(document.querySelector<HTMLIFrameElement>('[data-compose-preview="text"] iframe')?.srcdoc).toContain("Rendered text");
   });
+
 });
