@@ -467,7 +467,7 @@ class ElectionEditLifecycleTests(TestCase):
         self.assertEqual(election.status, Election.Status.draft)
         self.assertFalse(VotingCredential.objects.filter(election=election).exists())
 
-    def test_edit_rejects_end_election_action(self) -> None:
+    def test_started_election_edit_redirects_end_election_action(self) -> None:
         now = timezone.now()
         election = Election.objects.create(
             name="Open election",
@@ -509,10 +509,44 @@ class ElectionEditLifecycleTests(TestCase):
                 follow=False,
             )
 
-        self.assertEqual(resp.status_code, 400)
+        self.assertRedirects(
+            resp,
+            reverse("election-detail", args=[election.id]),
+            fetch_redirect_response=False,
+        )
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.open)
         self.assertEqual(VotingCredential.objects.get(election=election).freeipa_username, "voter1")
+
+    def test_started_election_edit_redirects_to_detail_without_saving(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Started election",
+            description="",
+            url="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+        )
+
+        self._login_as_freeipa_user("admin")
+        self._grant_manage_elections("admin")
+        admin_user = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        detail_url = reverse("election-detail", args=[election.id])
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            get_response = self.client.get(reverse("election-edit", args=[election.id]), follow=False)
+            post_response = self.client.post(
+                reverse("election-edit", args=[election.id]),
+                data={"action": "save_draft", "name": "Changed election"},
+                follow=False,
+            )
+
+        self.assertRedirects(get_response, detail_url, fetch_redirect_response=False)
+        self.assertRedirects(post_response, detail_url, fetch_redirect_response=False)
+        election.refresh_from_db()
+        self.assertEqual(election.name, "Started election")
 
     def test_start_election_blocks_committee_candidates(self) -> None:
         now = timezone.now()

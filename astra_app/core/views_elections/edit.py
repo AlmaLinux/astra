@@ -525,6 +525,9 @@ def _handle_start_election(
 def election_edit(request, election_id: int):
     is_create = election_id == 0
     election = None if is_create else _get_active_election(election_id)
+    if election is not None and election.status != Election.Status.draft:
+        return redirect("election-detail", election_id=election.id)
+
     candidate_queryset = Candidate.objects.none()
     group_queryset = ExclusionGroup.objects.none()
     if election is not None and election.pk is not None:
