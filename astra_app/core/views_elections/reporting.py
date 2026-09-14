@@ -24,7 +24,7 @@ def _build_elections_turnout_report_rows() -> list[dict[str, object]]:
         .filter(status__in=[Election.Status.open, Election.Status.closed, Election.Status.tallied])
         .exclude(status=Election.Status.draft)
         .annotate(candidates_count=Count("candidates", distinct=True), credentials_count=Count("credentials", distinct=True))
-        .order_by("start_datetime", "id")
+        .order_by("-start_datetime", "id")
     )
 
     report_rows: list[dict[str, object]] = []
