@@ -52,7 +52,7 @@
 
           <div class="form-group">
             <label for="id_otp">One-Time Password</label>
-            <input type="text" name="otp" class="form-control" id="id_otp" placeholder="One-Time Password (if you have one)" autocomplete="off">
+            <input type="text" name="otp" class="form-control" id="id_otp" placeholder="One-Time Password (if you have one)" autocomplete="one-time-code">
             {% if form.otp.errors %}<div class="text-danger">{{ form.otp.errors }}</div>{% endif %}
           </div>
 
