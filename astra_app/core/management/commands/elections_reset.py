@@ -859,6 +859,7 @@ class Command(BaseCommand):
                 "closed_detail": elections_payload[PAST_LIST_ALIAS]["route"],
                 "edit_draft": elections_payload[DRAFT_MANAGER_ALIAS]["route"],
                 "edit_large_start": elections_payload[LARGE_START_ALIAS]["route"],
+                "detail_large_start": reverse("election-detail", args=[large_start_election.id]),
                 "open_detail": elections_payload[DETAIL_OPEN_ALIAS]["route"],
                 "open_vote": reverse("election-vote", args=[open_election.id]),
                 "tallied_detail": elections_payload[DETAIL_TALLIED_ALIAS]["route"],
@@ -930,6 +931,12 @@ class Command(BaseCommand):
                     "aliases": [LARGE_START_ALIAS],
                     "destructive": True,
                     "route_target": elections_payload[LARGE_START_ALIAS]["route"],
+                },
+                "elections-remind-large-electorate-progress": {
+                    "actor": MANAGER_USERNAME,
+                    "aliases": [LARGE_START_ALIAS],
+                    "destructive": True,
+                    "route_target": reverse("election-detail", args=[large_start_election.id]),
                 },
                 "elections-edit-draft-save-and-start": {
                     "actor": MANAGER_USERNAME,

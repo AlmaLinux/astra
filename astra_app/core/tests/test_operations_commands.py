@@ -3,10 +3,21 @@ from io import StringIO
 from unittest.mock import call, patch
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from core.models import Election
+from core import mail_progress
+from core.freeipa.user import FreeIPAUser
+from core.mail_progress import MailRunKind
+from core.models import (
+    AuditLogEntry,
+    Candidate,
+    Election,
+    ElectionRoll,
+    Membership,
+    MembershipType,
+    VotingCredential,
+)
 
 
 class OperationsDailyCommandTests(TestCase):
@@ -144,6 +155,101 @@ class OperationsHourlyCommandTests(TestCase):
         call_command("election_lifecycle_automation", "--dry-run", verbosity=3, stdout=output)
 
         self.assertIn(f"scheduled start: {scheduled_for.isoformat()}", output.getvalue())
+
+    @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
+    def test_election_lifecycle_automation_starts_a_due_election_end_to_end(self) -> None:
+        """The cron path opens, issues and emails without any progress record.
+
+        Progress reporting exists for operators watching a browser; an automatic
+        start has nobody watching, so it runs synchronously in the command.
+        """
+        now = timezone.now()
+        scheduled_for = now - datetime.timedelta(hours=1)
+        election = Election.objects.create(
+            name="Scheduled start",
+            description="",
+            start_datetime=scheduled_for,
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.draft,
+            auto_start_enabled=True,
+            voting_email_subject="Hello {{ username }}",
+            voting_email_html="<p>Hi {{ username }}</p>",
+            voting_email_text="Hi {{ username }}",
+        )
+        Candidate.objects.create(election=election, freeipa_username="alice", nominated_by="nominator")
+
+        membership_type = MembershipType.objects.create(
+            code="voter",
+            name="Voter",
+            description="",
+            category_id="individual",
+            sort_order=1,
+            enabled=True,
+            votes=1,
+        )
+        for username in ("voter1", "voter2", "alice", "nominator"):
+            membership = Membership.objects.create(
+                target_username=username,
+                membership_type=membership_type,
+                expires_at=None,
+            )
+            Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=200))
+
+        def _get_user(username: str, **_: object) -> FreeIPAUser:
+            return FreeIPAUser(
+                username,
+                {"uid": [username], "memberof_group": [], "mail": [f"{username}@example.com"]},
+            )
+
+        output = StringIO()
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.freeipa.user.FreeIPAUser.warm_user_cache"),
+            patch("core.elections_services.send_voting_credential_email", autospec=True, return_value=None) as send_mock,
+            patch("core.mail_progress._spawn", side_effect=AssertionError("automatic starts must not spawn a delivery thread")),
+        ):
+            call_command("election_lifecycle_automation", verbosity=2, stdout=output)
+
+        self.assertIn("start started", output.getvalue())
+
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.open)
+        # Cleared so a later run cannot start the same election twice.
+        self.assertFalse(election.auto_start_enabled)
+
+        self.assertEqual(VotingCredential.objects.filter(election=election).count(), 4)
+        self.assertEqual(ElectionRoll.objects.filter(election=election).count(), 4)
+        self.assertEqual(send_mock.call_count, 4)
+
+        audit = AuditLogEntry.objects.get(election=election, event_type="election_started")
+        self.assertEqual(audit.payload["actor"], "operations_hourly")
+        self.assertTrue(audit.payload["automation"])
+        self.assertEqual(audit.payload["emailed"], 4)
+        self.assertEqual(audit.payload["failures"], 0)
+
+        # No operator is watching, so no progress record is kept.
+        self.assertIsNone(mail_progress.read(scope=str(election.id), kind=MailRunKind.election_start))
+
+    @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
+    def test_election_lifecycle_automation_does_not_restart_an_open_election(self) -> None:
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Already started",
+            description="",
+            start_datetime=now - datetime.timedelta(hours=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=Election.Status.open,
+            auto_start_enabled=True,
+        )
+        output = StringIO()
+
+        with patch("core.elections_services.send_voting_credential_email", autospec=True) as send_mock:
+            call_command("election_lifecycle_automation", verbosity=2, stdout=output)
+
+        send_mock.assert_not_called()
+        self.assertEqual(VotingCredential.objects.filter(election=election).count(), 0)
 
     def test_election_lifecycle_automation_closes_due_enabled_no_quorum_election(self) -> None:
         now = timezone.now()

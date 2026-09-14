@@ -199,7 +199,7 @@ class Phase1ElectionSignalTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get") as freeipa_get,
             patch("core.freeipa.user.FreeIPAUser.warm_user_cache"),
             patch("core.elections_services.timezone.now", return_value=started_at),
-            patch("core.elections_start_progress._spawn", side_effect=_run_inline),
+            patch("core.mail_progress._spawn", side_effect=_run_inline),
             patch("post_office.mail.send", autospec=True),
             patch.object(signal_module.election_opened, "send", autospec=True) as send_mock,
             self.captureOnCommitCallbacks(execute=True),

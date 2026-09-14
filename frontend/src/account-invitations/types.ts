@@ -32,6 +32,7 @@ export interface AccountInvitationsBootstrap {
   resendApiUrl: string;
   dismissApiUrl: string;
   bulkApiUrl: string;
+  mailProgressApiUrl: string;
   uploadApiUrl?: string;
   previewApiUrl?: string;
   sendApiUrl?: string;
@@ -124,6 +125,7 @@ export function readAccountInvitationsBootstrap(): AccountInvitationsBootstrap |
     resendApiUrl: root.getAttribute("data-account-invitations-resend-api-url") || "",
     dismissApiUrl: root.getAttribute("data-account-invitations-dismiss-api-url") || "",
     bulkApiUrl: root.getAttribute("data-account-invitations-bulk-api-url") || "",
+    mailProgressApiUrl: root.getAttribute("data-account-invitations-mail-progress-api-url") || "",
     uploadApiUrl: root.getAttribute("data-account-invitations-upload-api-url") || undefined,
     previewApiUrl: root.getAttribute("data-account-invitations-preview-api-url") || undefined,
     sendApiUrl: root.getAttribute("data-account-invitations-send-api-url") || undefined,

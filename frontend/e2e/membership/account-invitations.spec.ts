@@ -231,6 +231,12 @@ test("invitations-pending-bulk-resend keeps selection table-scoped and refreshes
   await bulkRequest;
   await latestInvitationRows(await pendingRefresh);
 
+  // Resending runs in the background behind a progress dialog.
+  const counts = page.locator("[data-mail-progress-counts]");
+  await expect(counts).toContainText(/\d+ of 2 invitations? sent/);
+  const continueButton = page.locator("[data-mail-progress-continue]");
+  await expect(continueButton).toBeEnabled({ timeout: 120_000 });
+  await continueButton.click();
   await expect(pending.getByText("Resent 2 invitation(s)")).toBeVisible();
   await expect(rowByInvitationId(pending, primaryId).locator("td").nth(8)).toHaveText("1");
   await expect(rowByInvitationId(pending, secondaryId).locator("td").nth(8)).toHaveText("1");

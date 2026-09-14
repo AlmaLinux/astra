@@ -1,4 +1,5 @@
 import type { ElectionsPagination } from "../elections/types";
+import type { MailProgressResponse } from "../mail-progress/types";
 
 export interface ElectionWinnerItem {
   username: string;
@@ -163,24 +164,8 @@ export interface ElectionStartPreviewResponse {
   start_preview?: ElectionStartPreview | null;
 }
 
-export type ElectionStartProgressState = "running" | "done" | "failed" | "stalled";
-
-export interface ElectionStartProgress {
-  state: ElectionStartProgressState;
-  total: number;
-  processed: number;
-  emailed: number;
-  skipped: number;
-  failures: number;
-  message: string;
-  updated_at: number;
-}
-
-export interface ElectionStartResponse {
-  ok: boolean;
-  errors?: string[];
+export interface ElectionStartResponse extends MailProgressResponse {
   election?: { status: string; auto_start_enabled: boolean };
-  start_progress?: ElectionStartProgress | null;
 }
 
 export interface ElectionTallyActionBootstrap {
@@ -192,6 +177,7 @@ export interface ElectionCredentialResendBootstrap {
   sendMailCredentialsApiUrl: string;
   credentialEmailTemplateApiUrl: string;
   credentialEmailPreviewUrl: string;
+  reminderProgressApiUrl: string;
   electionStatus: string;
   eligibleUsernames: string[];
 }
@@ -217,6 +203,7 @@ export interface EligibleVotersBootstrap {
   sendMailCredentialsApiUrl: string | null;
   credentialEmailTemplateApiUrl: string | null;
   credentialEmailPreviewUrl: string | null;
+  reminderProgressApiUrl: string | null;
 }
 
 export interface ElectionVoterSearchBootstrap {
@@ -309,7 +296,8 @@ export function readElectionCredentialResendBootstrap(root: HTMLElement): Electi
   const sendMailCredentialsApiUrl = String(root.dataset.electionSendMailCredentialsApiUrl || "").trim();
   const credentialEmailTemplateApiUrl = String(root.dataset.electionCredentialEmailTemplateApiUrl || "").trim();
   const credentialEmailPreviewUrl = String(root.dataset.electionEmailRenderPreviewUrl || "").trim();
-  if (!sendMailCredentialsApiUrl || !credentialEmailTemplateApiUrl || !credentialEmailPreviewUrl) {
+  const reminderProgressApiUrl = String(root.dataset.electionReminderProgressApiUrl || "").trim();
+  if (!sendMailCredentialsApiUrl || !credentialEmailTemplateApiUrl || !credentialEmailPreviewUrl || !reminderProgressApiUrl) {
     return null;
   }
 
@@ -330,6 +318,7 @@ export function readElectionCredentialResendBootstrap(root: HTMLElement): Electi
     sendMailCredentialsApiUrl,
     credentialEmailTemplateApiUrl,
     credentialEmailPreviewUrl,
+    reminderProgressApiUrl,
     electionStatus: String(root.dataset.electionStatus || "open").trim(),
     eligibleUsernames,
   };
@@ -377,7 +366,16 @@ export function readEligibleVotersBootstrap(root: HTMLElement): EligibleVotersBo
   const sendMailCredentialsApiUrl = String(root.dataset.electionSendMailCredentialsApiUrl || "").trim() || null;
   const credentialEmailTemplateApiUrl = String(root.dataset.electionCredentialEmailTemplateApiUrl || "").trim() || null;
   const credentialEmailPreviewUrl = String(root.dataset.electionEmailRenderPreviewUrl || "").trim() || null;
-  return { eligibleVotersApiUrl, ineligibleVotersApiUrl, electionStatus, sendMailCredentialsApiUrl, credentialEmailTemplateApiUrl, credentialEmailPreviewUrl };
+  const reminderProgressApiUrl = String(root.dataset.electionReminderProgressApiUrl || "").trim() || null;
+  return {
+    eligibleVotersApiUrl,
+    ineligibleVotersApiUrl,
+    electionStatus,
+    sendMailCredentialsApiUrl,
+    credentialEmailTemplateApiUrl,
+    credentialEmailPreviewUrl,
+    reminderProgressApiUrl,
+  };
 }
 
 export function readElectionVoterSearchBootstrap(root: HTMLElement): ElectionVoterSearchBootstrap | null {

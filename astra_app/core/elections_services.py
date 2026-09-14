@@ -4,7 +4,6 @@ import logging
 import secrets
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from itertools import batched
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -36,6 +35,7 @@ from core.forms_elections import is_self_nomination
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.logging_extras import current_exception_log_fields
+from core.mail_delivery import MailDelivery, deliver_in_batches
 from core.models import (
     AuditLogEntry,
     Ballot,
@@ -45,7 +45,7 @@ from core.models import (
     VotingCredential,
 )
 from core.public_urls import build_public_absolute_url
-from core.templated_email import bulk_save_emails, queue_composed_email, queue_templated_email
+from core.templated_email import queue_composed_email, queue_templated_email
 from core.tokens import election_chain_next_hash, election_genesis_chain_hash
 
 ELECTION_TALLY_ALGORITHM_NAME = "Meek STV (High-Precision Variant)"
@@ -1106,25 +1106,6 @@ class ElectionStartPreview:
     eligible_voter_count: int
 
 
-@dataclass(frozen=True, slots=True)
-class ElectionStartDelivery:
-    """Running totals for credential email delivery during an election start."""
-
-    total: int = 0
-    processed: int = 0
-    emailed: int = 0
-    skipped: int = 0
-    failures: int = 0
-
-
-# Credential emails are rendered and persisted in batches so that delivery
-# progress is observable (and memory bounded) for a large electorate. Progress
-# is reported once per batch, so this also sets how finely the operator's
-# progress bar advances -- it can never be finer than what has actually been
-# written to the mail queue.
-ELECTION_START_EMAIL_BATCH_SIZE = 10
-
-
 def election_start_preview(*, election: Election) -> ElectionStartPreview:
     """Summarize an election for the start confirmation dialog.
 
@@ -1244,93 +1225,121 @@ def open_election_for_start(*, election_id: int, scheduled: bool = True) -> Elec
     return ElectionStartOpenResult(status="opened", credential_count=len(credentials), opened_at=now)
 
 
+@dataclass(frozen=True, slots=True)
+class ElectionEmailRecipient:
+    """One resolved recipient of an election email."""
+
+    username: str
+    email: str
+    credential_public_id: str = ""
+    tz_name: str | None = None
+
+
+def resolve_election_email_recipients(
+    *,
+    targets: Sequence[VotingCredential] | Sequence[object],
+) -> tuple[list[ElectionEmailRecipient], int]:
+    """Resolve FreeIPA accounts and addresses for credential-shaped targets.
+
+    Returns the deliverable recipients and how many targets were skipped for
+    lacking a resolvable account or email address.
+    """
+    usernames = [
+        str(target.freeipa_username or "").strip()
+        for target in targets
+        if str(target.freeipa_username or "").strip()
+    ]
+    # Pre-warm individual FreeIPA user cache entries from the all-users list so
+    # that the per-voter get() calls below are instant cache hits instead of N
+    # individual IPA RPC calls.
+    FreeIPAUser.warm_user_cache(usernames)
+
+    recipients: list[ElectionEmailRecipient] = []
+    skipped = 0
+    for target in targets:
+        username = str(target.freeipa_username or "").strip()
+        if not username:
+            skipped += 1
+            continue
+        try:
+            user = FreeIPAUser.get(username, respect_privacy=False)
+        except Exception:
+            logger.exception("election email: user lookup failed username=%s", username)
+            user = None
+        if user is None or not user.email:
+            skipped += 1
+            continue
+        recipients.append(
+            ElectionEmailRecipient(
+                username=username,
+                email=user.email,
+                credential_public_id=str(target.public_id or ""),
+                tz_name=_get_freeipa_timezone_name(user),
+            )
+        )
+    return recipients, skipped
+
+
+def deliver_election_emails(
+    *,
+    election: Election,
+    recipients: Sequence[ElectionEmailRecipient],
+    request: HttpRequest | None = None,
+    subject_template: str | None = None,
+    html_template: str | None = None,
+    text_template: str | None = None,
+    include_credentials: bool = True,
+    skipped: int = 0,
+    on_progress: Callable[[MailDelivery], None] | None = None,
+) -> MailDelivery:
+    """Render and queue one personalized election email per recipient."""
+
+    def prepare(recipient: ElectionEmailRecipient) -> Email | None:
+        return send_voting_credential_email(
+            request=request,
+            election=election,
+            username=recipient.username,
+            email=recipient.email,
+            credential_public_id=recipient.credential_public_id if include_credentials else "",
+            tz_name=recipient.tz_name,
+            subject_template=subject_template,
+            html_template=html_template,
+            text_template=text_template,
+            include_credentials=include_credentials,
+            commit=False,
+        )
+
+    return deliver_in_batches(
+        items=recipients,
+        prepare=prepare,
+        skipped=skipped,
+        on_progress=on_progress,
+    )
+
+
 def deliver_start_credential_emails(
     *,
     election: Election,
     credentials: Sequence[VotingCredential],
     request: HttpRequest | None = None,
-    on_progress: Callable[[ElectionStartDelivery], None] | None = None,
-) -> ElectionStartDelivery:
-    """Queue one voting credential email per issued credential.
-
-    Voters without a resolvable FreeIPA account or email address are skipped and
-    rendering errors are counted as failures, so a few bad addresses never abort
-    a start; the operator re-sends those from the election page afterwards.
-    """
-    total = len(credentials)
-    processed = 0
-    emailed = 0
-    skipped = 0
-    failures = 0
-
-    # Pre-warm individual FreeIPA user cache entries from the all-users list so
-    # that the per-voter get() calls below are instant cache hits instead of N
-    # individual IPA RPC calls.
-    FreeIPAUser.warm_user_cache(
-        [str(credential.freeipa_username or "").strip() for credential in credentials if credential.freeipa_username]
-    )
-
+    on_progress: Callable[[MailDelivery], None] | None = None,
+) -> MailDelivery:
+    """Queue one voting credential email per issued credential."""
+    recipients, skipped = resolve_election_email_recipients(targets=credentials)
     use_snapshot = bool(
         election.voting_email_subject.strip()
         or election.voting_email_html.strip()
         or election.voting_email_text.strip()
     )
-
-    for batch in batched(credentials, ELECTION_START_EMAIL_BATCH_SIZE):
-        pending_emails: list[Email] = []
-        for credential in batch:
-            processed += 1
-            username = str(credential.freeipa_username or "").strip()
-            if not username:
-                skipped += 1
-                continue
-            try:
-                user = FreeIPAUser.get(username, respect_privacy=False)
-                if user is None or not user.email:
-                    skipped += 1
-                    continue
-                queued = send_voting_credential_email(
-                    request=request,
-                    election=election,
-                    username=username,
-                    email=user.email,
-                    credential_public_id=str(credential.public_id),
-                    tz_name=_get_freeipa_timezone_name(user),
-                    subject_template=election.voting_email_subject if use_snapshot else None,
-                    html_template=election.voting_email_html if use_snapshot else None,
-                    text_template=election.voting_email_text if use_snapshot else None,
-                    commit=False,
-                )
-            except Exception:
-                logger.exception(
-                    "election start: credential email failed election_id=%s username=%s",
-                    election.id,
-                    username,
-                )
-                failures += 1
-                continue
-            if queued is not None:
-                pending_emails.append(queued)
-            emailed += 1
-
-        bulk_save_emails(pending_emails)
-        if on_progress is not None:
-            on_progress(
-                ElectionStartDelivery(
-                    total=total,
-                    processed=processed,
-                    emailed=emailed,
-                    skipped=skipped,
-                    failures=failures,
-                )
-            )
-
-    return ElectionStartDelivery(
-        total=total,
-        processed=processed,
-        emailed=emailed,
+    return deliver_election_emails(
+        election=election,
+        recipients=recipients,
+        request=request,
+        subject_template=election.voting_email_subject if use_snapshot else None,
+        html_template=election.voting_email_html if use_snapshot else None,
+        text_template=election.voting_email_text if use_snapshot else None,
         skipped=skipped,
-        failures=failures,
+        on_progress=on_progress,
     )
 
 
@@ -1340,8 +1349,8 @@ def complete_election_start(
     scheduled: bool,
     opened_at: datetime.datetime,
     actor: str = "",
-    on_progress: Callable[[ElectionStartDelivery], None] | None = None,
-) -> ElectionStartDelivery:
+    on_progress: Callable[[MailDelivery], None] | None = None,
+) -> MailDelivery:
     """Deliver credential emails for a just-opened election and record the start.
 
     Runs outside the opening transaction so delivery progress is visible to

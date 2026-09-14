@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { readElectionsResetState } from "./resetState";
 
@@ -41,6 +41,16 @@ async function selectUserFromSelect2(page: Page, fieldName: string, username: st
   await result.click();
 
   await expect(select).toHaveValue(username);
+}
+
+/** Wait out the background email run behind the progress dialog and dismiss it. */
+async function expectMailProgressToComplete(controls: Locator): Promise<void> {
+  const counts = controls.locator("[data-mail-progress-counts]");
+  await expect(counts).toContainText(/\d+ of \d+ credential emails? sent/);
+  const continueButton = controls.locator("[data-mail-progress-continue]");
+  await expect(continueButton).toBeEnabled({ timeout: 300_000 });
+  await continueButton.click();
+  await expect(counts).toHaveCount(0);
 }
 
 test.describe.configure({ mode: "serial" });
@@ -116,7 +126,7 @@ test("elections-start-large-electorate-progress reports credential delivery prog
 
   await confirmModal.locator("#start-election-submit").click();
 
-  const counts = page.locator("[data-election-start-progress-counts]");
+  const counts = page.locator("[data-mail-progress-counts]");
   await expect(counts).toBeVisible();
   await expect(counts).toContainText(new RegExp(`\\d+ of ${electorateSize} credential emails sent`));
 
@@ -127,7 +137,7 @@ test("elections-start-large-electorate-progress reports credential delivery prog
   const progressModal = page.locator("[data-election-start-automation-vue-root] .modal").filter({ has: counts });
   await expect(progressModal.locator(".modal-title")).toHaveText("Starting election...");
 
-  const continueButton = page.locator("#start-election-continue");
+  const continueButton = page.locator("[data-mail-progress-continue]");
   await expect(continueButton).toBeEnabled({ timeout: 300_000 });
   await expect(progressModal.locator(".modal-title")).toHaveText("Election started");
   await expect(progressModal.locator(".progress-bar")).toHaveText("100%");
@@ -279,7 +289,7 @@ test("elections-email-open-reminder sends a credential reminder to one user and 
   await expect(modal).not.toBeVisible();
   await expect(controls.locator("[role='status']")).toBeVisible();
 
-  // --- Send to all ---
+  // --- Send to all, which reports delivery progress ---
   await allButton.click();
   await expect(modal).toBeVisible();
   await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send credential reminder to all");
@@ -294,8 +304,44 @@ test("elections-email-open-reminder sends a credential reminder to one user and 
   expect(allPayload.ok).toBe(true);
   expect(allPayload.recipient_count).toBeGreaterThanOrEqual(2);
 
-  await expect(modal).not.toBeVisible();
+  await expectMailProgressToComplete(controls);
   await expect(controls.locator("[role='status']")).toBeVisible();
+});
+
+// As an election operator, reminding a large electorate reports the same delivery progress a start does.
+test("elections-remind-large-electorate-progress reports reminder delivery progress to completion", async ({ page }) => {
+  const manager = resetState.actors.manager;
+  const electorateSize = resetState.large_electorate_size;
+
+  await loginViaForm(page, manager.username, manager.password);
+  await page.goto(resetState.routes.detail_large_start);
+
+  await expandEligibleVotersCard(page);
+
+  const controls = page.locator("[data-election-credential-resend-vue-root]");
+  const allButton = controls.getByTestId("send-reminder-all");
+  await allButton.click();
+
+  const composeModal = controls.locator(".modal.d-block");
+  await expect(composeModal.locator("> .modal-dialog .modal-title").first())
+    .toContainText(`Send credential reminder to all ${electorateSize} eligible voters`);
+  await composeModal.getByTestId("send-credentials-confirm").click();
+
+  const counts = controls.locator("[data-mail-progress-counts]");
+  await expect(counts).toContainText(new RegExp(`\\d+ of ${electorateSize} credential emails sent`));
+  await expect(controls.locator(".modal-title")).toHaveText("Sending credential reminders...");
+
+  // A second click while delivery runs must not start anything again.
+  await expect(allButton).toBeDisabled();
+
+  const continueButton = controls.locator("[data-mail-progress-continue]");
+  await expect(continueButton).toBeEnabled({ timeout: 300_000 });
+  await expect(controls.locator(".modal-title")).toHaveText("Reminders sent");
+  await expect(controls.locator(".progress-bar")).toHaveText("100%");
+  await expect(counts).toContainText(`${electorateSize} of ${electorateSize} credential emails sent`);
+
+  await continueButton.click();
+  await expect(controls.locator("[role='status']")).toContainText(`${electorateSize} recipients`);
 });
 
 // As an election operator, I can send a general email to eligible voters of a closed election.
@@ -355,7 +401,8 @@ test("elections-email-closed-send sends an email to one user and to all eligible
   expect(allPayload.ok).toBe(true);
   expect(allPayload.recipient_count).toBeGreaterThanOrEqual(2);
 
-  await expect(modal).not.toBeVisible();
+  // Emailing everyone runs in the background behind a progress dialog.
+  await expectMailProgressToComplete(controls);
   await expect(controls.locator("[role='status']")).toBeVisible();
 });
 
@@ -416,6 +463,7 @@ test("elections-email-tallied-send sends an email to one user and to all eligibl
   expect(allPayload.ok).toBe(true);
   expect(allPayload.recipient_count).toBeGreaterThanOrEqual(2);
 
-  await expect(modal).not.toBeVisible();
+  // Emailing everyone runs in the background behind a progress dialog.
+  await expectMailProgressToComplete(controls);
   await expect(controls.locator("[role='status']")).toBeVisible();
 });

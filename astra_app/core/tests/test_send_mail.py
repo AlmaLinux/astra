@@ -9,8 +9,10 @@ from django.conf import settings
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
+from core import mail_progress
 from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
 from core.freeipa.user import FreeIPAUser
+from core.mail_progress import MailRunKind, MailRunProgress
 from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL
 from core.views_send_mail import _CSV_SESSION_KEY, _PREVIEW_CONTEXT_SESSION_KEY, SendMailForm, _parse_csv_upload
@@ -45,6 +47,18 @@ class SendMailUrlHelperTests(SimpleTestCase):
         self.assertEqual(query["action_status"], ["approved"])
 
 
+def _run_inline(target, *, name: str) -> None:
+    """Stand-in for the delivery thread so these request tests stay synchronous."""
+    target()
+
+
+def _deliver_send_mail_inline(test_case) -> None:
+    """Run Send Mail delivery on the test connection instead of a worker thread."""
+    patcher = patch("core.mail_progress._spawn", side_effect=_run_inline)
+    patcher.start()
+    test_case.addCleanup(patcher.stop)
+
+
 class SendMailTests(TestCase):
     def _login_as_freeipa_user(self, username: str) -> None:
         session = self.client.session
@@ -58,6 +72,12 @@ class SendMailTests(TestCase):
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
+        _deliver_send_mail_inline(self)
+
+    def _send_mail_progress(self) -> MailRunProgress:
+        progress = mail_progress.read(scope="reviewer", kind=MailRunKind.send_mail)
+        self.assertIsNotNone(progress)
+        return progress
 
     def _send_mail_initial_payload(self, response) -> dict[str, object]:
         html = response.content.decode("utf-8")
@@ -518,7 +538,7 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Queued 1 email")
+        self.assertContains(resp, "Sending 1 email")
         self.assertNotContains(resp, "already been approved")
         self.assertNotContains(resp, "No email has been sent yet")
 
@@ -957,7 +977,7 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Queued 1 email")
+        self.assertContains(response, "Sending 1 email")
 
         updated_session = self.client.session
         self.assertNotIn(_CSV_SESSION_KEY, updated_session)
@@ -1551,8 +1571,9 @@ class SendMailTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Queued 1 email")
+        self.assertContains(resp, "Sending 1 email")
         self.assertNotContains(resp, "Failed to queue")
+        self.assertEqual(self._send_mail_progress().failures, 0)
         self.assertNotContains(resp, "Template error")
 
     def test_send_uses_ssot_queue_helper_with_best_effort_partial_failure(self) -> None:
@@ -1595,8 +1616,12 @@ class SendMailTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(queue_mock.call_count, 2)
-        self.assertContains(resp, "Queued 1 email")
-        self.assertContains(resp, "Failed to queue 1 email")
+        # Both recipients were attempted; the failure is reported by the run,
+        # which the operator watches instead of reading a flashed summary.
+        self.assertContains(resp, "Sending 2 emails")
+        progress = self._send_mail_progress()
+        self.assertEqual(progress.emailed, 1)
+        self.assertEqual(progress.failures, 1)
 
     def test_send_mail_org_claim_action_creates_account_invitation_on_send(self) -> None:
         from types import SimpleNamespace
@@ -1868,6 +1893,7 @@ class UnifiedEmailPreviewSendMailTests(TestCase):
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,
             principal_name=settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
         )
+        _deliver_send_mail_inline(self)
 
     def test_unified_preview_requires_loaded_recipients(self) -> None:
         self._login_as_freeipa_user("reviewer")

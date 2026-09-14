@@ -1415,7 +1415,11 @@ class ElectionsApiTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+            patch(
+                "core.views_elections.lifecycle.elections_services.send_voting_credential_email",
+                autospec=True,
+                return_value=None,
+            ) as send_mock,
         ):
             response = self.client.post(
                 reverse("api-election-send-mail-credentials", args=[election.id]),
@@ -1485,10 +1489,14 @@ class ElectionsApiTests(TestCase):
                 {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []},
             )
 
+        def _run_inline(target, *, name: str) -> None:
+            target()
+
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.mail_progress._spawn", side_effect=_run_inline),
             patch(
-                "core.views_elections.lifecycle.elections_services.send_voting_credential_email",
+                "core.elections_services.send_voting_credential_email",
                 autospec=True,
                 side_effect=[None, RuntimeError("queue failed")],
             ) as send_mock,
@@ -1499,16 +1507,20 @@ class ElectionsApiTests(TestCase):
                 content_type="application/json",
             )
 
+        # Reminding every voter runs in the background, so the response hands
+        # back a progress record instead of a final tally.
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
         self.assertTrue(payload["ok"])
-        self.assertEqual(
-            payload["message"],
-            "Queued voting credential email for 1 recipient. Failed to queue 1 email.",
-        )
-        self.assertEqual(payload["recipient_count"], 1)
-        self.assertEqual(payload["errors"], ["Failed to queue 1 email."])
+        self.assertEqual(payload["message"], "Sending voting credential emails to 2 recipients.")
+        self.assertEqual(payload["recipient_count"], 2)
         self.assertEqual(send_mock.call_count, 2)
+
+        progress = payload["mail_progress"]
+        self.assertEqual(progress["state"], "done")
+        self.assertEqual(progress["total"], 2)
+        self.assertEqual(progress["emailed"], 1)
+        self.assertEqual(progress["failures"], 1)
 
     @override_settings(
         ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_LIMIT=1,
@@ -1643,7 +1655,11 @@ class ElectionsApiTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+            patch(
+                "core.views_elections.lifecycle.elections_services.send_voting_credential_email",
+                autospec=True,
+                return_value=None,
+            ) as send_mock,
         ):
             response = self.client.post(
                 reverse("api-election-send-mail-credentials", args=[election.id]),

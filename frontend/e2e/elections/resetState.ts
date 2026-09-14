@@ -46,6 +46,7 @@ export type ElectionsResetState = {
     closed_detail: string;
     edit_draft: string;
     edit_large_start: string;
+    detail_large_start: string;
     open_detail: string;
     open_vote: string;
     tallied_detail: string;

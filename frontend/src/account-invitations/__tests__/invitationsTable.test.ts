@@ -11,6 +11,7 @@ const bootstrap: AccountInvitationsBootstrap = {
   resendApiUrl: "/api/v1/account/invitations/123456789/resend",
   dismissApiUrl: "/api/v1/account/invitations/123456789/dismiss",
   bulkApiUrl: "/api/v1/account/invitations/bulk",
+  mailProgressApiUrl: "/api/v1/mail-progress?kind=invitation_resend",
   listPageUrl: "/account/invitations/",
   pageSize: 50,
   canManageInvitations: true,
@@ -219,6 +220,42 @@ describe("InvitationsTable", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("Dismissed 1 invitation(s)");
+  });
+
+  it("follows the background run when resending invitations in bulk", async () => {
+    const running = {
+      state: "running" as const,
+      total: 40, processed: 10, emailed: 10, skipped: 0, failures: 0, message: "", updated_at: 0,
+    };
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ ok: true, message: "Resending 40 invitation(s)", mail_progress: running }),
+      { status: 200 },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(InvitationsTable, {
+      props: {
+        bootstrap,
+        rows: [row],
+        count: 1,
+        currentPage: 1,
+        totalPages: 1,
+        isLoading: false,
+        error: null,
+        scope: "pending",
+        buildPageHref: (page: number) => `?page=${page}`,
+      },
+    });
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="10"]').setValue(true);
+    await wrapper.get('select[name="bulk_action"]').setValue("resend");
+    await wrapper.get("form#bulk-invitations-pending-form").trigger("submit");
+    await new Promise((resolve) => { setTimeout(resolve, 20); });
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(wrapper.get(".modal-title").text()).toBe("Resending invitations...");
+    expect(wrapper.get("[data-mail-progress-counts]").text()).toContain("10 of 40");
   });
 
   it("submits the accepted bulk action as JSON with scope and selected ids", async () => {

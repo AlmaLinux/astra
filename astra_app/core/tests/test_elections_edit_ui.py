@@ -236,7 +236,7 @@ class ElectionEditPermissionTests(_CoreCategoriesTestCase):
         self.assertContains(resp, "data-election-start-automation-root")
         self.assertContains(resp, reverse("api-election-start", args=[election.id]))
         self.assertContains(resp, reverse("api-election-start-preview", args=[election.id]))
-        self.assertContains(resp, reverse("api-election-start-progress", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-mail-progress", args=[election.id]))
 
 
 class ElectionDraftDeletionTests(_CoreCategoriesTestCase):

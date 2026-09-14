@@ -116,9 +116,17 @@ const bootstrap: SendMailBootstrap = {
   apiUrl: "/api/v1/email-tools/send-mail/detail",
   submitUrl: "/email-tools/send-mail/",
   previewUrl: "/email-tools/send-mail/render-preview/",
+  mailProgressApiUrl: "/api/v1/mail-progress?kind=send_mail",
+  mailProgressAckApiUrl: "/api/v1/mail-progress/ack",
   csrfToken: "csrf-token",
   initialPayload,
 };
+
+function flushPromises(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 20);
+  });
+}
 
 describe("SendMailPage", () => {
   afterEach(() => {
@@ -190,5 +198,48 @@ describe("SendMailPage", () => {
     const selectedTemplate = wrapper.get('select[name="email_template_id"] option:checked');
     expect(selectedTemplate.element).toHaveProperty("value", "32");
     expect(selectedTemplate.text()).toBe("New Send Mail Template");
+  });
+
+  it("adopts a delivery already running for this operator and reports its progress", async () => {
+    const running = {
+      state: "running" as const,
+      total: 1200, processed: 300, emailed: 298, skipped: 2, failures: 0, message: "", updated_at: 0,
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, mail_progress: running }), { status: 200 })));
+
+    const wrapper = mount(SendMailPage, { props: { bootstrap } });
+    await flushPromises();
+
+    expect(wrapper.get(".modal-title").text()).toBe("Sending emails...");
+    expect(wrapper.get("[data-mail-progress-counts]").text()).toContain("300 of 1200 emails sent");
+    expect(wrapper.get("[data-mail-progress-counts]").text()).toContain("2 skipped");
+  });
+
+  it("shows no progress dialog when the operator has no run in flight", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, mail_progress: null }), { status: 200 })));
+
+    const wrapper = mount(SendMailPage, { props: { bootstrap } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-mail-progress-counts]").exists()).toBe(false);
+  });
+
+  it("acknowledges a finished run so it stops being reported", async () => {
+    const done = {
+      state: "done" as const,
+      total: 1200, processed: 1200, emailed: 1200, skipped: 0, failures: 0, message: "", updated_at: 0,
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, mail_progress: done }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(SendMailPage, { props: { bootstrap } });
+    await flushPromises();
+
+    expect(wrapper.get(".modal-title").text()).toBe("Emails sent");
+    await wrapper.get("[data-mail-progress-continue]").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("[data-mail-progress-counts]").exists()).toBe(false);
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("mail-progress/ack"))).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 
 import datetime
+from collections.abc import Callable
 from unittest.mock import ANY, patch
 
 from django.conf import settings
@@ -10,10 +11,17 @@ from django.urls import reverse
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
+from core import mail_progress
 from core.freeipa.user import FreeIPAUser
+from core.mail_progress import MailRunKind
 from core.models import Candidate, Election, FreeIPAPermissionGrant, Membership, MembershipType, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.utils_test_data import ensure_core_categories
+
+
+def _run_inline(target: Callable[[], None], *, name: str) -> None:
+    """Stand-in for the delivery thread so these request tests stay synchronous."""
+    target()
 
 
 class _CoreCategoriesTestCase(TestCase):
@@ -207,7 +215,12 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+            patch("core.mail_progress._spawn", side_effect=_run_inline),
+            patch(
+                "core.views_elections.lifecycle.elections_services.send_voting_credential_email",
+                autospec=True,
+                return_value=None,
+            ) as send_mock,
         ):
             resp = self.client.post(
                 reverse("election-send-mail-credentials", args=[election.id]),
@@ -219,7 +232,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
         flashed = list(get_messages(resp.wsgi_request))
         self.assertEqual(
             [(message.level, message.message) for message in flashed],
-            [(message_constants.SUCCESS, "Queued voting credential email for 1 recipient.")],
+            [(message_constants.SUCCESS, "Sending voting credential emails to 1 recipients.")],
         )
         send_mock.assert_called_once_with(
             request=ANY,
@@ -285,7 +298,11 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+            patch(
+                "core.views_elections.lifecycle.elections_services.send_voting_credential_email",
+                autospec=True,
+                return_value=None,
+            ) as send_mock,
         ):
             resp = self.client.post(
                 reverse("election-send-mail-credentials", args=[election.id]),
@@ -363,6 +380,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.mail_progress._spawn", side_effect=_run_inline),
             patch(
                 "core.views_elections.lifecycle.elections_services.send_voting_credential_email",
                 autospec=True,
@@ -377,14 +395,16 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.request["PATH_INFO"], reverse("election-detail", args=[election.id]))
         flashed = list(get_messages(resp.wsgi_request))
+        # Delivery outcomes for a whole electorate are reported through the
+        # progress record the operator polls, not through flashed messages.
         self.assertEqual(
             [(message.level, message.message) for message in flashed],
-            [
-                (message_constants.SUCCESS, "Queued voting credential email for 1 recipient."),
-                (message_constants.ERROR, "Failed to queue 1 email."),
-            ],
+            [(message_constants.SUCCESS, "Sending voting credential emails to 2 recipients.")],
         )
         self.assertEqual(send_mock.call_count, 2)
+        progress = mail_progress.read(scope=str(election.id), kind=MailRunKind.election_reminder)
+        self.assertEqual(progress.emailed, 1)
+        self.assertEqual(progress.failures, 1)
 
     def test_conclude_requires_confirmation(self) -> None:
         self._login_as_freeipa_user("viewer")
@@ -659,7 +679,11 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
-            patch("core.views_elections.lifecycle.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+            patch(
+                "core.views_elections.lifecycle.elections_services.send_voting_credential_email",
+                autospec=True,
+                return_value=None,
+            ) as send_mock,
         ):
             resp = self.client.post(
                 reverse("election-send-mail-credentials", args=[election.id]),

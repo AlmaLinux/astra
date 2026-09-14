@@ -132,6 +132,7 @@ declare -A SCENARIO_THEME_NAMES=(
   ["elections-vote-ineligible-state"]="$ELECTIONS_THEME"
   ["elections-detail-operator-actions"]="$ELECTIONS_THEME"
   ["elections-start-large-electorate-progress"]="$ELECTIONS_THEME"
+  ["elections-remind-large-electorate-progress"]="$ELECTIONS_THEME"
   ["elections-turnout-report-shell"]="$ELECTIONS_THEME"
   ["elections-audit-log-finished-shell"]="$ELECTIONS_THEME"
   ["elections-ballot-verify-closed-public-state"]="$ELECTIONS_THEME"
@@ -253,6 +254,7 @@ Scenarios:
   elections-vote-ineligible-state
   elections-detail-operator-actions
   elections-start-large-electorate-progress
+  elections-remind-large-electorate-progress
   elections-turnout-report-shell
   elections-audit-log-finished-shell
   elections-ballot-verify-closed-public-state

@@ -296,6 +296,8 @@ export interface SendMailBootstrap {
   apiUrl: string;
   submitUrl: string;
   previewUrl: string;
+  mailProgressApiUrl: string;
+  mailProgressAckApiUrl: string;
   csrfToken: string;
   initialPayload: SendMailPayload | null;
 }
@@ -505,6 +507,8 @@ export function readSendMailBootstrap(root: HTMLElement): SendMailBootstrap | nu
   const apiUrl = String(root.dataset.sendMailApiUrl || "").trim();
   const submitUrl = String(root.dataset.sendMailSubmitUrl || "").trim();
   const previewUrl = String(root.dataset.sendMailPreviewUrl || "").trim();
+  const mailProgressApiUrl = String(root.dataset.sendMailProgressApiUrl || "").trim();
+  const mailProgressAckApiUrl = String(root.dataset.sendMailProgressAckApiUrl || "").trim();
   const csrfToken = String(root.dataset.sendMailCsrfToken || "").trim();
   const initialPayloadRaw = parseJsonScript<SendMailApiPayload>(root, "#send-mail-initial-payload");
   const initialPayload = initialPayloadRaw === null ? null : normalizeSendMailPayload(initialPayloadRaw);
@@ -517,6 +521,8 @@ export function readSendMailBootstrap(root: HTMLElement): SendMailBootstrap | nu
     apiUrl,
     submitUrl,
     previewUrl,
+    mailProgressApiUrl,
+    mailProgressAckApiUrl,
     csrfToken,
     initialPayload,
   };

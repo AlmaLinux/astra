@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import MailProgressModal from "../../mail-progress/MailProgressModal.vue";
+import type { MailProgress } from "../../mail-progress/types";
+import { useMailProgress } from "../../mail-progress/useMailProgress";
 import TableBase from "../../shared/components/TableBase.vue";
 import type { AccountInvitationRow, AccountInvitationsBootstrap } from "../types";
 import { formatDateTime } from "../types";
@@ -33,6 +36,19 @@ const emit = defineEmits<{
 
 const isProcessing = ref(false);
 const bulkError = ref("");
+const { progress, percent, finished, failed, track, reset: resetProgress } = useMailProgress(
+  props.bootstrap.mailProgressApiUrl,
+  () => finishProgress(),
+);
+
+function finishProgress(): void {
+  const current = progress.value;
+  if (current !== null) {
+    bulkSuccess.value = `Resent ${current.emailed} invitation(s)`;
+  }
+  resetProgress();
+  emit("bulk-success");
+}
 const actionError = ref("");
 const bulkSuccess = ref("");
 const actionSuccess = ref("");
@@ -190,7 +206,14 @@ async function handleBulkAction(payload: BulkSubmitPayload): Promise<void> {
     }
 
     if (payload.action === "resend") {
-      bulkSuccess.value = `Resent ${payload.selectedIds.length} invitation(s)`;
+      // Resending queues one email per invitation in the background; follow that
+      // run rather than claiming a result that has not happened yet.
+      const data = (await response.json()) as { mail_progress?: MailProgress | null };
+      if (data.mail_progress != null) {
+        track(data.mail_progress);
+      } else {
+        bulkSuccess.value = `Resent ${payload.selectedIds.length} invitation(s)`;
+      }
     } else {
       bulkSuccess.value = `Dismissed ${payload.selectedIds.length} invitation(s)`;
     }
@@ -205,6 +228,21 @@ async function handleBulkAction(payload: BulkSubmitPayload): Promise<void> {
 </script>
 
 <template>
+  <MailProgressModal
+    v-if="progress"
+    :progress="progress"
+    :percent="percent"
+    :finished="finished"
+    :failed="failed"
+    running-title="Resending invitations..."
+    finished-title="Invitations resent"
+    description="Each selected invitation is being emailed again — this can take a few minutes."
+    continue-label="Done"
+    unit-singular="invitation"
+    unit-plural="invitations"
+    @continue="finishProgress"
+  />
+
   <TableBase
     :rows="rows"
     :count="count"

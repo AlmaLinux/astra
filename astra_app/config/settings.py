@@ -1044,6 +1044,10 @@ CACHES = {
         'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
         'LOCATION': 'astra_cache',
         'TIMEOUT': 300 if DEBUG else 3600,
+        # Django's 300-entry default culls a third of the table on every write
+        # once it is reached, which can evict long-lived rows such as bulk email
+        # progress records while the run they describe is still going.
+        'OPTIONS': {'MAX_ENTRIES': _env_int('CACHE_MAX_ENTRIES', default=2000)},
     }
 }
 

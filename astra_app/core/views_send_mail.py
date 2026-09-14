@@ -3,7 +3,7 @@ import io
 import json
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -20,17 +20,19 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from post_office.models import Email, EmailTemplate
 
+from core import mail_progress
 from core.email_context import system_email_context, user_email_context_from_user
 from core.forms_base import StyledForm
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
+from core.mail_delivery import MailDelivery, deliver_in_batches
+from core.mail_progress import MailRunKind
 from core.membership_notes import add_note
 from core.models import MembershipRequest, Organization
 from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
 from core.rate_limit import allow_request
 from core.templated_email import (
-    bulk_save_emails,
     execute_email_template_save,
     preview_drop_inline_image_tags,
     preview_rewrite_inline_image_tags_to_urls,
@@ -1166,83 +1168,85 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                     elif membership_request is not None:
                         email_kind = "custom"
 
-                    sent = 0
-                    failures = 0
-                    first_template_error: Exception | None = None
-                    pending_emails: list[Email] = []
-                    # Track emails that need a membership-request note after bulk insert.
+                    deliverable = [
+                        recipient for recipient in recipients if str(recipient.get("email") or "").strip()
+                    ]
+                    skipped = len(recipients) - len(deliverable)
+                    # Emails that need a membership-request note once they have ids.
                     deferred_note_emails: list[object] = []
-                    for recipient in recipients:
-                        to_email = str(recipient.get("email") or "").strip()
-                        if not to_email:
-                            continue
-                        try:
-                            queued_email = queue_composed_email(
-                                recipients=[to_email],
-                                sender=settings.DEFAULT_FROM_EMAIL,
-                                subject_source=subject,
-                                text_source=text_content,
-                                html_source=html_content,
-                                context=recipient,
-                                cc=cc,
-                                bcc=bcc,
-                                reply_to=reply_to,
-                                commit=False,
-                            )
 
-                            raw_election_id = recipient.get("election_id")
-                            if raw_election_id is not None:
-                                try:
-                                    queued_email.context = {"election_id": int(raw_election_id)}
-                                except (TypeError, ValueError):
-                                    pass
+                    def _prepare(recipient: dict[str, str]) -> Email | None:
+                        queued_email = queue_composed_email(
+                            recipients=[str(recipient.get("email") or "").strip()],
+                            sender=settings.DEFAULT_FROM_EMAIL,
+                            subject_source=subject,
+                            text_source=text_content,
+                            html_source=html_content,
+                            context=recipient,
+                            cc=cc,
+                            bcc=bcc,
+                            reply_to=reply_to,
+                            commit=False,
+                        )
 
-                            if isinstance(queued_email, Email):
-                                pending_emails.append(queued_email)
-                            sent += 1
+                        raw_election_id = recipient.get("election_id")
+                        if raw_election_id is not None:
+                            try:
+                                queued_email.context = {"election_id": int(raw_election_id)}
+                            except (TypeError, ValueError):
+                                pass
 
-                            if membership_request is not None:
-                                deferred_note_emails.append(queued_email)
-                        except Exception as exc:
-                            if first_template_error is None:
-                                first_template_error = exc
-                            failures += 1
-                            logger.exception(
-                                "Send mail failed email=%s",
-                                to_email,
-                                extra=current_exception_log_fields(),
-                            )
+                        if membership_request is not None:
+                            deferred_note_emails.append(queued_email)
+                        return queued_email if isinstance(queued_email, Email) else None
 
-                    bulk_save_emails(pending_emails)
+                    def _add_pending_notes() -> None:
+                        # Notes need the email ids, so they wait for the bulk insert.
+                        for queued_email in deferred_note_emails:
+                            try:
+                                add_note(
+                                    membership_request=membership_request,
+                                    username=get_username(request),
+                                    action={
+                                        "type": "contacted",
+                                        "kind": email_kind,
+                                        "email_id": queued_email.id,
+                                    },
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "Send mail email-note failed membership_request_id=%s",
+                                    raw_request_id,
+                                    extra=current_exception_log_fields(),
+                                )
+                        deferred_note_emails.clear()
 
-                    # Add membership-request notes now that emails have IDs.
-                    for queued_email in deferred_note_emails:
-                        try:
-                            add_note(
-                                membership_request=membership_request,
-                                username=get_username(request),
-                                action={
-                                    "type": "contacted",
-                                    "kind": email_kind,
-                                    "email_id": queued_email.id,
-                                },
-                            )
-                        except Exception:
-                            logger.exception(
-                                "Send mail email-note failed membership_request_id=%s",
-                                raw_request_id,
-                                extra=current_exception_log_fields(),
-                            )
+                    def _deliver(on_progress: Callable[[MailDelivery], None] | None) -> MailDelivery:
+                        delivery = deliver_in_batches(
+                            items=deliverable,
+                            prepare=_prepare,
+                            skipped=skipped,
+                            on_progress=on_progress,
+                        )
+                        _add_pending_notes()
+                        return delivery
 
-                    if first_template_error is not None and sent == 0:
-                        messages.error(request, f"Template error: {first_template_error}")
+                    # Rendering one email per recipient takes minutes for a large
+                    # list, so delivery runs off the request and reports progress
+                    # the operator watches on the next page load.
+                    mail_progress.deliver_in_background(
+                        scope=get_username(request) or "",
+                        kind=MailRunKind.send_mail,
+                        total=len(deliverable) + skipped,
+                        deliver=_deliver,
+                    )
+                    sent = len(deliverable)
+                    failures = 0
 
                     if sent:
                         request.session.pop(_CSV_SESSION_KEY, None)
                         request.session.pop(_PREVIEW_CONTEXT_SESSION_KEY, None)
-                        messages.success(request, f"Queued {sent} email{'s' if sent != 1 else ''}.")
-                    if failures:
-                        messages.error(request, f"Failed to queue {failures} email{'s' if failures != 1 else ''}.")
+                        messages.success(request, f"Sending {sent} email{'s' if sent != 1 else ''}.")
                     if sent or failures:
                         # Clear the reminder once we've queued at least one email.
                         action_notice = ""

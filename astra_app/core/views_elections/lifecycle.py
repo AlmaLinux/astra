@@ -1,6 +1,6 @@
 """Election lifecycle actions: credential re-send, conclude, extend end date."""
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 
 from django.conf import settings
@@ -11,16 +11,15 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonR
 from django.shortcuts import redirect
 from django.urls import reverse_lazy
 from django.views.decorators.http import require_GET, require_POST
-from post_office.models import Email, EmailTemplate
+from post_office.models import EmailTemplate
 
-from core import elections_services, elections_start_progress
+from core import elections_services, mail_progress
 from core.elections_services import ElectionError
-from core.freeipa.user import FreeIPAUser
-from core.ipa_user_attrs import _get_freeipa_timezone_name
+from core.mail_delivery import MailDelivery
+from core.mail_progress import MailRunKind
 from core.models import Election, ElectionRoll, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.rate_limit import allow_request
-from core.templated_email import bulk_save_emails
 from core.views_elections._helpers import (
     CREDENTIAL_EMAIL_SECRET_VARIABLES,
     _election_email_preview_context,
@@ -39,6 +38,8 @@ class ElectionCredentialResendResult:
     recipient_count: int = 0
     success_message: str | None = None
     error_message: str | None = None
+    # True when delivery was handed to a background run the caller should poll.
+    in_progress: bool = False
 
 
 @dataclass(frozen=True)
@@ -143,72 +144,52 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
             for username in eligible_usernames
         ]
 
-    # Pre-warm the FreeIPA user cache so individual .get() calls are cache hits.
-    all_usernames = [
-        str(credential.freeipa_username or "").strip()
-        for credential in credential_list
-        if str(credential.freeipa_username or "").strip()
-    ]
-    FreeIPAUser.warm_user_cache(all_usernames)
-
-    deliveries: list[tuple[str, str, str, str | None]] = []
-    for credential in credential_list:
-        username = str(credential.freeipa_username or "").strip()
-        if not username:
-            continue
-
-        user = FreeIPAUser.get(username, respect_privacy=False)
-        if user is None or not user.email:
-            continue
-
-        tz_name = _get_freeipa_timezone_name(user)
-
-        deliveries.append(
-            (
-                username,
-                user.email,
-                str(credential.public_id),
-                tz_name,
-            )
-        )
-
-    if not deliveries:
+    recipients, skipped = elections_services.resolve_election_email_recipients(targets=credential_list)
+    if not recipients:
         return ElectionCredentialResendResult(
             success=False,
             status_code=400,
             message="No credential recipients are available (missing email addresses?).",
         )
 
-    # Render all emails without committing to the database, then bulk-insert.
-    recipient_count = 0
-    failure_count = 0
-    pending_emails: list[Email] = []
-    for username, email, credential_public_id, tz_name in deliveries:
-        try:
-            email_obj = elections_services.send_voting_credential_email(
-                request=request,
-                election=election,
-                username=username,
-                email=email,
-                credential_public_id=credential_public_id if include_credentials else "",
-                tz_name=tz_name,
-                subject_template=subject_template,
-                html_template=html_template,
-                text_template=text_template,
-                include_credentials=include_credentials,
-                commit=False,
-            )
-            if email_obj is not None and isinstance(email_obj, Email):
-                pending_emails.append(email_obj)
-            recipient_count += 1
-        except Exception:
-            failure_count += 1
+    email_kind = "voting credential email" if include_credentials else "email"
 
-    bulk_save_emails(pending_emails)
+    def deliver(on_progress: Callable[[MailDelivery], None] | None) -> MailDelivery:
+        return elections_services.deliver_election_emails(
+            election=election,
+            recipients=recipients,
+            request=request,
+            subject_template=subject_template,
+            html_template=html_template,
+            text_template=text_template,
+            include_credentials=include_credentials,
+            skipped=skipped,
+            on_progress=on_progress,
+        )
 
-    if recipient_count == 0 and failure_count > 0:
-        failure_label = "email" if failure_count == 1 else "emails"
-        failure_message = f"Failed to queue {failure_count} {failure_label}."
+    # Emailing a whole electorate takes minutes, so it runs off the request and
+    # reports progress; a single recipient is fast enough to answer inline.
+    if not target_username:
+        mail_progress.deliver_in_background(
+            scope=str(election.id),
+            kind=MailRunKind.election_reminder,
+            total=len(recipients) + skipped,
+            deliver=deliver,
+        )
+        in_progress_message = f"Sending {email_kind}s to {len(recipients)} recipients."
+        return ElectionCredentialResendResult(
+            success=True,
+            status_code=200,
+            message=in_progress_message,
+            recipient_count=len(recipients),
+            success_message=in_progress_message,
+            in_progress=True,
+        )
+
+    delivery = deliver(None)
+
+    if delivery.emailed == 0 and delivery.failures > 0:
+        failure_message = _failure_message(delivery.failures)
         return ElectionCredentialResendResult(
             success=False,
             status_code=400,
@@ -216,18 +197,16 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
             error_message=failure_message,
         )
 
-    recipient_label = "recipient" if recipient_count == 1 else "recipients"
-    email_kind = "voting credential email" if include_credentials else "email"
-    success_message = f"Queued {email_kind} for {recipient_count} {recipient_label}."
+    recipient_label = "recipient" if delivery.emailed == 1 else "recipients"
+    success_message = f"Queued {email_kind} for {delivery.emailed} {recipient_label}."
 
-    if failure_count > 0:
-        failure_label = "email" if failure_count == 1 else "emails"
-        failure_message = f"Failed to queue {failure_count} {failure_label}."
+    if delivery.failures > 0:
+        failure_message = _failure_message(delivery.failures)
         return ElectionCredentialResendResult(
             success=True,
             status_code=200,
             message=f"{success_message} {failure_message}",
-            recipient_count=recipient_count,
+            recipient_count=delivery.emailed,
             success_message=success_message,
             error_message=failure_message,
         )
@@ -236,9 +215,14 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
         success=True,
         status_code=200,
         message=success_message,
-        recipient_count=recipient_count,
+        recipient_count=delivery.emailed,
         success_message=success_message,
     )
+
+
+def _failure_message(failure_count: int) -> str:
+    failure_label = "email" if failure_count == 1 else "emails"
+    return f"Failed to queue {failure_count} {failure_label}."
 
 
 @require_POST
@@ -468,12 +452,16 @@ def election_auto_end_api(request: HttpRequest, election_id: int) -> JsonRespons
     )
 
 
+def _mail_progress_payload(*, election_id: int, kind: MailRunKind) -> dict[str, object] | None:
+    progress = mail_progress.read(scope=str(election_id), kind=kind)
+    return asdict(progress) if progress is not None else None
+
+
 def _start_payload(*, election: Election, ok: bool, errors: list[str] | None = None) -> dict[str, object]:
     """Automation payload plus the credential delivery progress, if any."""
-    progress = elections_start_progress.read(election_id=election.id)
     return {
         **_automation_payload(election=election, ok=ok, errors=errors),
-        "start_progress": asdict(progress) if progress is not None else None,
+        "mail_progress": _mail_progress_payload(election_id=election.id, kind=MailRunKind.election_start),
     }
 
 
@@ -507,20 +495,39 @@ def election_start_api(request: HttpRequest, election_id: int) -> JsonResponse:
             status=400,
         )
 
-    elections_start_progress.deliver_in_background(
-        election_id=election_id,
+    opened_at = opened.opened_at
+    actor = get_username(request) or ""
+    mail_progress.deliver_in_background(
+        scope=str(election_id),
+        kind=MailRunKind.election_start,
         total=opened.credential_count,
-        opened_at=opened.opened_at,
-        actor=get_username(request) or "",
+        deliver=lambda report: elections_services.complete_election_start(
+            election_id=election_id,
+            scheduled=False,
+            opened_at=opened_at,
+            actor=actor,
+            on_progress=report,
+        ),
     )
     return JsonResponse(_start_payload(election=election, ok=True))
 
 
 @require_GET
 @json_permission_required(ASTRA_ADD_ELECTION)
-def election_start_progress_api(request: HttpRequest, election_id: int) -> JsonResponse:
-    """Poll target for the credential delivery started by ``election_start_api``."""
-    return JsonResponse(_start_payload(election=_get_active_election(election_id), ok=True))
+def election_mail_progress_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    """Poll target for a bulk election email run started by this operator."""
+    election = _get_active_election(election_id)
+    raw_kind = str(request.GET.get("kind") or MailRunKind.election_start)
+    if raw_kind not in {MailRunKind.election_start, MailRunKind.election_reminder}:
+        return JsonResponse({"ok": False, "errors": ["Unknown email run."]}, status=400)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "election": {"id": election.id, "status": election.status},
+            "mail_progress": _mail_progress_payload(election_id=election.id, kind=MailRunKind(raw_kind)),
+        }
+    )
 
 
 @require_POST
@@ -564,6 +571,13 @@ def election_send_mail_credentials_api(request: HttpRequest, election_id: int) -
                 "recipient_count": result.recipient_count,
             }
         )
+        if result.in_progress:
+            # Delivery runs in the background; hand back the seeded record so the
+            # caller can render a progress bar before its first poll returns.
+            payload["mail_progress"] = _mail_progress_payload(
+                election_id=election.id,
+                kind=MailRunKind.election_reminder,
+            )
         if result.error_message:
             payload["errors"] = [result.error_message]
     else:

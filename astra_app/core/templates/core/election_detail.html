@@ -101,7 +101,7 @@
               data-election-start-automation-root
               data-election-start-api-url="{% url 'api-election-start' election.id %}"
               data-election-start-preview-api-url="{% url 'api-election-start-preview' election.id %}"
-              data-election-start-progress-api-url="{% url 'api-election-start-progress' election.id %}"
+              data-election-start-progress-api-url="{% url 'api-election-mail-progress' election.id %}?kind=start"
               data-election-auto-start-api-url="{% url 'api-election-auto-start' election.id %}"
               data-election-auto-start-enabled="{% if election.auto_start_enabled %}true{% else %}false{% endif %}"
             ></div>
@@ -159,6 +159,7 @@
       {% if can_send_election_email %}data-election-send-mail-credentials-api-url="{% url 'api-election-send-mail-credentials' election.id %}"{% endif %}
       {% if can_send_election_email %}data-election-credential-email-template-api-url="{% url 'api-election-credential-email-template' election.id %}"{% endif %}
       {% if can_send_election_email %}data-election-email-render-preview-url="{% url 'election-email-render-preview' election.id %}"{% endif %}
+      {% if can_send_election_email %}data-election-reminder-progress-api-url="{% url 'api-election-mail-progress' election.id %}?kind=reminder"{% endif %}
     ></div>
   {% endif %}
 {% endblock %}

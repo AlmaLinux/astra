@@ -27,10 +27,10 @@ from core.views_elections.lifecycle import (
     election_conclude_api,
     election_credential_email_template_api,
     election_extend_end_api,
+    election_mail_progress_api,
     election_send_mail_credentials_api,
     election_start_api,
     election_start_preview_api,
-    election_start_progress_api,
     election_tally_api,
 )
 from core.views_elections.reporting import elections_turnout_report_api, elections_turnout_report_detail_api
@@ -54,6 +54,7 @@ from core.views_invitations_api import (
     account_invitations_resend_api,
 )
 from core.views_mail_images import email_images_detail_api
+from core.views_mail_progress import mail_progress_ack_api, mail_progress_api
 from core.views_membership.admin import (
     stats_membership_summary_api,
 )
@@ -183,10 +184,12 @@ urlpatterns = [
         election_start_preview_api,
         name="api-election-start-preview",
     ),
+    path("mail-progress", mail_progress_api, name="api-mail-progress"),
+    path("mail-progress/ack", mail_progress_ack_api, name="api-mail-progress-ack"),
     path(
-        "elections/<int:election_id>/start-progress",
-        election_start_progress_api,
-        name="api-election-start-progress",
+        "elections/<int:election_id>/mail-progress",
+        election_mail_progress_api,
+        name="api-election-mail-progress",
     ),
     path(
         "elections/<int:election_id>/tally",

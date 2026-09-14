@@ -826,6 +826,7 @@ class AccountInvitationsApiTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.mail_progress._spawn", side_effect=lambda target, *, name: target()),
             patch(
                 "core.views_invitations_api.find_account_invitation_matches",
                 side_effect=AssertionError("bulk resend should not run acceptance precheck"),
@@ -844,7 +845,12 @@ class AccountInvitationsApiTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"ok": True, "message": "Resent 1 invitation(s)"})
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["message"], "Resending 1 invitation(s)")
+        # Delivery runs in the background and reports through a progress record.
+        self.assertEqual(payload["mail_progress"]["emailed"], 1)
+        self.assertEqual(payload["mail_progress"]["failures"], 0)
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
         self.assertEqual(invitation.send_count, 1)
@@ -889,6 +895,7 @@ class AccountInvitationsApiTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()),
+            patch("core.mail_progress._spawn", side_effect=lambda target, *, name: target()),
             patch(
                 "core.views_invitations_api.find_account_invitation_matches",
                 side_effect=AssertionError("bulk resend should not run acceptance precheck"),
@@ -910,7 +917,12 @@ class AccountInvitationsApiTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"ok": True, "message": "Resent 1 invitation(s)"})
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["message"], "Resending 1 invitation(s)")
+        # Delivery runs in the background and reports through a progress record.
+        self.assertEqual(payload["mail_progress"]["emailed"], 1)
+        self.assertEqual(payload["mail_progress"]["failures"], 0)
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
         self.assertEqual(invitation.send_count, 1)

@@ -24,6 +24,8 @@
     data-send-mail-api-url="{{ send_mail_api_url }}"
     data-send-mail-submit-url="{{ send_mail_submit_url }}"
     data-send-mail-preview-url="{{ send_mail_preview_url }}"
+    data-send-mail-progress-api-url="{% url 'api-mail-progress' %}?kind=send_mail"
+    data-send-mail-progress-ack-api-url="{% url 'api-mail-progress-ack' %}"
     data-send-mail-csrf-token="{{ csrf_token }}"
   >
     {{ send_mail_initial_payload|json_script:"send-mail-initial-payload" }}

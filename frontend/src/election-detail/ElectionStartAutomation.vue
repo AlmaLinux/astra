@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, ref } from "vue";
 
+import MailProgressModal from "../mail-progress/MailProgressModal.vue";
+import { useMailProgress } from "../mail-progress/useMailProgress";
 import type {
   ElectionStartAutomationBootstrap,
   ElectionStartPreview,
-  ElectionStartProgress,
   ElectionStartPreviewResponse,
   ElectionStartResponse,
 } from "./types";
@@ -21,25 +22,15 @@ const errors = ref<string[]>([]);
 // a while; the modal reports delivery progress so the operator can see that it
 // is running instead of clicking Start again.
 const starting = ref(false);
-const progress = ref<ElectionStartProgress | null>(null);
-const POLL_INTERVAL_MS = 1000;
-let pollTimer: number | undefined;
+const { progress, percent, finished, failed, track } = useMailProgress(
+  props.bootstrap.startProgressApiUrl,
+  () => finish(),
+);
 
 const vacantSeats = computed(() => {
   const current = preview.value;
   return current === null ? 0 : Math.max(current.number_of_seats - current.candidate_count, 0);
 });
-
-const percent = computed(() => {
-  const current = progress.value;
-  if (current === null || current.total <= 0) {
-    return 0;
-  }
-  return Math.min(100, Math.round((current.processed / current.total) * 100));
-});
-
-const finished = computed(() => progress.value !== null && progress.value.state !== "running");
-const failed = computed(() => progress.value !== null && (progress.value.state === "failed" || progress.value.state === "stalled"));
 
 function csrfToken(): string {
   return document.cookie.split(";").map((value) => value.trim()).find((value) => value.startsWith("csrftoken="))?.slice(10) || "";
@@ -119,13 +110,12 @@ async function startElection(): Promise<void> {
       starting.value = false;
       return;
     }
-    if (payload.start_progress == null) {
+    if (payload.mail_progress == null) {
       // No delivery to follow (the election was already started elsewhere).
       window.location.reload();
       return;
     }
-    progress.value = payload.start_progress;
-    schedulePoll();
+    track(payload.mail_progress);
   } catch {
     errors.value = ["Unable to start the election."];
     starting.value = false;
@@ -134,39 +124,9 @@ async function startElection(): Promise<void> {
   }
 }
 
-function schedulePoll(): void {
-  if (finished.value) {
-    return;
-  }
-  pollTimer = window.setTimeout(pollProgress, POLL_INTERVAL_MS);
-}
-
-async function pollProgress(): Promise<void> {
-  try {
-    const response = await fetch(props.bootstrap.startProgressApiUrl, { credentials: "same-origin", headers: { Accept: "application/json" } });
-    const payload = await response.json() as ElectionStartResponse;
-    if (response.ok) {
-      if (payload.start_progress == null) {
-        // The progress record expired; the delivery is no longer observable.
-        finish();
-        return;
-      }
-      progress.value = payload.start_progress;
-    }
-  } catch {
-    // A dropped poll is not fatal: keep polling, and the stalled state on the
-    // server side ends the wait if delivery really did stop.
-  }
-  schedulePoll();
-}
-
 function finish(): void {
   window.location.reload();
 }
-
-onBeforeUnmount(() => {
-  window.clearTimeout(pollTimer);
-});
 </script>
 
 <template>
@@ -216,51 +176,22 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="progress" class="modal fade show d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="election-start-progress-modal-label">
-      <div class="modal-dialog" role="document">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 id="election-start-progress-modal-label" class="modal-title">
-              {{ finished ? "Election started" : "Starting election..." }}
-            </h5>
-          </div>
-          <div class="modal-body">
-            <p class="mb-2">
-              The election is open. Voting credentials are being emailed to all eligible voters &mdash; this can take a few minutes.
-            </p>
+    <MailProgressModal
+      v-if="progress"
+      :progress="progress"
+      :percent="percent"
+      :finished="finished"
+      :failed="failed"
+      running-title="Starting election..."
+      finished-title="Election started"
+      description="The election is open. Voting credentials are being emailed to all eligible voters — this can take a few minutes."
+      continue-label="Continue"
+      unit-singular="credential email"
+      unit-plural="credential emails"
+      @continue="finish"
+    />
 
-            <div class="progress mb-2" style="height: 1.25rem">
-              <div
-                class="progress-bar"
-                :class="{ 'progress-bar-striped progress-bar-animated': !finished, 'bg-success': finished && !failed, 'bg-danger': failed }"
-                role="progressbar"
-                :style="{ width: `${percent}%` }"
-                :aria-valuenow="percent"
-                aria-valuemin="0"
-                aria-valuemax="100"
-              >
-                {{ percent }}%
-              </div>
-            </div>
-
-            <p class="small mb-0" data-election-start-progress-counts>
-              {{ progress.processed }} of {{ progress.total }} credential email{{ progress.total === 1 ? "" : "s" }} sent
-              <span v-if="progress.skipped > 0">&middot; {{ progress.skipped }} skipped (no email address)</span>
-              <span v-if="progress.failures > 0" class="text-danger">&middot; {{ progress.failures }} failed</span>
-            </p>
-
-            <p v-if="progress.message" class="alert alert-warning mt-3 mb-0" role="alert">{{ progress.message }}</p>
-          </div>
-          <div class="modal-footer">
-            <button id="start-election-continue" type="button" class="btn btn-primary" :disabled="!finished" :aria-disabled="!finished" title="Go to the election" @click="finish">
-              {{ finished ? "Continue" : "Sending..." }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="preview || progress" class="modal-backdrop fade show"></div>
+    <div v-if="preview && !progress" class="modal-backdrop fade show"></div>
   </div>
 </template>
 

@@ -2,12 +2,12 @@ import { mount, type VueWrapper } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ElectionStartAutomation from "../ElectionStartAutomation.vue";
-import type { ElectionStartAutomationBootstrap, ElectionStartPreview, ElectionStartProgress } from "../types";
+import type { ElectionStartAutomationBootstrap, ElectionStartPreview, ElectionMailProgress } from "../types";
 
 const bootstrap: ElectionStartAutomationBootstrap = {
   startApiUrl: "/api/v1/elections/1/start",
   startPreviewApiUrl: "/api/v1/elections/1/start-preview",
-  startProgressApiUrl: "/api/v1/elections/1/start-progress",
+  startProgressApiUrl: "/api/v1/elections/1/mail-progress?kind=start",
   autoStartApiUrl: "/api/v1/elections/1/auto-start",
   autoStartEnabled: false,
 };
@@ -22,7 +22,7 @@ function preview(overrides: Partial<ElectionStartPreview> = {}): ElectionStartPr
   };
 }
 
-function progress(overrides: Partial<ElectionStartProgress> = {}): ElectionStartProgress {
+function progress(overrides: Partial<ElectionMailProgress> = {}): ElectionMailProgress {
   return {
     state: "running",
     total: 200,
@@ -72,7 +72,7 @@ describe("ElectionStartAutomation", () => {
   });
 
   it("confirms the start with the electorate size and the vacant seat warning", async () => {
-    stubFetch({ ok: true, start_progress: progress() }, 200, {
+    stubFetch({ ok: true, mail_progress: progress() }, 200, {
       ok: true,
       start_preview: preview({ number_of_seats: 3, candidate_count: 1 }),
     });
@@ -87,7 +87,7 @@ describe("ElectionStartAutomation", () => {
   });
 
   it("omits the vacant seat warning when every seat has a candidate", async () => {
-    stubFetch({ ok: true, start_progress: progress() });
+    stubFetch({ ok: true, mail_progress: progress() });
 
     const wrapper = mount(ElectionStartAutomation, { props: { bootstrap } });
     await wrapper.get("button.btn-success").trigger("click");
@@ -97,7 +97,7 @@ describe("ElectionStartAutomation", () => {
   });
 
   it("does nothing until the start is confirmed", async () => {
-    const fetchMock = stubFetch({ ok: true, start_progress: progress() });
+    const fetchMock = stubFetch({ ok: true, mail_progress: progress() });
 
     const wrapper = mount(ElectionStartAutomation, { props: { bootstrap } });
     await wrapper.get("button.btn-success").trigger("click");
@@ -110,18 +110,18 @@ describe("ElectionStartAutomation", () => {
   });
 
   it("shows a progress modal with the share of credential emails sent", async () => {
-    stubFetch({ ok: true, start_progress: progress() });
+    stubFetch({ ok: true, mail_progress: progress() });
 
     const wrapper = mount(ElectionStartAutomation, { props: { bootstrap } });
     await confirmStart(wrapper);
 
     expect(wrapper.find("#start-election-modal").exists()).toBe(false);
     expect(wrapper.get(".progress-bar").attributes("style")).toContain("width: 25%");
-    expect(wrapper.get("[data-election-start-progress-counts]").text()).toContain("50 of 200 credential emails sent");
+    expect(wrapper.get("[data-mail-progress-counts]").text()).toContain("50 of 200 credential emails sent");
   });
 
   it("ignores repeated clicks while a start is under way", async () => {
-    const fetchMock = stubFetch({ ok: true, start_progress: progress() });
+    const fetchMock = stubFetch({ ok: true, mail_progress: progress() });
 
     const wrapper = mount(ElectionStartAutomation, { props: { bootstrap } });
     await confirmStart(wrapper);
@@ -136,15 +136,15 @@ describe("ElectionStartAutomation", () => {
   });
 
   it("reports a finished delivery and offers to continue", async () => {
-    stubFetch({ ok: true, start_progress: progress({ state: "done", processed: 200, emailed: 198, skipped: 2 }) });
+    stubFetch({ ok: true, mail_progress: progress({ state: "done", processed: 200, emailed: 198, skipped: 2 }) });
 
     const wrapper = mount(ElectionStartAutomation, { props: { bootstrap } });
     await confirmStart(wrapper);
 
     expect(wrapper.get(".modal-title").text()).toBe("Election started");
     expect(wrapper.get(".progress-bar").classes()).toContain("bg-success");
-    expect(wrapper.get("[data-election-start-progress-counts]").text()).toContain("2 skipped");
-    expect(wrapper.get("#start-election-continue").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get("[data-mail-progress-counts]").text()).toContain("2 skipped");
+    expect(wrapper.get("[data-mail-progress-continue]").attributes("disabled")).toBeUndefined();
   });
 
   it("lists every reason the server rejected the start", async () => {
@@ -160,7 +160,7 @@ describe("ElectionStartAutomation", () => {
   });
 
   it("warns when delivery stopped before finishing", async () => {
-    stubFetch({ ok: true, start_progress: progress({ state: "stalled", message: "Credential delivery stopped before it finished." }) });
+    stubFetch({ ok: true, mail_progress: progress({ state: "stalled", message: "Credential delivery stopped before it finished." }) });
 
     const wrapper = mount(ElectionStartAutomation, { props: { bootstrap } });
     await confirmStart(wrapper);

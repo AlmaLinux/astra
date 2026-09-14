@@ -122,7 +122,7 @@ class ElectionStartLifecycleTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
             patch("core.freeipa.user.FreeIPAUser.warm_user_cache"),
-            patch("core.elections_start_progress._spawn", side_effect=_run_inline),
+            patch("core.mail_progress._spawn", side_effect=_run_inline),
             patch("core.elections_services.timezone.now", return_value=started_at),
             patch(
                 "core.elections_services.send_voting_credential_email",
@@ -173,7 +173,7 @@ class ElectionStartLifecycleTests(TestCase):
         with (
             patch("core.freeipa.user.FreeIPAUser.get", return_value=ADMIN_USER),
             patch("core.freeipa.user.FreeIPAUser.warm_user_cache"),
-            patch("core.elections_start_progress._spawn", side_effect=_run_inline),
+            patch("core.mail_progress._spawn", side_effect=_run_inline),
         ):
             response = self._start(election)
 
@@ -311,7 +311,7 @@ class ElectionStartLifecycleTests(TestCase):
             self._committee_group_patch(member_usernames=[]),
             patch("core.freeipa.user.FreeIPAUser.get", return_value=ADMIN_USER),
             patch("core.freeipa.user.FreeIPAUser.warm_user_cache"),
-            patch("core.elections_start_progress._spawn", side_effect=_run_inline),
+            patch("core.mail_progress._spawn", side_effect=_run_inline),
         ):
             response = self._start(election)
 

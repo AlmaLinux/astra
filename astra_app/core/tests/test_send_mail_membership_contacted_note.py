@@ -19,6 +19,9 @@ class SendMailMembershipContactedNoteTests(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        patcher = patch("core.mail_progress._spawn", side_effect=lambda target, *, name: target())
+        patcher.start()
+        self.addCleanup(patcher.stop)
         FreeIPAPermissionGrant.objects.get_or_create(
             permission=ASTRA_ADD_SEND_MAIL,
             principal_type=FreeIPAPermissionGrant.PrincipalType.group,

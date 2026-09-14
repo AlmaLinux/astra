@@ -54,6 +54,16 @@ async function selectExistingTemplate(page: Page): Promise<void> {
   await expect(page.locator("iframe[title='Rendered text preview']")).toBeVisible();
 }
 
+/** Wait out the background send behind the progress dialog and dismiss it. */
+async function expectMailProgressToComplete(page: Page, recipientCount: number): Promise<void> {
+  const counts = page.locator("[data-mail-progress-counts]");
+  await expect(counts).toContainText(new RegExp(`\\d+ of ${recipientCount} emails? sent`));
+  const continueButton = page.locator("[data-mail-progress-continue]");
+  await expect(continueButton).toBeEnabled({ timeout: 120_000 });
+  await continueButton.click();
+  await expect(counts).toHaveCount(0);
+}
+
 async function confirmSendAndExpectQueued(page: Page, recipientCount: number): Promise<void> {
   const plural = recipientCount === 1 ? "" : "s";
 
@@ -68,7 +78,9 @@ async function confirmSendAndExpectQueued(page: Page, recipientCount: number): P
   ).toBeVisible();
   await expect(sendModal.locator("#send-mail-send-confirm-btn")).toBeVisible();
   await sendModal.locator("#send-mail-send-confirm-btn").click();
-  await expect(page.getByText(`Queued ${recipientCount} email${plural}.`, { exact: true })).toBeVisible();
+  await expect(page.getByText(`Sending ${recipientCount} email${plural}.`, { exact: true })).toBeVisible();
+  // Delivery runs in the background; the page reports it until acknowledged.
+  await expectMailProgressToComplete(page, recipientCount);
 }
 
 async function selectUserRecipients(page: Page, usernames: string[]): Promise<void> {
@@ -137,7 +149,8 @@ test("mail-tools-send-mail-workflow", async ({ page }) => {
   await expect(sendModal.getByText("Queue 2 emails for delivery using the current recipients and message contents?")).toBeVisible();
   await expect(sendModal.locator("#send-mail-send-confirm-btn")).toBeVisible();
   await sendModal.locator("#send-mail-send-confirm-btn").click();
-  await expect(page.getByText("Queued 2 emails.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Sending 2 emails.", { exact: true })).toBeVisible();
+  await expectMailProgressToComplete(page, 2);
 });
 
 // As a send-mail operator, I can queue a templated message to all members of a selected group.

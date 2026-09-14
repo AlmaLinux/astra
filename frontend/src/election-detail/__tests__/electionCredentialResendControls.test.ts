@@ -3,12 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
 
 import ElectionCredentialResendControls from "../ElectionCredentialResendControls.vue";
-import type { ElectionCredentialResendBootstrap } from "../types";
+import type { ElectionCredentialResendBootstrap, ElectionMailProgress } from "../types";
 
 const bootstrap: ElectionCredentialResendBootstrap = {
   sendMailCredentialsApiUrl: "/api/v1/elections/1/send-mail-credentials",
   credentialEmailTemplateApiUrl: "/api/v1/elections/1/credential-email-template",
   credentialEmailPreviewUrl: "/elections/1/email/render-preview/",
+  reminderProgressApiUrl: "/api/v1/elections/1/mail-progress?kind=reminder",
   electionStatus: "open",
   eligibleUsernames: ["alice", "bob"],
 };
@@ -90,6 +91,7 @@ describe("ElectionCredentialResendControls", () => {
       sendMailCredentialsApiUrl: "/api/v1/elections/1/send-mail-credentials",
       credentialEmailTemplateApiUrl: "/api/v1/elections/1/credential-email-template",
       credentialEmailPreviewUrl: "/elections/1/email/render-preview/",
+      reminderProgressApiUrl: "/api/v1/elections/1/mail-progress?kind=reminder",
       electionStatus: "open",
       eligibleUsernames: [],
     };
@@ -180,6 +182,76 @@ describe("ElectionCredentialResendControls", () => {
     // Modal should close, success message shown
     expect(wrapper.find(".modal").exists()).toBe(false);
     expect(wrapper.text()).toContain("Queued voting credential email for 1 recipient.");
+  });
+
+  it("reports background progress when reminding every eligible voter", async () => {
+    const running: ElectionMailProgress = {
+      state: "running", total: 260, processed: 40, emailed: 40, skipped: 0, failures: 0, message: "", updated_at: 0,
+    };
+    const done: ElectionMailProgress = { ...running, state: "done", processed: 260, emailed: 258, skipped: 2 };
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes("credential-email-template")) {
+        return Promise.resolve(new Response(JSON.stringify(templatePayload), { status: 200 }));
+      }
+      if (url.includes("mail-progress")) {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, mail_progress: done }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(
+        JSON.stringify({ ok: true, message: "Sending voting credential emails to 260 recipients.", recipient_count: 260, mail_progress: running }),
+        { status: 200 },
+      ));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(ElectionCredentialResendControls, { props: { bootstrap } });
+
+    await wrapper.find("[data-testid='send-reminder-all']").trigger("click");
+    await flushPromises();
+    await nextTick();
+    await wrapper.find("[data-testid='send-credentials-confirm']").trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.get("[data-mail-progress-counts]").text()).toContain("40 of 260 credential emails sent");
+    expect(wrapper.get(".modal-title").text()).toBe("Sending credential reminders...");
+    // Both send buttons stay disabled until the run is acknowledged.
+    expect(wrapper.find("[data-testid='send-reminder-all']").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("[data-testid='send-reminder-single']").attributes("disabled")).toBeDefined();
+  });
+
+  it("summarizes the run once the operator acknowledges it", async () => {
+    const done: ElectionMailProgress = {
+      state: "done", total: 260, processed: 260, emailed: 258, skipped: 2, failures: 0, message: "", updated_at: 0,
+    };
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes("credential-email-template")) {
+        return Promise.resolve(new Response(JSON.stringify(templatePayload), { status: 200 }));
+      }
+      return Promise.resolve(new Response(
+        JSON.stringify({ ok: true, message: "Sending voting credential emails to 260 recipients.", recipient_count: 260, mail_progress: done }),
+        { status: 200 },
+      ));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(ElectionCredentialResendControls, { props: { bootstrap } });
+
+    await wrapper.find("[data-testid='send-reminder-all']").trigger("click");
+    await flushPromises();
+    await nextTick();
+    await wrapper.find("[data-testid='send-credentials-confirm']").trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.get(".modal-title").text()).toBe("Reminders sent");
+    expect(wrapper.get("[data-mail-progress-counts]").text()).toContain("2 skipped");
+
+    await wrapper.find("[data-mail-progress-continue]").trigger("click");
+    await nextTick();
+
+    expect(wrapper.find("[data-mail-progress-counts]").exists()).toBe(false);
+    expect(wrapper.text()).toContain("Queued voting credential email for 258 recipients.");
+    expect(wrapper.find("[data-testid='send-reminder-all']").attributes("disabled")).toBeUndefined();
   });
 
   it("closes the modal without sending when cancel is clicked", async () => {

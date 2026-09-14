@@ -3,6 +3,7 @@
 import json
 import logging
 from collections.abc import Callable
+from dataclasses import asdict
 from functools import wraps
 from typing import Any
 
@@ -14,6 +15,7 @@ from django.utils.formats import date_format
 from django.utils.timezone import localtime
 from django.views.decorators.http import require_http_methods
 
+from core import mail_progress
 from core.account_invitations import (
     _mark_invitation_accepted_from_email_match,
     _send_account_invitation_email,
@@ -22,6 +24,8 @@ from core.account_invitations import (
     refresh_account_invitations,
 )
 from core.logging_extras import current_exception_log_fields
+from core.mail_delivery import MailDeliveryError, deliver_in_batches
+from core.mail_progress import MailRunKind, MailRunProgress
 from core.models import AccountInvitation
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.rate_limit import allow_request
@@ -479,21 +483,42 @@ def account_invitations_bulk_api(request: HttpRequest) -> JsonResponse:
                     "error": "Too many resend attempts. Try again shortly.",
                 }, status=429)
 
-            resent_count = 0
+            invitations = list(queryset)
             now = timezone.now()
-            for invitation in queryset:
+
+            def _prepare(invitation: AccountInvitation) -> None:
                 result = _send_account_invitation_email(
                     invitation=invitation,
                     actor_username=username,
                     template_name=invitation.email_template_name,
                     now=now,
                 )
-                if result == "queued":
-                    resent_count += 1
+                if result != "queued":
+                    # The helper already recorded the failed send; surface it in
+                    # the run totals rather than silently under-reporting.
+                    raise MailDeliveryError(result)
+                return None
+
+            # Resending a full page of invitations queues hundreds of emails, so
+            # delivery runs off the request and reports progress.
+            mail_progress.deliver_in_background(
+                scope=username,
+                kind=MailRunKind.invitation_resend,
+                total=len(invitations),
+                deliver=lambda on_progress: deliver_in_batches(
+                    items=invitations,
+                    prepare=_prepare,
+                    on_progress=on_progress,
+                ),
+            )
 
             return JsonResponse({
                 "ok": True,
-                "message": f"Resent {resent_count} invitation(s)",
+                "message": f"Resending {len(invitations)} invitation(s)",
+                "mail_progress": asdict(
+                    mail_progress.read(scope=username, kind=MailRunKind.invitation_resend)
+                    or MailRunProgress()
+                ),
             })
 
     except Exception:

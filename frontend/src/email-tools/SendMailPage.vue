@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 
+import MailProgressModal from "../mail-progress/MailProgressModal.vue";
+import { useMailProgress } from "../mail-progress/useMailProgress";
 import ComposeCard from "./ComposeCard.vue";
 import { fetchSendMailPayload, toComposeFieldSpec, type SendMailBootstrap, type SendMailField, type SendMailFieldOption, type SendMailPayload } from "./types";
 
@@ -22,6 +24,32 @@ const props = defineProps<{
 
 const payload = ref<SendMailPayload | null>(props.bootstrap.initialPayload);
 const loadError = ref("");
+
+// A send queues one rendered email per recipient, which takes minutes for a
+// large list. Delivery runs in the background, so on every load we adopt
+// whatever run this operator already has and show its progress.
+const { progress, percent, finished, failed, adopt, reset: resetProgress } = useMailProgress(
+  props.bootstrap.mailProgressApiUrl,
+  () => resetProgress(),
+);
+
+async function acknowledgeProgress(): Promise<void> {
+  resetProgress();
+  try {
+    await fetch(props.bootstrap.mailProgressAckApiUrl, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRFToken": props.bootstrap.csrfToken,
+      },
+      body: "kind=send_mail",
+    });
+  } catch {
+    // The record expires on its own; nothing here is worth interrupting for.
+  }
+}
 
 const fieldByName = computed<Record<string, SendMailField>>(() => {
   const fields = payload.value?.form.fields || [];
@@ -143,11 +171,24 @@ watch(
 
 onMounted(async () => {
   await loadPayload();
+  await adopt();
 });
 </script>
 
 <template>
   <div data-send-mail-page-vue-root>
+    <MailProgressModal
+      v-if="progress"
+      :progress="progress"
+      :percent="percent"
+      :finished="finished"
+      :failed="failed"
+      running-title="Sending emails..."
+      finished-title="Emails sent"
+      description="Each recipient is being emailed their own message — this can take a few minutes. You can leave this page; delivery continues."
+      continue-label="Done"
+      @continue="acknowledgeProgress"
+    />
     <div v-if="loadError" class="alert alert-danger" role="alert">{{ loadError }}</div>
     <div v-else-if="!payload" class="text-muted">Loading send mail...</div>
     <form v-else id="send-mail-form" :action="bootstrap.submitUrl" method="post" enctype="multipart/form-data">

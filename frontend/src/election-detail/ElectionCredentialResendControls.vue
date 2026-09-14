@@ -2,9 +2,12 @@
 import { computed, nextTick, ref, watch } from "vue";
 
 import ComposeCard from "../email-tools/ComposeCard.vue";
+import MailProgressModal from "../mail-progress/MailProgressModal.vue";
+import { useMailProgress } from "../mail-progress/useMailProgress";
 import { useComposeSaveHandlers } from "../email-tools/compose-actions";
 import type { ComposeFieldSpec, ComposeTemplateOption, ComposeVariable } from "../email-tools/types";
 import { readCsrfToken } from "../shared/csrf";
+import type { MailProgress } from "../mail-progress/types";
 import type { ElectionCredentialResendBootstrap } from "./types";
 
 declare global {
@@ -57,6 +60,13 @@ const templateLoadError = ref("");
 const isSubmitting = ref(false);
 const submitError = ref("");
 const successMessage = ref("");
+
+// Emailing a whole electorate runs in the background, so the operator watches a
+// progress bar instead of a spinner that gives no sign of how far it has got.
+const { progress, percent, finished, failed, track, reset: resetProgress } = useMailProgress(
+  props.bootstrap.reminderProgressApiUrl,
+  () => closeProgress(),
+);
 
 // ComposeCard field state
 const subjectValue = ref("");
@@ -221,6 +231,15 @@ function closeModal(): void {
   modalMode.value = null;
 }
 
+function closeProgress(): void {
+  const current = progress.value;
+  if (current !== null) {
+    const noun = current.emailed === 1 ? "recipient" : "recipients";
+    successMessage.value = `Queued ${isOpen.value ? "voting credential email" : "email"} for ${current.emailed} ${noun}.`;
+  }
+  resetProgress();
+}
+
 // Wire up save / save-as event handlers via the centralized composable.
 useComposeSaveHandlers({
   templateOptions,
@@ -262,6 +281,7 @@ async function sendCredentials(): Promise<void> {
       errors?: string[];
       message?: string;
       ok?: boolean;
+      mail_progress?: MailProgress | null;
     };
 
     if (!response.ok || payload.ok !== true || !payload.message) {
@@ -269,8 +289,12 @@ async function sendCredentials(): Promise<void> {
       return;
     }
 
-    successMessage.value = payload.message;
     modalMode.value = null;
+    if (payload.mail_progress != null) {
+      track(payload.mail_progress);
+      return;
+    }
+    successMessage.value = payload.message;
   } catch {
     submitError.value = "Unable to send the credential emails right now.";
   } finally {
@@ -360,7 +384,7 @@ watch(
           data-testid="send-reminder-single"
           type="button"
           class="btn btn-outline-primary btn-sm"
-          :disabled="!username"
+          :disabled="!username || progress !== null"
           :title="isOpen ? 'Send a credential reminder to the selected user' : 'Send an email to the selected user'"
           style="white-space: nowrap;"
           @click="openModal('single')"
@@ -374,7 +398,7 @@ watch(
           data-testid="send-reminder-all"
           type="button"
           class="btn btn-outline-primary btn-sm"
-          :disabled="bootstrap.eligibleUsernames.length === 0"
+          :disabled="bootstrap.eligibleUsernames.length === 0 || progress !== null"
           :title="isOpen ? 'Send credential reminders to all eligible voters' : 'Send an email to all eligible voters'"
           style="white-space: nowrap;"
           @click="openModal('all')"
@@ -383,6 +407,23 @@ watch(
         </button>
       </div>
     </div>
+
+    <MailProgressModal
+      v-if="progress"
+      :progress="progress"
+      :percent="percent"
+      :finished="finished"
+      :failed="failed"
+      :running-title="isOpen ? 'Sending credential reminders...' : 'Sending emails...'"
+      :finished-title="isOpen ? 'Reminders sent' : 'Emails sent'"
+      :description="isOpen
+        ? 'Each eligible voter is being emailed their own reminder with their voting link — this can take a few minutes.'
+        : 'Each eligible voter is being emailed — this can take a few minutes.'"
+      continue-label="Done"
+      unit-singular="credential email"
+      unit-plural="credential emails"
+      @continue="closeProgress"
+    />
 
     <!-- Compose + confirm modal -->
     <div
