@@ -2,8 +2,9 @@ import datetime
 import json
 import logging
 import secrets
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from itertools import batched
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -18,13 +19,20 @@ from django.utils import timezone
 from post_office.models import Email
 
 from core import signals as astra_signals
-from core.elections_eligibility import ElectionEligibilityError, start_eligible_voters, validate_candidates_for_election
+from core.election_nominators import parse_nominator_identifier
+from core.elections_eligibility import (
+    CandidateValidationResult,
+    ElectionEligibilityError,
+    start_eligible_voters,
+    validate_candidates_for_election,
+)
 from core.elections_timestamping import get_public_payload, schedule_attestation
 from core.email_context import (
     election_committee_email_context,
     user_email_context,
     user_email_context_from_user,
 )
+from core.forms_elections import is_self_nomination
 from core.freeipa.user import DegradedFreeIPAUser, FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.logging_extras import current_exception_log_fields
@@ -33,6 +41,7 @@ from core.models import (
     Ballot,
     Candidate,
     Election,
+    Organization,
     VotingCredential,
 )
 from core.public_urls import build_public_absolute_url
@@ -1077,19 +1086,137 @@ def close_election(
         ) from exc
 
 
+@dataclass(frozen=True, slots=True)
+class ElectionStartOpenResult:
+    """Outcome of the draft -> open half of an election start."""
+
+    status: str
+    reasons: tuple[str, ...] = ()
+    credential_count: int = 0
+    opened_at: datetime.datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ElectionStartPreview:
+    """Facts an operator confirms before starting an election."""
+
+    election_name: str
+    number_of_seats: int
+    candidate_count: int
+    eligible_voter_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ElectionStartDelivery:
+    """Running totals for credential email delivery during an election start."""
+
+    total: int = 0
+    processed: int = 0
+    emailed: int = 0
+    skipped: int = 0
+    failures: int = 0
+
+
+# Credential emails are rendered and persisted in batches so that delivery
+# progress is observable (and memory bounded) for a large electorate. Progress
+# is reported once per batch, so this also sets how finely the operator's
+# progress bar advances -- it can never be finer than what has actually been
+# written to the mail queue.
+ELECTION_START_EMAIL_BATCH_SIZE = 10
+
+
+def election_start_preview(*, election: Election) -> ElectionStartPreview:
+    """Summarize an election for the start confirmation dialog.
+
+    Uses the cached electorate: this only informs the operator, while
+    ``open_election_for_start`` re-reads eligibility fresh before committing.
+    """
+    return ElectionStartPreview(
+        election_name=election.name,
+        number_of_seats=election.number_of_seats,
+        candidate_count=Candidate.objects.filter(election=election).count(),
+        eligible_voter_count=len(start_eligible_voters(election=election)),
+    )
+
+
+def _ineligible_nominator_labels(nominators: Iterable[str]) -> list[str]:
+    """Name ineligible nominators without leaking raw organization identifiers."""
+    parsed = [(nominator, parse_nominator_identifier(nominator).organization_id) for nominator in nominators]
+    organization_names = {
+        organization.id: organization.name
+        for organization in Organization.objects.filter(
+            pk__in={organization_id for _, organization_id in parsed if organization_id is not None}
+        ).only("id", "name")
+    }
+    return [
+        nominator if organization_id is None else organization_names.get(organization_id, "organization nominator")
+        for nominator, organization_id in parsed
+    ]
+
+
+def _start_validation_reasons(
+    *,
+    validation: CandidateValidationResult,
+    has_eligible_voters: bool,
+) -> list[str]:
+    """Build one operator-facing message per blocking eligibility problem."""
+    reasons: list[str] = []
+    if validation.disqualified_candidates:
+        names = ", ".join(sorted(validation.disqualified_candidates, key=str.lower))
+        reasons.append("Election committee members cannot be candidates for this election: " + names)
+    if validation.disqualified_nominators:
+        names = ", ".join(sorted(validation.disqualified_nominators, key=str.lower))
+        reasons.append("Election committee members cannot nominate candidates for this election: " + names)
+    if validation.ineligible_candidates:
+        names = ", ".join(sorted(validation.ineligible_candidates, key=str.lower))
+        reasons.append("Candidate is not eligible: " + names)
+    if validation.ineligible_nominators:
+        names = ", ".join(_ineligible_nominator_labels(sorted(validation.ineligible_nominators, key=str.lower)))
+        reasons.append("One or more nominators are not eligible for this election: " + names)
+    if not has_eligible_voters:
+        reasons.append("No eligible voters were found for this election.")
+    return reasons
+
+
 @transaction.atomic
-def start_scheduled_election(*, election_id: int, scheduled: bool = True) -> dict[str, int | str]:
-    """Open one due opted-in draft election and queue its credential email."""
+def open_election_for_start(*, election_id: int, scheduled: bool = True) -> ElectionStartOpenResult:
+    """Validate a draft election, issue its voting credentials and open it.
+
+    Credential emails are deliberately *not* queued here: delivery takes one
+    rendered email per voter and must run outside this transaction so that
+    ``complete_election_start`` can report progress to concurrent readers.
+    """
     election = Election.objects.select_for_update().get(pk=election_id)
     now = timezone.now()
     if election.status != Election.Status.draft:
-        return {"status": "skipped"}
+        return ElectionStartOpenResult(status="skipped")
     if scheduled and (not election.auto_start_enabled or election.start_datetime > now):
-        return {"status": "skipped"}
-    if not Candidate.objects.filter(election=election).exists():
-        return {"status": "invalid", "reason": "Election has no candidates."}
+        return ElectionStartOpenResult(status="skipped")
 
     candidates = list(Candidate.objects.filter(election=election).only("freeipa_username", "nominated_by"))
+    if not candidates:
+        return ElectionStartOpenResult(
+            status="invalid",
+            reasons=("Add at least one candidate before starting the election.",),
+        )
+
+    self_nominations = sorted(
+        {
+            str(candidate.freeipa_username or "").strip()
+            for candidate in candidates
+            if is_self_nomination(
+                candidate_username=candidate.freeipa_username,
+                nominator_username=candidate.nominated_by,
+            )
+        },
+        key=str.lower,
+    )
+    if self_nominations:
+        return ElectionStartOpenResult(
+            status="invalid",
+            reasons=("Candidates cannot nominate themselves: " + ", ".join(self_nominations),),
+        )
+
     candidate_usernames = [str(candidate.freeipa_username or "").strip() for candidate in candidates]
     nominator_usernames = [str(candidate.nominated_by or "").strip() for candidate in candidates]
     try:
@@ -1098,20 +1225,15 @@ def start_scheduled_election(*, election_id: int, scheduled: bool = True) -> dic
             election=election,
             candidate_usernames=candidate_usernames,
             nominator_usernames=nominator_usernames,
-            eligible_group_cn=election.eligible_group_cn,
+            eligible_group_cn=str(election.eligible_group_cn or "").strip(),
             require_fresh=True,
         )
     except ElectionEligibilityError as exc:
-        return {"status": "invalid", "reason": str(exc)}
-    if not eligible_voters:
-        return {"status": "invalid", "reason": "No eligible voters were found for this election."}
-    if (
-        validation.disqualified_candidates
-        or validation.disqualified_nominators
-        or validation.ineligible_candidates
-        or validation.ineligible_nominators
-    ):
-        return {"status": "invalid", "reason": "Election candidate eligibility validation failed."}
+        return ElectionStartOpenResult(status="invalid", reasons=(str(exc),))
+
+    reasons = _start_validation_reasons(validation=validation, has_eligible_voters=bool(eligible_voters))
+    if reasons:
+        return ElectionStartOpenResult(status="invalid", reasons=tuple(reasons))
 
     credentials = issue_credentials_at_start_transition_for_scheduled_election(election=election)
     if not scheduled:
@@ -1119,75 +1241,173 @@ def start_scheduled_election(*, election_id: int, scheduled: bool = True) -> dic
     election.status = Election.Status.open
     election.auto_start_enabled = False
     election.save(update_fields=["status", "auto_start_enabled", "start_datetime", "updated_at"])
+    return ElectionStartOpenResult(status="opened", credential_count=len(credentials), opened_at=now)
 
-    pending_emails: list[Email] = []
+
+def deliver_start_credential_emails(
+    *,
+    election: Election,
+    credentials: Sequence[VotingCredential],
+    request: HttpRequest | None = None,
+    on_progress: Callable[[ElectionStartDelivery], None] | None = None,
+) -> ElectionStartDelivery:
+    """Queue one voting credential email per issued credential.
+
+    Voters without a resolvable FreeIPA account or email address are skipped and
+    rendering errors are counted as failures, so a few bad addresses never abort
+    a start; the operator re-sends those from the election page afterwards.
+    """
+    total = len(credentials)
+    processed = 0
     emailed = 0
     skipped = 0
     failures = 0
-    FreeIPAUser.warm_user_cache([str(c.freeipa_username) for c in credentials if c.freeipa_username])
+
+    # Pre-warm individual FreeIPA user cache entries from the all-users list so
+    # that the per-voter get() calls below are instant cache hits instead of N
+    # individual IPA RPC calls.
+    FreeIPAUser.warm_user_cache(
+        [str(credential.freeipa_username or "").strip() for credential in credentials if credential.freeipa_username]
+    )
+
     use_snapshot = bool(
         election.voting_email_subject.strip()
         or election.voting_email_html.strip()
         or election.voting_email_text.strip()
     )
-    for credential in credentials:
-        username = str(credential.freeipa_username or "").strip()
-        if not username:
-            skipped += 1
-            continue
-        try:
-            user = FreeIPAUser.get(username, respect_privacy=False)
-            if user is None or not user.email:
+
+    for batch in batched(credentials, ELECTION_START_EMAIL_BATCH_SIZE):
+        pending_emails: list[Email] = []
+        for credential in batch:
+            processed += 1
+            username = str(credential.freeipa_username or "").strip()
+            if not username:
                 skipped += 1
                 continue
-            queued = send_voting_credential_email(
-                request=None,
-                election=election,
-                username=username,
-                email=user.email,
-                credential_public_id=str(credential.public_id),
-                tz_name=_get_freeipa_timezone_name(user),
-                subject_template=election.voting_email_subject if use_snapshot else None,
-                html_template=election.voting_email_html if use_snapshot else None,
-                text_template=election.voting_email_text if use_snapshot else None,
-                commit=False,
-            )
+            try:
+                user = FreeIPAUser.get(username, respect_privacy=False)
+                if user is None or not user.email:
+                    skipped += 1
+                    continue
+                queued = send_voting_credential_email(
+                    request=request,
+                    election=election,
+                    username=username,
+                    email=user.email,
+                    credential_public_id=str(credential.public_id),
+                    tz_name=_get_freeipa_timezone_name(user),
+                    subject_template=election.voting_email_subject if use_snapshot else None,
+                    html_template=election.voting_email_html if use_snapshot else None,
+                    text_template=election.voting_email_text if use_snapshot else None,
+                    commit=False,
+                )
+            except Exception:
+                logger.exception(
+                    "election start: credential email failed election_id=%s username=%s",
+                    election.id,
+                    username,
+                )
+                failures += 1
+                continue
             if queued is not None:
                 pending_emails.append(queued)
             emailed += 1
-        except Exception:
-            failures += 1
-    bulk_save_emails(pending_emails)
 
-    audit_entry = AuditLogEntry.objects.create(
+        bulk_save_emails(pending_emails)
+        if on_progress is not None:
+            on_progress(
+                ElectionStartDelivery(
+                    total=total,
+                    processed=processed,
+                    emailed=emailed,
+                    skipped=skipped,
+                    failures=failures,
+                )
+            )
+
+    return ElectionStartDelivery(
+        total=total,
+        processed=processed,
+        emailed=emailed,
+        skipped=skipped,
+        failures=failures,
+    )
+
+
+def complete_election_start(
+    *,
+    election_id: int,
+    scheduled: bool,
+    opened_at: datetime.datetime,
+    actor: str = "",
+    on_progress: Callable[[ElectionStartDelivery], None] | None = None,
+) -> ElectionStartDelivery:
+    """Deliver credential emails for a just-opened election and record the start.
+
+    Runs outside the opening transaction so delivery progress is visible to
+    other requests while it is still going.
+    """
+    election = Election.objects.get(pk=election_id)
+    credentials = list(VotingCredential.objects.filter(election=election).only("public_id", "freeipa_username"))
+    delivery = deliver_start_credential_emails(
         election=election,
-        event_type="election_started",
-        payload={
-            "eligible_voters": len(credentials),
-            "emailed": emailed,
-            "skipped": skipped,
-            "failures": failures,
-            "genesis_chain_hash": election_genesis_chain_hash(election.id),
-            "candidates": [
-                {"id": candidate.id, "freeipa_username": candidate.freeipa_username, "tiebreak_uuid": str(candidate.tiebreak_uuid)}
-                for candidate in Candidate.objects.filter(election=election).only("id", "freeipa_username", "tiebreak_uuid")
-            ],
-            "automation": scheduled,
-            "actor": "operations_hourly" if scheduled else "",
-            "scheduled_for": election.start_datetime.isoformat() if scheduled else None,
-            "transitioned_at": now.isoformat(),
-        },
-        is_public=True,
+        credentials=credentials,
+        on_progress=on_progress,
     )
-    schedule_attestation(audit_entry)
-    transaction.on_commit(
-        lambda: astra_signals.election_opened.send(
-            sender=Election,
-            election=Election.objects.get(pk=election.id),
-            actor="operations_hourly" if scheduled else None,
+
+    with transaction.atomic():
+        audit_entry = AuditLogEntry.objects.create(
+            election=election,
+            event_type="election_started",
+            payload={
+                "eligible_voters": delivery.total,
+                "emailed": delivery.emailed,
+                "skipped": delivery.skipped,
+                "failures": delivery.failures,
+                "genesis_chain_hash": election_genesis_chain_hash(election.id),
+                "candidates": [
+                    {"id": candidate.id, "freeipa_username": candidate.freeipa_username, "tiebreak_uuid": str(candidate.tiebreak_uuid)}
+                    for candidate in Candidate.objects.filter(election=election).only("id", "freeipa_username", "tiebreak_uuid")
+                ],
+                "automation": scheduled,
+                "actor": actor,
+                "scheduled_for": election.start_datetime.isoformat() if scheduled else None,
+                "transitioned_at": opened_at.isoformat(),
+            },
+            is_public=True,
         )
+        schedule_attestation(audit_entry)
+        transaction.on_commit(
+            lambda: astra_signals.election_opened.send(
+                sender=Election,
+                election=Election.objects.get(pk=election.id),
+                actor=actor or None,
+            )
+        )
+    return delivery
+
+
+def start_scheduled_election(*, election_id: int, scheduled: bool = True) -> dict[str, int | str]:
+    """Open one due opted-in draft election and queue its credential email."""
+    opened = open_election_for_start(election_id=election_id, scheduled=scheduled)
+    if opened.status != "opened":
+        result: dict[str, int | str] = {"status": opened.status}
+        if opened.reasons:
+            result["reason"] = "; ".join(opened.reasons)
+        return result
+
+    delivery = complete_election_start(
+        election_id=election_id,
+        scheduled=scheduled,
+        opened_at=opened.opened_at,
+        actor="operations_hourly" if scheduled else "",
     )
-    return {"status": "started", "emailed": emailed, "skipped": skipped, "failures": failures}
+    return {
+        "status": "started",
+        "emailed": delivery.emailed,
+        "skipped": delivery.skipped,
+        "failures": delivery.failures,
+    }
 
 
 def issue_credentials_at_start_transition_for_scheduled_election(*, election: Election) -> list[VotingCredential]:

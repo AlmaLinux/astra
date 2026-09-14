@@ -1,7 +1,7 @@
 """Election lifecycle actions: credential re-send, conclude, extend end date."""
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from django.conf import settings
 from django.contrib import messages
@@ -13,7 +13,7 @@ from django.urls import reverse_lazy
 from django.views.decorators.http import require_GET, require_POST
 from post_office.models import Email, EmailTemplate
 
-from core import elections_services
+from core import elections_services, elections_start_progress
 from core.elections_services import ElectionError
 from core.freeipa.user import FreeIPAUser
 from core.ipa_user_attrs import _get_freeipa_timezone_name
@@ -468,23 +468,59 @@ def election_auto_end_api(request: HttpRequest, election_id: int) -> JsonRespons
     )
 
 
+def _start_payload(*, election: Election, ok: bool, errors: list[str] | None = None) -> dict[str, object]:
+    """Automation payload plus the credential delivery progress, if any."""
+    progress = elections_start_progress.read(election_id=election.id)
+    return {
+        **_automation_payload(election=election, ok=ok, errors=errors),
+        "start_progress": asdict(progress) if progress is not None else None,
+    }
+
+
+@require_GET
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_start_preview_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    """Facts shown in the start confirmation dialog before anything is committed."""
+    election = _get_active_election(election_id)
+    preview = elections_services.election_start_preview(election=election)
+    return JsonResponse({"ok": True, "start_preview": asdict(preview)})
+
+
 @require_POST
 @json_permission_required(ASTRA_ADD_ELECTION)
 def election_start_api(request: HttpRequest, election_id: int) -> JsonResponse:
-    result = elections_services.start_scheduled_election(election_id=election_id, scheduled=False)
+    opened = elections_services.open_election_for_start(election_id=election_id, scheduled=False)
     election = _get_active_election(election_id)
-    if result["status"] != "started":
+
+    # A repeated click on a start that is already under way (or finished) is a
+    # no-op, not an error: report the election as it stands so the caller can
+    # keep showing progress instead of an alarming failure.
+    if opened.status == "skipped":
+        return JsonResponse(_start_payload(election=election, ok=True))
+    if opened.status != "opened":
         return JsonResponse(
-            _automation_payload(
+            _start_payload(
                 election=election,
                 ok=False,
-                errors=[str(result.get("reason") or "Election could not be started.")],
+                errors=list(opened.reasons) or ["Election could not be started."],
             ),
             status=400,
         )
-    payload = _automation_payload(election=election, ok=True)
-    payload["delivery"] = {key: result[key] for key in ("emailed", "skipped", "failures")}
-    return JsonResponse(payload)
+
+    elections_start_progress.deliver_in_background(
+        election_id=election_id,
+        total=opened.credential_count,
+        opened_at=opened.opened_at,
+        actor=get_username(request) or "",
+    )
+    return JsonResponse(_start_payload(election=election, ok=True))
+
+
+@require_GET
+@json_permission_required(ASTRA_ADD_ELECTION)
+def election_start_progress_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    """Poll target for the credential delivery started by ``election_start_api``."""
+    return JsonResponse(_start_payload(election=_get_active_election(election_id), ok=True))
 
 
 @require_POST

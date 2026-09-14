@@ -57,6 +57,7 @@ class ElectionsResetCommandTests(TestCase):
                 "manager_open_election",
                 "detail_open_election",
                 "detail_tallied_election",
+                "large_start_election",
             },
         )
         self.assertEqual(
@@ -74,6 +75,7 @@ class ElectionsResetCommandTests(TestCase):
                 "elections-email-tallied-send",
                 "elections-list-viewer-shell",
                 "elections-list-manager-draft-routing",
+                "elections-start-large-electorate-progress",
                 "elections-detail-open-summary",
                 "elections-detail-operator-actions",
                 "elections-detail-tallied-results",
@@ -268,6 +270,7 @@ class ElectionsResetCommandTests(TestCase):
                 "ballot_verify",
                 "closed_detail",
                 "edit_draft",
+                "edit_large_start",
                 "open_detail",
                 "open_vote",
                 "tallied_detail",
@@ -291,6 +294,7 @@ class ElectionsResetCommandTests(TestCase):
                 "elections-email-tallied-send",
                 "elections-list-manager-draft-routing",
                 "elections-list-viewer-shell",
+                "elections-start-large-electorate-progress",
                 "elections-turnout-report-shell",
                 "elections-vote-ineligible-state",
                 "elections-vote-ranking-submit-and-copy-receipt",
@@ -302,6 +306,10 @@ class ElectionsResetCommandTests(TestCase):
         self.assertEqual(payload["routes"]["audit_tallied"], payload["scenarios"]["elections-audit-log-finished-shell"]["route_target"])
         self.assertEqual(payload["routes"]["algorithm"], payload["scenarios"]["elections-algorithm-shell"]["route_target"])
         self.assertEqual(payload["routes"]["edit_draft"], payload["scenarios"]["elections-edit-draft-save-and-start"]["route_target"])
+        self.assertEqual(
+            payload["routes"]["edit_large_start"],
+            payload["scenarios"]["elections-start-large-electorate-progress"]["route_target"],
+        )
 
         self._login_as_freeipa(payload["actors"]["manager"]["username"])
         vote_response = self.client.get(payload["routes"]["open_vote"], HTTP_ACCEPT="text/html")

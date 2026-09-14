@@ -7,12 +7,12 @@ from post_office.models import Email, EmailTemplate
 
 from core.elections_services import (
     close_election,
+    deliver_start_credential_emails,
     send_vote_receipt_email,
     send_voting_credential_email,
     submit_ballot,
 )
 from core.models import Election, VotingCredential
-from core.views_elections.edit import _issue_and_email_credentials
 
 
 class ElectionPrivacyTest(TestCase):
@@ -101,7 +101,7 @@ class ElectionPrivacyTest(TestCase):
         emails_after_close = Email.objects.filter(to=email_addr)
         self.assertEqual(emails_after_close.count(), 0)
 
-    def test_issue_and_email_credentials_uses_delivery_safe_privacy_override(self) -> None:
+    def test_credential_delivery_uses_delivery_safe_privacy_override(self) -> None:
         credential = type("_Cred", (), {"freeipa_username": "alice", "public_id": "cred-1"})()
         private_user = type(
             "_User",
@@ -118,12 +118,19 @@ class ElectionPrivacyTest(TestCase):
             return private_user
 
         with (
-            patch("core.views_elections.edit.issue_credentials_at_start_transition", return_value=[credential]),
-            patch("core.views_elections.edit.FreeIPAUser.get", side_effect=_get),
-            patch("core.views_elections.edit.elections_services.send_voting_credential_email", autospec=True) as send_mock,
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get),
+            patch("core.freeipa.user.FreeIPAUser.warm_user_cache"),
+            patch(
+                "core.elections_services.send_voting_credential_email",
+                autospec=True,
+                return_value=None,
+            ) as send_mock,
         ):
-            total, emailed, skipped, failures = _issue_and_email_credentials(None, self.election)
+            delivery = deliver_start_credential_emails(election=self.election, credentials=[credential])
 
-        self.assertEqual((total, emailed, skipped, failures), (1, 1, 0, 0))
+        self.assertEqual(
+            (delivery.total, delivery.emailed, delivery.skipped, delivery.failures),
+            (1, 1, 0, 0),
+        )
         send_mock.assert_called_once()
         self.assertEqual(send_mock.call_args.kwargs["email"], "alice@example.com")

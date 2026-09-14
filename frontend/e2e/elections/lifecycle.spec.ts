@@ -82,12 +82,59 @@ test("elections-edit-draft-save-and-start opens the draft start confirmation mod
   await loginViaForm(page, manager.username, manager.password);
   await page.goto(resetState.routes.edit_draft);
 
+  // Opening the dialog only reads the start preview; nothing is committed until
+  // the confirmation button is pressed, so the shared draft stays untouched.
   await page.getByRole("button", { name: "Start Election", exact: true }).click();
-  await expect(page.locator("#start-election-modal")).toBeVisible();
-  await expect(page.locator("#start-election-modal")).toContainText("This will open the election and email voting credentials to all eligible voters.");
-  await expect(page.locator("#start-election-modal")).toContainText("Eligible voters:");
-  await page.locator("#start-election-modal").getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(page.locator("#start-election-modal")).not.toBeVisible();
+  const confirmModal = page.locator("#start-election-modal");
+  await expect(confirmModal).toBeVisible();
+  await expect(confirmModal).toContainText("This will open the election and email voting credentials to all eligible voters.");
+  await expect(confirmModal).toContainText("Eligible voters:");
+  await confirmModal.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(confirmModal).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Election edit", exact: true })).toBeVisible();
+});
+
+// As an election operator starting an election with a large electorate, I can watch
+// credential delivery progress instead of wondering whether my click registered.
+test("elections-start-large-electorate-progress reports credential delivery progress to completion", async ({ page }) => {
+  const manager = resetState.actors.manager;
+  const electorateSize = resetState.large_electorate_size;
+
+  await loginViaForm(page, manager.username, manager.password);
+  await page.goto(resetState.routes.edit_large_start);
+
+  // The start control relabels itself while running, so address it structurally.
+  const startButton = page.locator("[data-election-start-automation-vue-root] button.btn-success");
+  await startButton.click();
+
+  const confirmModal = page.locator("#start-election-modal");
+  await expect(confirmModal).toBeVisible();
+  await expect(confirmModal).toContainText("vacant seat");
+  await expect(confirmModal.locator(".js-eligible-voters-count")).toHaveText(String(electorateSize));
+
+  await confirmModal.locator("#start-election-submit").click();
+
+  const counts = page.locator("[data-election-start-progress-counts]");
+  await expect(counts).toBeVisible();
+  await expect(counts).toContainText(new RegExp(`\\d+ of ${electorateSize} credential emails sent`));
+
+  // A second click while delivery runs must not start anything again.
+  await expect(startButton).toHaveText("Starting...");
+  await expect(startButton).toBeDisabled();
+
+  const progressModal = page.locator("[data-election-start-automation-vue-root] .modal").filter({ has: counts });
+  await expect(progressModal.locator(".modal-title")).toHaveText("Starting election...");
+
+  const continueButton = page.locator("#start-election-continue");
+  await expect(continueButton).toBeEnabled({ timeout: 300_000 });
+  await expect(progressModal.locator(".modal-title")).toHaveText("Election started");
+  await expect(progressModal.locator(".progress-bar")).toHaveText("100%");
+  await expect(counts).toContainText(`${electorateSize} of ${electorateSize} credential emails sent`);
+
+  await continueButton.click();
+  await expect(page.getByRole("button", { name: "Conclude Election", exact: true })).toBeVisible();
 });
 
 // As an election operator, I can close an open election with or without immediate tally.

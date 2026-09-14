@@ -138,7 +138,7 @@ class Phase1ElectionSignalTests(TestCase):
         )
         return election
 
-    def test_election_opened_signal_emitted_from_edit_view(self) -> None:
+    def test_election_opened_signal_emitted_when_an_operator_starts_an_election(self) -> None:
         now = timezone.now()
         started_at = now + datetime.timedelta(hours=2)
         election = Election.objects.create(
@@ -190,14 +190,16 @@ class Phase1ElectionSignalTests(TestCase):
         self._login_as_freeipa_user("admin")
         self._grant_manage_elections("admin")
 
-        start_str = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
-        end_str = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
-
         signal_module = importlib.import_module("core.signals")
+
+        def _run_inline(target, *, name: str) -> None:
+            target()
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get") as freeipa_get,
-            patch("core.views_elections.edit.timezone.now", return_value=started_at),
+            patch("core.freeipa.user.FreeIPAUser.warm_user_cache"),
+            patch("core.elections_services.timezone.now", return_value=started_at),
+            patch("core.elections_start_progress._spawn", side_effect=_run_inline),
             patch("post_office.mail.send", autospec=True),
             patch.object(signal_module.election_opened, "send", autospec=True) as send_mock,
             self.captureOnCommitCallbacks(execute=True),
@@ -206,26 +208,9 @@ class Phase1ElectionSignalTests(TestCase):
             admin_user.username = "admin"
             freeipa_get.side_effect = [admin_user, Mock(username="voter1", email="voter1@example.com"), None, None]
 
-            response = self.client.post(
-                reverse("election-edit", args=[election.id]),
-                data={
-                    "action": "start_election",
-                    "name": election.name,
-                    "description": election.description,
-                    "url": election.url,
-                    "start_datetime": start_str,
-                    "end_datetime": end_str,
-                    "number_of_seats": str(election.number_of_seats),
-                    "quorum": str(election.quorum),
-                    "email_template_id": "",
-                    "subject": election.voting_email_subject,
-                    "html_content": election.voting_email_html,
-                    "text_content": election.voting_email_text,
-                },
-                follow=False,
-            )
+            response = self.client.post(reverse("api-election-start", args=[election.id]))
 
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
         send_mock.assert_called_once()
         kwargs = send_mock.call_args.kwargs
         self.assertEqual(kwargs.get("sender"), Election)

@@ -29,6 +29,8 @@ from core.views_elections.lifecycle import (
     election_extend_end_api,
     election_send_mail_credentials_api,
     election_start_api,
+    election_start_preview_api,
+    election_start_progress_api,
     election_tally_api,
 )
 from core.views_elections.reporting import elections_turnout_report_api, elections_turnout_report_detail_api
@@ -176,6 +178,16 @@ urlpatterns = [
     path("elections/<int:election_id>/auto-start", election_auto_start_api, name="api-election-auto-start"),
     path("elections/<int:election_id>/auto-end", election_auto_end_api, name="api-election-auto-end"),
     path("elections/<int:election_id>/start", election_start_api, name="api-election-start"),
+    path(
+        "elections/<int:election_id>/start-preview",
+        election_start_preview_api,
+        name="api-election-start-preview",
+    ),
+    path(
+        "elections/<int:election_id>/start-progress",
+        election_start_progress_api,
+        name="api-election-start-progress",
+    ),
     path(
         "elections/<int:election_id>/tally",
         election_tally_api,

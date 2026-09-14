@@ -145,8 +145,42 @@ export interface ElectionConcludeActionBootstrap {
 
 export interface ElectionStartAutomationBootstrap {
   startApiUrl: string;
+  startPreviewApiUrl: string;
+  startProgressApiUrl: string;
   autoStartApiUrl: string;
   autoStartEnabled: boolean;
+}
+
+export interface ElectionStartPreview {
+  election_name: string;
+  number_of_seats: number;
+  candidate_count: number;
+  eligible_voter_count: number;
+}
+
+export interface ElectionStartPreviewResponse {
+  ok: boolean;
+  start_preview?: ElectionStartPreview | null;
+}
+
+export type ElectionStartProgressState = "running" | "done" | "failed" | "stalled";
+
+export interface ElectionStartProgress {
+  state: ElectionStartProgressState;
+  total: number;
+  processed: number;
+  emailed: number;
+  skipped: number;
+  failures: number;
+  message: string;
+  updated_at: number;
+}
+
+export interface ElectionStartResponse {
+  ok: boolean;
+  errors?: string[];
+  election?: { status: string; auto_start_enabled: boolean };
+  start_progress?: ElectionStartProgress | null;
 }
 
 export interface ElectionTallyActionBootstrap {
@@ -244,12 +278,16 @@ export function readElectionConcludeActionBootstrap(root: HTMLElement): Election
 
 export function readElectionStartAutomationBootstrap(root: HTMLElement): ElectionStartAutomationBootstrap | null {
   const startApiUrl = String(root.dataset.electionStartApiUrl || "").trim();
+  const startPreviewApiUrl = String(root.dataset.electionStartPreviewApiUrl || "").trim();
+  const startProgressApiUrl = String(root.dataset.electionStartProgressApiUrl || "").trim();
   const autoStartApiUrl = String(root.dataset.electionAutoStartApiUrl || "").trim();
-  if (!startApiUrl || !autoStartApiUrl) {
+  if (!startApiUrl || !startPreviewApiUrl || !startProgressApiUrl || !autoStartApiUrl) {
     return null;
   }
   return {
     startApiUrl,
+    startPreviewApiUrl,
+    startProgressApiUrl,
     autoStartApiUrl,
     autoStartEnabled: root.dataset.electionAutoStartEnabled === "true",
   };

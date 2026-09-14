@@ -3,34 +3,23 @@
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
-from django.db import transaction
-from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
+from django.http import HttpRequest, HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
-from post_office.models import Email, EmailTemplate
+from post_office.models import EmailTemplate
 
-from core import elections_eligibility, elections_services
-from core import signals as astra_signals
+from core import elections_eligibility
 from core.election_nominators import parse_nominator_identifier
 from core.elections_eligibility import ElectionEligibilityError
-from core.elections_services import (
-    election_genesis_chain_hash,
-    issue_credentials_at_start_transition,
-)
-from core.elections_timestamping import schedule_attestation
 from core.forms_elections import (
     CandidateWizardFormSet,
     ElectionDetailsForm,
     ElectionVotingEmailForm,
     ExclusionGroupWizardFormSet,
-    is_self_nomination,
     parse_datetime_local_value,
 )
-from core.freeipa.user import FreeIPAUser
-from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.models import (
-    AuditLogEntry,
     Candidate,
     Election,
     ExclusionGroup,
@@ -38,14 +27,13 @@ from core.models import (
     Organization,
 )
 from core.permissions import ASTRA_ADD_ELECTION
-from core.templated_email import bulk_save_emails, placeholderize_empty_values, render_templated_email_preview
+from core.templated_email import placeholderize_empty_values, render_templated_email_preview
 from core.user_labels import user_choice_from_freeipa
 from core.views_elections._helpers import (
     _election_email_preview_context,
     _extend_election_end_from_post,
     _get_active_election,
 )
-from core.views_utils import get_username
 
 
 def _configure_candidate_choices(
@@ -250,275 +238,6 @@ def _save_candidates_and_groups(
             if c is None:
                 continue
             ExclusionGroupCandidate.objects.create(exclusion_group=group, candidate=c)
-
-
-def _issue_and_email_credentials(
-    request: HttpRequest, election: Election,
-) -> tuple[int, int, int, int]:
-    """Issue voting credentials and email voters.
-
-    Returns (total_credentials, emailed, skipped, failures).
-    """
-    credentials = issue_credentials_at_start_transition(election=election)
-    emailed = 0
-    skipped = 0
-    failures = 0
-
-    # Pre-warm individual FreeIPA user cache entries from the all-users list so
-    # that the per-voter get() calls below are instant cache hits instead of N
-    # individual IPA RPC calls.
-    usernames = [
-        str(c.freeipa_username or "").strip()
-        for c in credentials
-        if str(c.freeipa_username or "").strip()
-    ]
-    FreeIPAUser.warm_user_cache(usernames)
-
-    subject_template = election.voting_email_subject
-    html_template = election.voting_email_html
-    text_template = election.voting_email_text
-    use_snapshot = bool(subject_template.strip() or html_template.strip() or text_template.strip())
-
-    # Render all emails without committing to the database, then bulk-insert.
-    pending_emails: list[Email] = []
-    for cred in credentials:
-        username = str(cred.freeipa_username or "").strip()
-        if not username:
-            skipped += 1
-            continue
-
-        try:
-            user = FreeIPAUser.get(username, respect_privacy=False)
-        except Exception:
-            failures += 1
-            continue
-        if user is None or not user.email:
-            skipped += 1
-            continue
-
-        tz_name = _get_freeipa_timezone_name(user)
-
-        try:
-            email_obj = elections_services.send_voting_credential_email(
-                request=request,
-                election=election,
-                username=username,
-                email=user.email,
-                credential_public_id=str(cred.public_id),
-                tz_name=tz_name,
-                subject_template=subject_template if use_snapshot else None,
-                html_template=html_template if use_snapshot else None,
-                text_template=text_template if use_snapshot else None,
-                commit=False,
-            )
-        except Exception:
-            failures += 1
-            continue
-        if email_obj is not None and isinstance(email_obj, Email):
-            pending_emails.append(email_obj)
-        emailed += 1
-
-    bulk_save_emails(pending_emails)
-
-    return len(credentials), emailed, skipped, failures
-
-
-def _handle_start_election(
-    request: HttpRequest,
-    election: Election | None,
-    details_form: ElectionDetailsForm,
-    email_form: ElectionVotingEmailForm,
-) -> HttpResponse | None:
-    """Validate and start an election, issuing credentials and emailing voters.
-
-    Returns a redirect on success, or None if validation fails (caller should
-    fall through to re-render the form with error messages).
-    """
-    if election is None:
-        messages.error(request, "Save the draft first.")
-        return None
-    if election.status != Election.Status.draft:
-        messages.error(request, "Only draft elections can be started.")
-        return None
-    if not details_form.is_valid() or not email_form.is_valid():
-        messages.error(request, "Please correct the errors below.")
-        return None
-    if not Candidate.objects.filter(election=election).exists():
-        messages.error(request, "Add at least one candidate before starting the election.")
-        return None
-
-    candidates = list(
-        Candidate.objects.filter(election=election).only("freeipa_username", "nominated_by")
-    )
-    self_nominations = sorted(
-        {
-            str(c.freeipa_username or "").strip()
-            for c in candidates
-            if is_self_nomination(
-                candidate_username=c.freeipa_username,
-                nominator_username=c.nominated_by,
-            )
-        },
-        key=str.lower,
-    )
-    candidate_usernames = [
-        str(c.freeipa_username or "").strip()
-        for c in candidates
-        if str(c.freeipa_username or "").strip()
-    ]
-    nominator_usernames = [
-        str(c.nominated_by or "").strip()
-        for c in candidates
-        if str(c.nominated_by or "").strip()
-    ]
-
-    if self_nominations:
-        messages.error(request, "Candidates cannot nominate themselves.")
-        return None
-
-    try:
-        start_eligible_voters = elections_eligibility.eligible_voters_from_memberships(
-            election=election,
-            require_fresh=True,
-        )
-        no_eligible_voters = not start_eligible_voters
-        validation = elections_eligibility.validate_candidates_for_election(
-            election=election,
-            candidate_usernames=candidate_usernames,
-            nominator_usernames=nominator_usernames,
-            eligible_group_cn=str(election.eligible_group_cn or "").strip(),
-            require_fresh=True,
-        )
-    except ElectionEligibilityError as exc:
-        messages.error(request, str(exc))
-        return None
-
-    has_issues = (
-        validation.disqualified_candidates
-        or validation.disqualified_nominators
-        or validation.ineligible_candidates
-        or validation.ineligible_nominators
-    )
-    if has_issues or no_eligible_voters:
-        if validation.disqualified_candidates:
-            names = ", ".join(sorted(validation.disqualified_candidates, key=str.lower))
-            messages.error(
-                request,
-                "Election committee members cannot be candidates for this election: " + names,
-            )
-        if validation.disqualified_nominators:
-            names = ", ".join(sorted(validation.disqualified_nominators, key=str.lower))
-            messages.error(
-                request,
-                "Election committee members cannot nominate candidates for this election: " + names,
-            )
-        if validation.ineligible_candidates:
-            names = ", ".join(sorted(validation.ineligible_candidates, key=str.lower))
-            messages.error(request, "Candidate is not eligible: " + names)
-        if validation.ineligible_nominators:
-            sorted_nominators = sorted(validation.ineligible_nominators, key=str.lower)
-            organization_nominator_ids: set[int] = set()
-            parsed_nominators: list[tuple[str, int | None]] = []
-            for nominator in sorted_nominators:
-                parsed_nominator = parse_nominator_identifier(nominator)
-                parsed_nominators.append((nominator, parsed_nominator.organization_id))
-                if parsed_nominator.organization_id is not None:
-                    organization_nominator_ids.add(parsed_nominator.organization_id)
-
-            organizations_by_id = {
-                organization.id: organization.name
-                for organization in Organization.objects.filter(pk__in=organization_nominator_ids).only("id", "name")
-            }
-
-            display_nominators: list[str] = []
-            for nominator, organization_id in parsed_nominators:
-                if organization_id is None:
-                    display_nominators.append(nominator)
-                else:
-                    display_nominators.append(organizations_by_id.get(organization_id, "organization nominator"))
-
-            names = ", ".join(display_nominators)
-            messages.error(request, "One or more nominators are not eligible for this election: " + names)
-        if no_eligible_voters:
-            messages.error(request, "No eligible voters were found for this election.")
-        return None
-
-    # All validations passed — commit the election start.
-    started_at = timezone.now()
-
-    with transaction.atomic():
-        locked = Election.objects.select_for_update().get(pk=election.pk)
-        if locked.status != Election.Status.draft:
-            messages.error(request, "This election has already been started.")
-            return None
-
-        # Re-bind details to the locked row so concurrent updates cannot race this write.
-        locked_form = ElectionDetailsForm(details_form.data, instance=locked)
-        if not locked_form.is_valid():
-            messages.error(request, "Please correct the errors below.")
-            return None
-        locked = locked_form.save(commit=False)
-
-        # Align the published start timestamp with when the election actually opens.
-        locked.start_datetime = started_at
-        _apply_email_template_from_form(locked, email_form)
-
-        locked.status = Election.Status.open
-        locked.save()
-
-        total_credentials, emailed, skipped, failures = _issue_and_email_credentials(request, locked)
-
-        username = get_username(request)
-        candidate_snapshot = list(
-            Candidate.objects.filter(election=locked)
-            .only("id", "freeipa_username", "tiebreak_uuid")
-            .order_by("freeipa_username", "id")
-        )
-        payload: dict[str, object] = {
-            "eligible_voters": total_credentials,
-            "emailed": emailed,
-            "skipped": skipped,
-            "failures": failures,
-            "genesis_chain_hash": election_genesis_chain_hash(locked.id),
-            "candidates": [
-                {
-                    "id": c.id,
-                    "freeipa_username": c.freeipa_username,
-                    "tiebreak_uuid": str(c.tiebreak_uuid),
-                }
-                for c in candidate_snapshot
-            ],
-        }
-        if username:
-            payload["actor"] = username
-
-        audit_entry = AuditLogEntry.objects.create(
-            election=locked,
-            event_type="election_started",
-            payload=payload,
-            is_public=True,
-        )
-        schedule_attestation(audit_entry)
-
-        opened_election_id = locked.id
-
-        def _send_opened_signal() -> None:
-            committed_election = Election.objects.get(pk=opened_election_id)
-            astra_signals.election_opened.send(
-                sender=Election,
-                election=committed_election,
-                actor=username,
-            )
-
-        transaction.on_commit(_send_opened_signal)
-
-    if emailed:
-        messages.success(request, f"Election started; emailed {emailed} voter(s).")
-    if skipped:
-        messages.warning(request, f"Skipped {skipped} voter(s) (missing user/email).")
-    if failures:
-        messages.error(request, f"Failed to email {failures} voter(s).")
-    return redirect("election-detail", election_id=locked.id)
 
 
 @permission_required(ASTRA_ADD_ELECTION, raise_exception=True, login_url=reverse_lazy("users"))
@@ -785,12 +504,7 @@ def election_edit(request, election_id: int):
                 messages.success(request, "Draft saved.")
                 return redirect("election-edit", election_id=election.id)
 
-        if action == "start_election":
-            result = _handle_start_election(request, election, details_form, email_form)
-            if result is not None:
-                return result
-        else:
-            messages.error(request, "Please correct the errors below.")
+        messages.error(request, "Please correct the errors below.")
     else:
         details_form = ElectionDetailsForm(instance=election)
         if election_locked:
@@ -861,13 +575,6 @@ def election_edit(request, election_id: int):
         ]
         group_empty_form.fields["candidate_usernames"].choices = candidate_choices
 
-    candidate_count = (
-        Candidate.objects.filter(election=election).count()
-        if election is not None and election.pk is not None
-        else 0
-    )
-    vacant_seats_count = max((election.number_of_seats if election is not None else 0) - candidate_count, 0)
-
     return render(
         request,
         "core/election_edit.html",
@@ -881,8 +588,6 @@ def election_edit(request, election_id: int):
             "group_empty_form": group_empty_form,
             "eligible_voters_count": len(eligible_voter_usernames),
             "nomination_eligible_voters_count": len(nomination_eligible_usernames),
-            "candidate_count": candidate_count,
-            "vacant_seats_count": vacant_seats_count,
             "templates": templates,
             "rendered_preview": rendered_preview,
             "email_template_variables": email_template_variables,

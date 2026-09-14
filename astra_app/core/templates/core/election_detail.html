@@ -100,6 +100,8 @@
             <div
               data-election-start-automation-root
               data-election-start-api-url="{% url 'api-election-start' election.id %}"
+              data-election-start-preview-api-url="{% url 'api-election-start-preview' election.id %}"
+              data-election-start-progress-api-url="{% url 'api-election-start-progress' election.id %}"
               data-election-auto-start-api-url="{% url 'api-election-auto-start' election.id %}"
               data-election-auto-start-enabled="{% if election.auto_start_enabled %}true{% else %}false{% endif %}"
             ></div>

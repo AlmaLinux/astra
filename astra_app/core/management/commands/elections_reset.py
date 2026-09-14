@@ -14,6 +14,7 @@ from core.elections_services import (
     close_election,
     election_quorum_status,
     issue_credentials_at_start_transition,
+    scrub_election_emails,
     submit_ballot,
     tally_election,
 )
@@ -45,6 +46,7 @@ DRAFT_MANAGER_ALIAS: Final[str] = "draft_manager_election"
 MANAGER_OPEN_ALIAS: Final[str] = "manager_open_election"
 DETAIL_OPEN_ALIAS: Final[str] = "detail_open_election"
 DETAIL_TALLIED_ALIAS: Final[str] = "detail_tallied_election"
+LARGE_START_ALIAS: Final[str] = "large_start_election"
 
 CLOSED_RECEIPT_ALIAS: Final[str] = "verify_closed_receipt"
 TALLIED_RECEIPT_ALIAS: Final[str] = "verify_tallied_receipt"
@@ -56,11 +58,22 @@ PAST_ELECTION_NAME: Final[str] = "Wave 6 Past Election"
 DRAFT_ELECTION_NAME: Final[str] = "Wave 6 Draft Election"
 MANAGER_OPEN_ELECTION_NAME: Final[str] = "Wave 6 Manager Open Election"
 TALLIED_ELECTION_NAME: Final[str] = "Wave 6 Tallied Election"
+LARGE_START_ELECTION_NAME: Final[str] = "Wave 6 Large Start Election"
 
 MANAGER_ELIGIBLE_USERNAME: Final[str] = MANAGER_USERNAME
 CANDIDATE_ONE_USERNAME: Final[str] = "regular18"
 CANDIDATE_TWO_USERNAME: Final[str] = "regular19"
 ELECTIONS_ELIGIBLE_GROUP_CN: Final[str] = "wave6-e2e-electorate"
+
+# A draft election whose electorate is large enough that credential delivery
+# visibly takes time, so the start progress dialog can be exercised end to end.
+LARGE_ELECTORATE_GROUP_CN: Final[str] = "wave6-e2e-large-electorate"
+LARGE_ELECTORATE_SIZE: Final[int] = 260
+LARGE_VOTER_USERNAMES: Final[tuple[str, ...]] = tuple(
+    f"wave6voter{index:03d}" for index in range(1, LARGE_ELECTORATE_SIZE + 1)
+)
+LARGE_CANDIDATE_USERNAME: Final[str] = LARGE_VOTER_USERNAMES[0]
+LARGE_NOMINATOR_USERNAME: Final[str] = LARGE_VOTER_USERNAMES[1]
 
 SLICE_ELECTION_NAMES: Final[tuple[str, ...]] = (
     OPEN_ELECTION_NAME,
@@ -68,6 +81,7 @@ SLICE_ELECTION_NAMES: Final[tuple[str, ...]] = (
     DRAFT_ELECTION_NAME,
     MANAGER_OPEN_ELECTION_NAME,
     TALLIED_ELECTION_NAME,
+    LARGE_START_ELECTION_NAME,
 )
 
 class BallotSeedDefinition(TypedDict):
@@ -148,6 +162,7 @@ class Command(BaseCommand):
         with transaction.atomic():
             self._ensure_membership_types()
             self._clear_slice_memberships()
+            self._ensure_large_electorate()
             elections_by_alias = self._upsert_slice_elections()
             self._ensure_manager_permission()
             self._ensure_signed_coc()
@@ -218,6 +233,54 @@ class Command(BaseCommand):
             "fasgroup": ["FALSE"],
         }
         e2e_registry._write_e2e_group_registry(group_registry)
+
+    def _ensure_large_electorate(self) -> None:
+        """Register a few hundred fake voters so a start is slow enough to watch.
+
+        The synthetic voters live outside the shared ``packagers`` group so the
+        other E2E themes keep their deterministic user inventory.
+        """
+        user_registry = e2e_registry._e2e_registry()
+        for username in LARGE_VOTER_USERNAMES:
+            user_registry[username] = {
+                "password": ACTOR_PASSWORD,
+                "user": {
+                    "uid": [username],
+                    "givenname": [username],
+                    "sn": ["Voter"],
+                    "displayname": [f"{username} Voter"],
+                    "cn": [f"{username} Voter"],
+                    "mail": [f"{username}@example.test"],
+                    "memberof_group": [LARGE_ELECTORATE_GROUP_CN],
+                    "timezone": ["UTC"],
+                    "fasIsPrivate": ["FALSE"],
+                },
+            }
+        e2e_registry._write_e2e_user_registry(user_registry)
+
+        group_registry = e2e_registry._e2e_group_registry()
+        group_registry[LARGE_ELECTORATE_GROUP_CN] = {
+            "cn": [LARGE_ELECTORATE_GROUP_CN],
+            "description": ["Wave 6 E2E large election electorate"],
+            "member_user": list(LARGE_VOTER_USERNAMES),
+            "member_group": [],
+            "membermanager_user": [],
+            "membermanager_group": [],
+            "fasgroup": ["FALSE"],
+        }
+        e2e_registry._write_e2e_group_registry(group_registry)
+
+        self._upsert_memberships(
+            definitions=tuple(
+                {
+                    "username": username,
+                    "membership_type_code": "individual",
+                    "created_at": _dt(year=2026, month=1, day=5, hour=10),
+                    "expires_at": _dt(year=2026, month=12, day=31, hour=10),
+                }
+                for username in LARGE_VOTER_USERNAMES
+            )
+        )
 
     def _upsert_slice_elections(self) -> dict[str, Election]:
         replace_when_ballots_exist_aliases = {
@@ -302,6 +365,25 @@ class Command(BaseCommand):
                     "eligible_group_cn": ELECTIONS_ELIGIBLE_GROUP_CN,
                     "status": Election.Status.draft,
                     "tally_result": {},
+                },
+            ),
+            (
+                LARGE_START_ALIAS,
+                {
+                    "name": LARGE_START_ELECTION_NAME,
+                    "description": "Wave 6 large-electorate start progress coverage.",
+                    "url": "",
+                    "start_datetime": _dt(year=2026, month=6, day=1, hour=10),
+                    "end_datetime": _dt(year=2026, month=6, day=10, hour=10),
+                    # One candidate for two seats, so the start confirmation also
+                    # has to show its vacant seat warning.
+                    "number_of_seats": 2,
+                    "eligible_group_cn": LARGE_ELECTORATE_GROUP_CN,
+                    "status": Election.Status.draft,
+                    "tally_result": {},
+                    "voting_email_subject": "Wave 6 large electorate credential",
+                    "voting_email_html": "<p>Hello {{ username }}, vote at {{ vote_url_with_credential_fragment }}.</p>",
+                    "voting_email_text": "Hello {{ username }}, vote at {{ vote_url_with_credential_fragment }}.",
                 },
             ),
             (
@@ -481,6 +563,21 @@ class Command(BaseCommand):
 
         self._upsert_candidates(election=draft_election, definitions=())
         self._upsert_candidates(election=manager_open_election, definitions=())
+
+        large_start_election = elections_by_alias[LARGE_START_ALIAS]
+        self._upsert_candidates(
+            election=large_start_election,
+            definitions=(
+                {
+                    "username": LARGE_CANDIDATE_USERNAME,
+                    "nominated_by": LARGE_NOMINATOR_USERNAME,
+                    "description": "Large electorate progress candidate.",
+                },
+            ),
+        )
+        # Starting this election is the point of its scenario, so every reset has
+        # to hand it back as an unstarted draft with no credential mail pending.
+        scrub_election_emails(election=large_start_election)
         open_candidate_definitions = (
             {"username": "alice", "nominated_by": "regular21", "description": "Platform continuity candidate."},
             {"username": "bob", "nominated_by": "regular22", "description": "Infrastructure reliability candidate."},
@@ -534,12 +631,20 @@ class Command(BaseCommand):
                 closed_election,
                 draft_election,
                 manager_open_election,
+                large_start_election,
             ]
         ).delete()
         employees_group.candidates.set([tallied_candidates[0], tallied_candidates[1]])
 
         self._clear_slice_workflow_state(
-            elections=(open_election, closed_election, draft_election, manager_open_election, tallied_election)
+            elections=(
+                open_election,
+                closed_election,
+                draft_election,
+                manager_open_election,
+                tallied_election,
+                large_start_election,
+            )
         )
 
         open_credentials = self._start_seed_election(
@@ -695,6 +800,7 @@ class Command(BaseCommand):
             MANAGER_OPEN_ALIAS: self._election_payload(elections_by_alias[MANAGER_OPEN_ALIAS], route_name="election-detail"),
             DETAIL_OPEN_ALIAS: self._election_payload(open_election, route_name="election-detail"),
             DETAIL_TALLIED_ALIAS: self._election_payload(tallied_election, route_name="election-detail"),
+            LARGE_START_ALIAS: self._election_payload(large_start_election, route_name="election-edit"),
         }
 
         return {
@@ -705,6 +811,7 @@ class Command(BaseCommand):
                 "manager": {"username": MANAGER_USERNAME, "password": ACTOR_PASSWORD},
             },
             "elections": elections_payload,
+            "large_electorate_size": LARGE_ELECTORATE_SIZE,
             "receipts": {
                 CLOSED_RECEIPT_ALIAS: {
                     "ballot_hash": _ballot_hash_for_seed(
@@ -751,6 +858,7 @@ class Command(BaseCommand):
                 "ballot_verify": reverse("ballot-verify"),
                 "closed_detail": elections_payload[PAST_LIST_ALIAS]["route"],
                 "edit_draft": elections_payload[DRAFT_MANAGER_ALIAS]["route"],
+                "edit_large_start": elections_payload[LARGE_START_ALIAS]["route"],
                 "open_detail": elections_payload[DETAIL_OPEN_ALIAS]["route"],
                 "open_vote": reverse("election-vote", args=[open_election.id]),
                 "tallied_detail": elections_payload[DETAIL_TALLIED_ALIAS]["route"],
@@ -816,6 +924,12 @@ class Command(BaseCommand):
                     "aliases": [],
                     "destructive": False,
                     "route_target": reverse("election-algorithm"),
+                },
+                "elections-start-large-electorate-progress": {
+                    "actor": MANAGER_USERNAME,
+                    "aliases": [LARGE_START_ALIAS],
+                    "destructive": True,
+                    "route_target": elections_payload[LARGE_START_ALIAS]["route"],
                 },
                 "elections-edit-draft-save-and-start": {
                     "actor": MANAGER_USERNAME,

@@ -36,6 +36,7 @@ export type ElectionsResetState = {
     manager: Actor;
   };
   elections: Record<string, ElectionRouteState>;
+  large_electorate_size: number;
   receipts: Record<string, ReceiptState>;
   credentials: Record<string, CredentialState>;
   routes: {
@@ -44,6 +45,7 @@ export type ElectionsResetState = {
     ballot_verify: string;
     closed_detail: string;
     edit_draft: string;
+    edit_large_start: string;
     open_detail: string;
     open_vote: string;
     tallied_detail: string;

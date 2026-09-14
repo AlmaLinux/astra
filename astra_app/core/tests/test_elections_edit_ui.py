@@ -183,8 +183,7 @@ class ElectionEditPermissionTests(_CoreCategoriesTestCase):
         # In create mode (unsaved election), showing a disabled "Start" button is confusing.
         # We should instead guide the user to save the draft first.
         self.assertContains(resp, "Save the draft to enable starting the election")
-        self.assertNotContains(resp, 'data-target="#start-election-modal"')
-        self.assertNotContains(resp, 'id="start-election-modal"')
+        self.assertNotContains(resp, "data-election-start-automation-root")
         self.assertNotContains(resp, "btn-success")
         self.assertContains(resp, 'class="btn btn-primary btn-block"', html=False)
 
@@ -209,7 +208,7 @@ class ElectionEditPermissionTests(_CoreCategoriesTestCase):
             r"<button[^>]*formnovalidate[^>]*title=\"Save changes as a draft\"[^>]*>",
         )
 
-    def test_edit_shows_vacant_seat_warning_in_start_modal(self) -> None:
+    def test_edit_mounts_the_start_control_with_its_api_endpoints(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
@@ -232,13 +231,12 @@ class ElectionEditPermissionTests(_CoreCategoriesTestCase):
         resp = self.client.get(reverse("election-edit", args=[election.id]))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "This election has 3 seats but only 1 candidate")
-        self.assertNotContains(resp, "btn-success")
-        self.assertContains(resp, 'title="Open the election and send credentials"', html=False)
-        self.assertContains(resp, 'class="btn btn-primary btn-block"', html=False)
-        self.assertContains(resp, 'title="Start the election and send credentials"', html=False)
-        self.assertContains(resp, 'class="btn btn-primary"', html=False)
-        self.assertContains(resp, "vacant seat")
+        # The confirmation and progress dialogs are rendered by the Vue start
+        # control; the page only has to hand it the endpoints it drives.
+        self.assertContains(resp, "data-election-start-automation-root")
+        self.assertContains(resp, reverse("api-election-start", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-start-preview", args=[election.id]))
+        self.assertContains(resp, reverse("api-election-start-progress", args=[election.id]))
 
 
 class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
@@ -548,81 +546,7 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
         self.assertEqual(election.status, Election.Status.draft)
         self.assertFalse(Candidate.objects.filter(election=election).exists())
 
-    def test_start_election_submit_button_allows_invalid_submit_for_server_validation(self) -> None:
-        self._login_as_freeipa_user("admin")
-        FreeIPAPermissionGrant.objects.create(
-            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
-            principal_name="admin",
-            permission=ASTRA_ADD_ELECTION,
-        )
-
-        now = timezone.now()
-        election = Election.objects.create(
-            name="Draft election",
-            description="",
-            url="",
-            start_datetime=now + datetime.timedelta(days=10),
-            end_datetime=now + datetime.timedelta(days=11),
-            number_of_seats=1,
-            status=Election.Status.draft,
-        )
-
-        resp = self.client.get(reverse("election-edit", args=[election.id]))
-        self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode("utf-8")
-        self.assertRegex(
-            html,
-            r"<button(?=[^>]*title=\"Start the election and send credentials\")(?=[^>]*data-allow-invalid-submit=\"true\")[^>]*>",
-        )
-        self.assertNotRegex(
-            html,
-            r"<button[^>]*title=\"Start the election and send credentials\"[^>]*formnovalidate[^>]*>",
-        )
-
-    def test_start_election_without_candidates_shows_specific_error_without_generic_duplicate(self) -> None:
-        self._login_as_freeipa_user("admin")
-        FreeIPAPermissionGrant.objects.create(
-            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
-            principal_name="admin",
-            permission=ASTRA_ADD_ELECTION,
-        )
-
-        now = timezone.now()
-        election = Election.objects.create(
-            name="Draft election",
-            description="",
-            url="",
-            start_datetime=now + datetime.timedelta(days=10),
-            end_datetime=now + datetime.timedelta(days=11),
-            number_of_seats=1,
-            quorum=10,
-            status=Election.Status.draft,
-        )
-
-        resp = self.client.post(
-            reverse("election-edit", args=[election.id]),
-            data={
-                "action": "start_election",
-                "name": election.name,
-                "description": election.description,
-                "url": election.url,
-                "start_datetime": election.start_datetime.strftime("%Y-%m-%dT%H:%M"),
-                "end_datetime": election.end_datetime.strftime("%Y-%m-%dT%H:%M"),
-                "number_of_seats": str(election.number_of_seats),
-                "quorum": str(election.quorum),
-                "email_template_id": "",
-                "subject": "",
-                "html_content": "",
-                "text_content": "",
-            },
-            follow=False,
-        )
-
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Add at least one candidate before starting the election.")
-        self.assertNotContains(resp, "Please correct the errors below.")
-
-    def test_start_election_with_zero_seats_shows_validation_error(self) -> None:
+    def test_save_draft_never_persists_an_invalid_seat_count(self) -> None:
         self._login_as_freeipa_user("admin")
         FreeIPAPermissionGrant.objects.create(
             principal_type=FreeIPAPermissionGrant.PrincipalType.user,
@@ -664,7 +588,7 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
             resp = self.client.post(
                 reverse("election-edit", args=[election.id]),
                 data={
-                    "action": "start_election",
+                    "action": "save_draft",
                     "name": election.name,
                     "description": election.description,
                     "url": election.url,
@@ -676,14 +600,22 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
                     "subject": "",
                     "html_content": "",
                     "text_content": "",
+                    "candidates-TOTAL_FORMS": "0",
+                    "candidates-INITIAL_FORMS": "0",
+                    "candidates-MIN_NUM_FORMS": "0",
+                    "candidates-MAX_NUM_FORMS": "1000",
+                    "groups-TOTAL_FORMS": "0",
+                    "groups-INITIAL_FORMS": "0",
+                    "groups-MIN_NUM_FORMS": "0",
+                    "groups-MAX_NUM_FORMS": "1000",
                 },
                 follow=False,
             )
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Please correct the errors below.")
-        self.assertContains(resp, "Ensure this value is greater than or equal to 1.")
+        self.assertEqual(resp.status_code, 302)
         election.refresh_from_db()
+        # Partial drafts are allowed, but an invalid seat count is never persisted.
+        self.assertEqual(election.number_of_seats, 1)
         self.assertEqual(election.status, Election.Status.draft)
 
     def test_new_election_post_save_draft_with_only_name_and_candidate_creates_partial_election(self) -> None:
@@ -789,27 +721,12 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
         self.assertEqual(save_resp.status_code, 302)
         election = Election.objects.get(name="Draft requiring completion")
 
-        start_resp = self.client.post(
-            reverse("election-edit", args=[election.id]),
-            data={
-                "action": "start_election",
-                "name": election.name,
-                "description": election.description,
-                "url": election.url,
-                "start_datetime": "",
-                "end_datetime": "",
-                "number_of_seats": "",
-                "quorum": "",
-                "email_template_id": "",
-                "subject": "",
-                "html_content": "",
-                "text_content": "",
-            },
-            follow=False,
-        )
+        start_resp = self.client.post(reverse("api-election-start", args=[election.id]))
 
-        self.assertEqual(start_resp.status_code, 200)
-        self.assertContains(start_resp, "Please correct the errors below.")
+        self.assertEqual(start_resp.status_code, 400)
+        self.assertTrue(start_resp.json()["errors"])
+        election.refresh_from_db()
+        self.assertEqual(election.status, Election.Status.draft)
         election.refresh_from_db()
         self.assertEqual(election.status, Election.Status.draft)
 
