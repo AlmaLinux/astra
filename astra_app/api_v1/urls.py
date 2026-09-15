@@ -24,6 +24,7 @@ from core.views_elections.detail import (
 from core.views_elections.lifecycle import (
     election_auto_end_api,
     election_auto_start_api,
+    election_complete_start_api,
     election_conclude_api,
     election_credential_email_template_api,
     election_extend_end_api,
@@ -190,6 +191,11 @@ urlpatterns = [
         "elections/<int:election_id>/mail-progress",
         election_mail_progress_api,
         name="api-election-mail-progress",
+    ),
+    path(
+        "elections/<int:election_id>/complete-start",
+        election_complete_start_api,
+        name="api-election-complete-start",
     ),
     path(
         "elections/<int:election_id>/tally",

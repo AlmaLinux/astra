@@ -58,6 +58,7 @@ class ElectionsResetCommandTests(TestCase):
                 "detail_open_election",
                 "detail_tallied_election",
                 "large_start_election",
+                "partial_delivery_election",
             },
         )
         self.assertEqual(
@@ -75,6 +76,7 @@ class ElectionsResetCommandTests(TestCase):
                 "elections-email-tallied-send",
                 "elections-list-viewer-shell",
                 "elections-list-manager-draft-routing",
+                "elections-complete-interrupted-credential-delivery",
                 "elections-remind-large-electorate-progress",
                 "elections-start-large-electorate-progress",
                 "elections-detail-open-summary",
@@ -271,6 +273,7 @@ class ElectionsResetCommandTests(TestCase):
                 "ballot_verify",
                 "closed_detail",
                 "detail_large_start",
+                "detail_partial_delivery",
                 "edit_draft",
                 "edit_large_start",
                 "open_detail",
@@ -296,6 +299,7 @@ class ElectionsResetCommandTests(TestCase):
                 "elections-email-tallied-send",
                 "elections-list-manager-draft-routing",
                 "elections-list-viewer-shell",
+                "elections-complete-interrupted-credential-delivery",
                 "elections-remind-large-electorate-progress",
                 "elections-start-large-electorate-progress",
                 "elections-turnout-report-shell",

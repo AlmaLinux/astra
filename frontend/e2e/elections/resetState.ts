@@ -37,6 +37,7 @@ export type ElectionsResetState = {
   };
   elections: Record<string, ElectionRouteState>;
   large_electorate_size: number;
+  partial_delivery_missing_count: number;
   receipts: Record<string, ReceiptState>;
   credentials: Record<string, CredentialState>;
   routes: {
@@ -47,6 +48,7 @@ export type ElectionsResetState = {
     edit_draft: string;
     edit_large_start: string;
     detail_large_start: string;
+    detail_partial_delivery: string;
     open_detail: string;
     open_vote: string;
     tallied_detail: string;

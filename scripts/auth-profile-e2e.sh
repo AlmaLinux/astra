@@ -133,6 +133,7 @@ declare -A SCENARIO_THEME_NAMES=(
   ["elections-detail-operator-actions"]="$ELECTIONS_THEME"
   ["elections-start-large-electorate-progress"]="$ELECTIONS_THEME"
   ["elections-remind-large-electorate-progress"]="$ELECTIONS_THEME"
+  ["elections-complete-interrupted-credential-delivery"]="$ELECTIONS_THEME"
   ["elections-turnout-report-shell"]="$ELECTIONS_THEME"
   ["elections-audit-log-finished-shell"]="$ELECTIONS_THEME"
   ["elections-ballot-verify-closed-public-state"]="$ELECTIONS_THEME"
@@ -255,6 +256,7 @@ Scenarios:
   elections-detail-operator-actions
   elections-start-large-electorate-progress
   elections-remind-large-electorate-progress
+  elections-complete-interrupted-credential-delivery
   elections-turnout-report-shell
   elections-audit-log-finished-shell
   elections-ballot-verify-closed-public-state

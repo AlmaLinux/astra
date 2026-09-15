@@ -15,7 +15,7 @@ from django.db.models import Count, Q, Sum
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
-from post_office.models import Email
+from post_office.models import Email, EmailTemplate
 
 from core import signals as astra_signals
 from core.election_nominators import parse_nominator_identifier
@@ -483,12 +483,17 @@ def send_voting_credential_email(
             reply_to=[settings.ELECTION_COMMITTEE_EMAIL],
             commit=commit,
         )
-        queued_email.context = _post_office_json_context({"election_id": election.id})
+        # Keep the delivery context minimal (the rendered body already holds the
+        # credential) but record who it went to, so a half-finished run can be
+        # completed without emailing anyone twice.
+        queued_email.context = _post_office_json_context(
+            {"election_id": election.id, "username": username}
+        )
         if commit:
             queued_email.save(update_fields=["context"])
         return queued_email
 
-    context = _post_office_json_context(context)
+    context = _post_office_json_context({**context, "election_id": election.id, "username": username})
     queued_email = queue_templated_email(
         recipients=[email],
         sender=settings.DEFAULT_FROM_EMAIL,
@@ -1317,6 +1322,179 @@ def deliver_election_emails(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class InterruptedStart:
+    """What an election start still owes after the run that should have done it.
+
+    A start issues credentials, emails every voter, then records and announces
+    itself. Anything that kills the process part way leaves one or both of the
+    last two steps undone.
+    """
+
+    credential_count: int
+    emailed_count: int
+    start_recorded: bool
+
+    @property
+    def missing_email_count(self) -> int:
+        return max(self.credential_count - self.emailed_count, 0)
+
+    @property
+    def is_interrupted(self) -> bool:
+        return self.missing_email_count > 0 or not self.start_recorded
+
+
+def credential_emails_queued_for(*, election: Election) -> Q:
+    """Match every credential email queued for this election."""
+    return Q(context__election_id=election.id)
+
+
+def interrupted_start(*, election: Election) -> InterruptedStart:
+    """Report what this election's start still owes.
+
+    Cheap enough to compute on a page render: it compares the issued credentials
+    against the distinct recipients already emailed, without resolving anyone
+    through FreeIPA. Repeat sends to the same voter are not double counted, so a
+    reminder run can never mask a start that stopped half way.
+    """
+    credential_count = (
+        VotingCredential.objects.filter(election=election)
+        .exclude(freeipa_username__isnull=True)
+        .exclude(freeipa_username="")
+        .count()
+    )
+    emailed_count = (
+        Email.objects.filter(credential_emails_queued_for(election=election))
+        .values("to")
+        .distinct()
+        .count()
+    )
+    start_recorded = AuditLogEntry.objects.filter(election=election, event_type="election_started").exists()
+    return InterruptedStart(
+        credential_count=credential_count,
+        emailed_count=emailed_count,
+        start_recorded=start_recorded,
+    )
+
+
+def unemailed_credential_recipients(
+    *,
+    election: Election,
+) -> tuple[list[ElectionEmailRecipient], int]:
+    """Resolve only the voters whose credential email was never queued.
+
+    Matches on the username recorded with each queued email, falling back to the
+    address for emails queued before that was recorded.
+    """
+    queued = Email.objects.filter(credential_emails_queued_for(election=election)).values_list("context", "to")
+    emailed_usernames: set[str] = set()
+    emailed_addresses: set[str] = set()
+    for context, recipients in queued:
+        username = str((context or {}).get("username") or "").strip()
+        if username:
+            emailed_usernames.add(username.lower())
+        emailed_addresses.update(str(address).strip().lower() for address in (recipients or []) if address)
+
+    credentials = list(
+        VotingCredential.objects.filter(election=election)
+        .exclude(freeipa_username__isnull=True)
+        .exclude(freeipa_username="")
+        .only("public_id", "freeipa_username")
+    )
+    pending = [
+        credential
+        for credential in credentials
+        if str(credential.freeipa_username or "").strip().lower() not in emailed_usernames
+    ]
+
+    recipients, skipped = resolve_election_email_recipients(targets=pending)
+    return [
+        recipient for recipient in recipients if recipient.email.strip().lower() not in emailed_addresses
+    ], skipped
+
+
+def resolve_election_email_template(*, election: Election) -> tuple[str, str, str]:
+    """Return (subject, html, text) for the election's voting credential email.
+
+    Uses the election's snapshot fields when populated, otherwise falls back to
+    the linked EmailTemplate FK or the default named template.
+    """
+    if (
+        election.voting_email_subject.strip()
+        or election.voting_email_html.strip()
+        or election.voting_email_text.strip()
+    ):
+        return (
+            election.voting_email_subject,
+            election.voting_email_html,
+            election.voting_email_text,
+        )
+
+    template: EmailTemplate | None = None
+    if election.voting_email_template_id is not None:
+        template = election.voting_email_template
+    else:
+        template = EmailTemplate.objects.filter(
+            name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
+        ).first()
+
+    if template is not None:
+        return (
+            template.subject or "",
+            template.html_content or "",
+            template.content or "",
+        )
+
+    return ("", "", "")
+
+
+def complete_interrupted_start(
+    *,
+    election: Election,
+    actor: str = "",
+    request: HttpRequest | None = None,
+    on_progress: Callable[[MailDelivery], None] | None = None,
+) -> MailDelivery:
+    """Finish a start that stopped part way, without repeating any of its work.
+
+    Emails only the voters who were missed, then records and announces the start
+    if the interrupted run never got that far. Safe to run again: a start that is
+    already complete delivers nothing and records nothing.
+    """
+    recipients, skipped = unemailed_credential_recipients(election=election)
+    subject, html, text = resolve_election_email_template(election=election)
+    delivery = deliver_election_emails(
+        election=election,
+        recipients=recipients,
+        request=request,
+        subject_template=subject,
+        html_template=html,
+        text_template=text,
+        skipped=skipped,
+        on_progress=on_progress,
+    )
+
+    state = interrupted_start(election=election)
+    if not state.start_recorded:
+        # Nothing announced this election when it opened, so announce it now and
+        # report the electorate as a whole rather than just this repair run.
+        record_election_started(
+            election=election,
+            delivery=MailDelivery(
+                total=state.credential_count,
+                processed=state.credential_count,
+                emailed=state.emailed_count,
+                skipped=delivery.skipped,
+                failures=delivery.failures,
+            ),
+            scheduled=False,
+            opened_at=election.start_datetime,
+            actor=actor,
+            recovered=True,
+        )
+    return delivery
+
+
 def deliver_start_credential_emails(
     *,
     election: Election,
@@ -1364,25 +1542,55 @@ def complete_election_start(
         on_progress=on_progress,
     )
 
+    record_election_started(
+        election=election,
+        delivery=delivery,
+        scheduled=scheduled,
+        opened_at=opened_at,
+        actor=actor,
+    )
+    return delivery
+
+
+def record_election_started(
+    *,
+    election: Election,
+    delivery: MailDelivery,
+    scheduled: bool,
+    opened_at: datetime.datetime,
+    actor: str = "",
+    recovered: bool = False,
+) -> None:
+    """Write the public ``election_started`` entry and announce the open election.
+
+    The attestation and the ``election_opened`` signal hang off this entry, so an
+    election whose start was interrupted before this ran is neither audited nor
+    announced until it is recorded.
+    """
+    payload: dict[str, object] = {
+        "eligible_voters": delivery.total,
+        "emailed": delivery.emailed,
+        "skipped": delivery.skipped,
+        "failures": delivery.failures,
+        "genesis_chain_hash": election_genesis_chain_hash(election.id),
+        "candidates": [
+            {"id": candidate.id, "freeipa_username": candidate.freeipa_username, "tiebreak_uuid": str(candidate.tiebreak_uuid)}
+            for candidate in Candidate.objects.filter(election=election).only("id", "freeipa_username", "tiebreak_uuid")
+        ],
+        "automation": scheduled,
+        "actor": actor,
+        "scheduled_for": election.start_datetime.isoformat() if scheduled else None,
+        "transitioned_at": opened_at.isoformat(),
+    }
+    if recovered:
+        # The audit log must not imply this was recorded as the start happened.
+        payload["recovered"] = True
+
     with transaction.atomic():
         audit_entry = AuditLogEntry.objects.create(
             election=election,
             event_type="election_started",
-            payload={
-                "eligible_voters": delivery.total,
-                "emailed": delivery.emailed,
-                "skipped": delivery.skipped,
-                "failures": delivery.failures,
-                "genesis_chain_hash": election_genesis_chain_hash(election.id),
-                "candidates": [
-                    {"id": candidate.id, "freeipa_username": candidate.freeipa_username, "tiebreak_uuid": str(candidate.tiebreak_uuid)}
-                    for candidate in Candidate.objects.filter(election=election).only("id", "freeipa_username", "tiebreak_uuid")
-                ],
-                "automation": scheduled,
-                "actor": actor,
-                "scheduled_for": election.start_datetime.isoformat() if scheduled else None,
-                "transitioned_at": opened_at.isoformat(),
-            },
+            payload=payload,
             is_public=True,
         )
         schedule_attestation(audit_entry)
@@ -1393,7 +1601,6 @@ def complete_election_start(
                 actor=actor or None,
             )
         )
-    return delivery
 
 
 def start_scheduled_election(*, election_id: int, scheduled: bool = True) -> dict[str, int | str]:

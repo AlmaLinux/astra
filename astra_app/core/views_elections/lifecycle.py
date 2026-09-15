@@ -532,6 +532,58 @@ def election_mail_progress_api(request: HttpRequest, election_id: int) -> JsonRe
 
 @require_POST
 @json_permission_required(ASTRA_ADD_ELECTION)
+def election_complete_start_api(request: HttpRequest, election_id: int) -> JsonResponse:
+    """Finish a start that was interrupted, repeating none of the work it did."""
+    election = _get_active_election(election_id)
+    if election.status != Election.Status.open:
+        return JsonResponse(
+            {"ok": False, "errors": ["Only an open election can have its start completed."]},
+            status=400,
+        )
+
+    state = elections_services.interrupted_start(election=election)
+    if not state.is_interrupted:
+        return JsonResponse(
+            {"ok": False, "errors": ["This election's start already finished."]},
+            status=400,
+        )
+
+    if not allow_request(
+        scope="elections.credential_resend",
+        key_parts=[str(election.id), get_username(request)],
+        limit=settings.ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_LIMIT,
+        window_seconds=settings.ELECTION_RATE_LIMIT_CREDENTIAL_RESEND_WINDOW_SECONDS,
+    ):
+        return JsonResponse({"ok": False, "errors": ["Too many attempts. Please try again later."]}, status=429)
+
+    actor = get_username(request) or ""
+    mail_progress.deliver_in_background(
+        scope=str(election.id),
+        kind=MailRunKind.election_reminder,
+        total=state.missing_email_count,
+        deliver=lambda report: elections_services.complete_interrupted_start(
+            election=election,
+            actor=actor,
+            request=request,
+            on_progress=report,
+        ),
+    )
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "message": f"Finishing the interrupted start for {state.missing_email_count} voter(s).",
+            "recipient_count": state.missing_email_count,
+            "mail_progress": _mail_progress_payload(
+                election_id=election.id,
+                kind=MailRunKind.election_reminder,
+            ),
+        }
+    )
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_ELECTION)
 def election_tally_api(request: HttpRequest, election_id: int) -> JsonResponse:
     election = _get_active_election(election_id)
     data = _request_data(request)
@@ -586,41 +638,6 @@ def election_send_mail_credentials_api(request: HttpRequest, election_id: int) -
     return JsonResponse(payload, status=result.status_code if not result.success else 200)
 
 
-def _resolve_election_email_template(election: Election) -> tuple[str, str, str]:
-    """Return (subject, html, text) for the election's voting credential email.
-
-    Uses the election's snapshot fields when populated, otherwise falls back to
-    the linked EmailTemplate FK or the default named template.
-    """
-    if (
-        election.voting_email_subject.strip()
-        or election.voting_email_html.strip()
-        or election.voting_email_text.strip()
-    ):
-        return (
-            election.voting_email_subject,
-            election.voting_email_html,
-            election.voting_email_text,
-        )
-
-    template: EmailTemplate | None = None
-    if election.voting_email_template_id is not None:
-        template = election.voting_email_template
-    else:
-        template = EmailTemplate.objects.filter(
-            name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
-        ).first()
-
-    if template is not None:
-        return (
-            template.subject or "",
-            template.html_content or "",
-            template.content or "",
-        )
-
-    return ("", "", "")
-
-
 def _credential_email_variable_examples(
     request: HttpRequest,
     election: Election,
@@ -651,7 +668,7 @@ def election_credential_email_template_api(request: HttpRequest, election_id: in
 
     preview_username = str(request.GET.get("preview_username") or "").strip() or None
 
-    subject, html_content, text_content = _resolve_election_email_template(election)
+    subject, html_content, text_content = elections_services.resolve_election_email_template(election=election)
 
     # Template selector options.
     templates = list(EmailTemplate.objects.all().order_by("name"))

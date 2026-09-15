@@ -13,7 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
-from core import elections_eligibility
+from core import elections_eligibility, elections_services
 from core.api_pagination import paginate_detail_items, serialize_pagination
 from core.avatar_providers import resolve_avatar_urls_for_users
 from core.election_nominators import parse_nominator_identifier
@@ -399,6 +399,13 @@ def election_detail(request, election_id: int):
         Election.Status.open, Election.Status.closed, Election.Status.tallied,
     }
 
+    # A start that stopped half way leaves voters unemailed, or the election
+    # unrecorded and unannounced; surface that rather than letting it pass silently.
+    interrupted_start = None
+    if can_manage_elections and election.status == Election.Status.open:
+        state = elections_services.interrupted_start(election=election)
+        interrupted_start = state if state.is_interrupted else None
+
     return render(
         request,
         "core/election_detail.html",
@@ -406,6 +413,7 @@ def election_detail(request, election_id: int):
             "election": election,
             "can_manage_elections": can_manage_elections,
             "can_send_election_email": can_send_election_email,
+            "interrupted_start": interrupted_start,
             "eligible_q": str(request.GET.get("eligible_q") or ""),
             "ineligible_q": str(request.GET.get("ineligible_q") or ""),
         },

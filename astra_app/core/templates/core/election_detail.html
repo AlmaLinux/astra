@@ -50,6 +50,16 @@
 {% endblock %}
 
 {% block content %}
+  {% if interrupted_start %}
+    <div
+      data-election-interrupted-start-root
+      data-election-interrupted-start-missing-count="{{ interrupted_start.missing_email_count }}"
+      data-election-interrupted-start-recorded="{% if interrupted_start.start_recorded %}true{% else %}false{% endif %}"
+      data-election-interrupted-start-api-url="{% url 'api-election-complete-start' election.id %}"
+      data-election-interrupted-start-progress-api-url="{% url 'api-election-mail-progress' election.id %}?kind=reminder"
+    ></div>
+  {% endif %}
+
   <div class="row">
     <div class="col-lg-8">
       <div

@@ -7,6 +7,7 @@ import ElectionActionCard from "../election-detail/ElectionActionCard.vue";
 import ElectionConcludeAction from "../election-detail/ElectionConcludeAction.vue";
 import ElectionCredentialResendControls from "../election-detail/ElectionCredentialResendControls.vue";
 import ElectionExtendAction from "../election-detail/ElectionExtendAction.vue";
+import ElectionInterruptedStartWarning from "../election-detail/ElectionInterruptedStartWarning.vue";
 import ElectionStartAutomation from "../election-detail/ElectionStartAutomation.vue";
 import ElectionTallyAction from "../election-detail/ElectionTallyAction.vue";
 import IneligibleVoterModal from "../election-detail/IneligibleVoterModal.vue";
@@ -18,6 +19,7 @@ import {
   readElectionCredentialResendBootstrap,
   readElectionDetailBootstrap,
   readElectionExtendActionBootstrap,
+  readElectionInterruptedStartBootstrap,
   readElectionStartAutomationBootstrap,
   readElectionTallyActionBootstrap,
   readEligibleVotersBootstrap,
@@ -29,6 +31,7 @@ import {
   type ElectionCredentialResendBootstrap,
   type ElectionDetailBootstrap,
   type ElectionExtendActionBootstrap,
+  type ElectionInterruptedStartBootstrap,
   type ElectionStartAutomationBootstrap,
   type ElectionTallyActionBootstrap,
   type ElectionVoterSearchBootstrap,
@@ -82,6 +85,23 @@ export function mountElectionConcludeAction(root: HTMLElement | null): App<Eleme
   const app = createApp(ElectionConcludeAction, {
     bootstrap,
   } satisfies { bootstrap: ElectionConcludeActionBootstrap });
+  app.mount(root);
+  return app;
+}
+
+export function mountElectionInterruptedStartWarning(root: HTMLElement | null): App<Element> | null {
+  if (root === null) {
+    return null;
+  }
+
+  const bootstrap = readElectionInterruptedStartBootstrap(root);
+  if (bootstrap === null) {
+    return null;
+  }
+
+  const app = createApp(ElectionInterruptedStartWarning, {
+    bootstrap,
+  } satisfies { bootstrap: ElectionInterruptedStartBootstrap });
   app.mount(root);
   return app;
 }
@@ -209,6 +229,7 @@ function mountFromDocument(): void {
   mountElectionExtendAction(document.querySelector<HTMLElement>("[data-election-extend-action-root]"));
   mountElectionConcludeAction(document.querySelector<HTMLElement>("[data-election-conclude-action-root]"));
   mountElectionStartAutomation(document.querySelector<HTMLElement>("[data-election-start-automation-root]"));
+  mountElectionInterruptedStartWarning(document.querySelector<HTMLElement>("[data-election-interrupted-start-root]"));
   mountElectionTallyAction(document.querySelector<HTMLElement>("[data-election-tally-action-root]"));
   mountElectionCredentialResendControls(document.querySelector<HTMLElement>("[data-election-credential-resend-root]"));
   mountIneligibleVoterModal(document.querySelector<HTMLElement>("[data-ineligible-voter-modal-root]"));

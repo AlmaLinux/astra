@@ -168,6 +168,13 @@ export interface ElectionStartResponse extends MailProgressResponse {
   election?: { status: string; auto_start_enabled: boolean };
 }
 
+export interface ElectionInterruptedStartBootstrap {
+  missingCount: number;
+  startRecorded: boolean;
+  completeApiUrl: string;
+  progressApiUrl: string;
+}
+
 export interface ElectionTallyActionBootstrap {
   tallyApiUrl: string;
   electionName: string;
@@ -278,6 +285,20 @@ export function readElectionStartAutomationBootstrap(root: HTMLElement): Electio
     autoStartApiUrl,
     autoStartEnabled: root.dataset.electionAutoStartEnabled === "true",
   };
+}
+
+export function readElectionInterruptedStartBootstrap(root: HTMLElement): ElectionInterruptedStartBootstrap | null {
+  const missingCount = Number.parseInt(String(root.dataset.electionInterruptedStartMissingCount || ""), 10);
+  const startRecorded = root.dataset.electionInterruptedStartRecorded === "true";
+  const completeApiUrl = String(root.dataset.electionInterruptedStartApiUrl || "").trim();
+  const progressApiUrl = String(root.dataset.electionInterruptedStartProgressApiUrl || "").trim();
+  if (!Number.isFinite(missingCount) || !completeApiUrl || !progressApiUrl) {
+    return null;
+  }
+  if (missingCount <= 0 && startRecorded) {
+    return null;
+  }
+  return { missingCount: Math.max(missingCount, 0), startRecorded, completeApiUrl, progressApiUrl };
 }
 
 export function readElectionTallyActionBootstrap(root: HTMLElement): ElectionTallyActionBootstrap | null {

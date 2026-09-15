@@ -147,6 +147,41 @@ test("elections-start-large-electorate-progress reports credential delivery prog
   await expect(page.getByRole("button", { name: "Conclude Election", exact: true })).toBeVisible();
 });
 
+// As an election operator, I am warned when a start was interrupted, and can finish
+// it without emailing anyone twice or leaving the election unannounced.
+test("elections-complete-interrupted-credential-delivery finishes a start that was killed part way", async ({ page }) => {
+  const manager = resetState.actors.manager;
+  const missing = resetState.partial_delivery_missing_count;
+
+  await loginViaForm(page, manager.username, manager.password);
+  await page.goto(resetState.routes.detail_partial_delivery);
+
+  const warning = page.locator("[data-election-interrupted-start-vue-root]");
+  const alert = warning.locator(".alert-warning");
+  await expect(alert).toContainText("This election's start did not finish");
+  // Both halves of an interrupted start are reported.
+  await expect(alert).toContainText("their voting credentials");
+  await expect(alert).toContainText("record the start in the public audit log");
+  await expect(alert).toContainText("nobody who already received their credentials is emailed again");
+
+  const completeButton = warning.locator("[data-election-interrupted-start-complete]");
+  await expect(completeButton).toHaveClass(/btn-primary/);
+  await expect(completeButton).toHaveText("Finish the interrupted start");
+  await completeButton.click();
+
+  const continueButton = warning.locator("[data-mail-progress-continue]");
+  await expect(continueButton).toBeEnabled({ timeout: 120_000 });
+  await expect(warning.locator("[data-mail-progress-counts]"))
+    .toContainText(`${missing} of ${missing} credential email`);
+  await continueButton.click();
+
+  await expect(warning.locator(".alert-success")).toContainText("recorded in the audit log and announced");
+
+  // Gone on a fresh load, proving both the emails and the audit entry landed.
+  await page.reload();
+  await expect(page.locator("[data-election-interrupted-start-vue-root]")).toHaveCount(0);
+});
+
 // As an election operator, I can close an open election with or without immediate tally.
 test("elections-close-and-tally-modal exercises the typed-confirm conclude and tally modals without submitting them", async ({ page }) => {
   const manager = resetState.actors.manager;

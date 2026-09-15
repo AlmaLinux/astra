@@ -15,6 +15,7 @@ from core.elections_services import (
     election_quorum_status,
     issue_credentials_at_start_transition,
     scrub_election_emails,
+    send_voting_credential_email,
     submit_ballot,
     tally_election,
 )
@@ -47,6 +48,7 @@ MANAGER_OPEN_ALIAS: Final[str] = "manager_open_election"
 DETAIL_OPEN_ALIAS: Final[str] = "detail_open_election"
 DETAIL_TALLIED_ALIAS: Final[str] = "detail_tallied_election"
 LARGE_START_ALIAS: Final[str] = "large_start_election"
+PARTIAL_DELIVERY_ALIAS: Final[str] = "partial_delivery_election"
 
 CLOSED_RECEIPT_ALIAS: Final[str] = "verify_closed_receipt"
 TALLIED_RECEIPT_ALIAS: Final[str] = "verify_tallied_receipt"
@@ -59,6 +61,9 @@ DRAFT_ELECTION_NAME: Final[str] = "Wave 6 Draft Election"
 MANAGER_OPEN_ELECTION_NAME: Final[str] = "Wave 6 Manager Open Election"
 TALLIED_ELECTION_NAME: Final[str] = "Wave 6 Tallied Election"
 LARGE_START_ELECTION_NAME: Final[str] = "Wave 6 Large Start Election"
+PARTIAL_DELIVERY_ELECTION_NAME: Final[str] = "Wave 6 Partial Credential Delivery Election"
+# Voters deliberately left unemailed so the interrupted-delivery warning shows.
+PARTIAL_DELIVERY_MISSING_COUNT: Final[int] = 1
 
 MANAGER_ELIGIBLE_USERNAME: Final[str] = MANAGER_USERNAME
 CANDIDATE_ONE_USERNAME: Final[str] = "regular18"
@@ -82,6 +87,7 @@ SLICE_ELECTION_NAMES: Final[tuple[str, ...]] = (
     MANAGER_OPEN_ELECTION_NAME,
     TALLIED_ELECTION_NAME,
     LARGE_START_ELECTION_NAME,
+    PARTIAL_DELIVERY_ELECTION_NAME,
 )
 
 class BallotSeedDefinition(TypedDict):
@@ -387,6 +393,23 @@ class Command(BaseCommand):
                 },
             ),
             (
+                PARTIAL_DELIVERY_ALIAS,
+                {
+                    "name": PARTIAL_DELIVERY_ELECTION_NAME,
+                    "description": "Wave 6 interrupted credential delivery coverage.",
+                    "url": "",
+                    "start_datetime": _dt(year=2026, month=4, day=2, hour=10),
+                    "end_datetime": _dt(year=2026, month=4, day=12, hour=10),
+                    "number_of_seats": 1,
+                    "eligible_group_cn": ELECTIONS_ELIGIBLE_GROUP_CN,
+                    "status": Election.Status.draft,
+                    "tally_result": {},
+                    "voting_email_subject": "Wave 6 partial delivery credential",
+                    "voting_email_html": "<p>Hello {{ username }}, vote at {{ vote_url_with_credential_fragment }}.</p>",
+                    "voting_email_text": "Hello {{ username }}, vote at {{ vote_url_with_credential_fragment }}.",
+                },
+            ),
+            (
                 DETAIL_TALLIED_ALIAS,
                 {
                     "name": TALLIED_ELECTION_NAME,
@@ -564,6 +587,18 @@ class Command(BaseCommand):
         self._upsert_candidates(election=draft_election, definitions=())
         self._upsert_candidates(election=manager_open_election, definitions=())
 
+        partial_delivery_election = elections_by_alias[PARTIAL_DELIVERY_ALIAS]
+        self._upsert_candidates(
+            election=partial_delivery_election,
+            definitions=(
+                {
+                    "username": CANDIDATE_ONE_USERNAME,
+                    "nominated_by": CANDIDATE_TWO_USERNAME,
+                    "description": "Partial delivery coverage candidate.",
+                },
+            ),
+        )
+
         large_start_election = elections_by_alias[LARGE_START_ALIAS]
         self._upsert_candidates(
             election=large_start_election,
@@ -578,6 +613,10 @@ class Command(BaseCommand):
         # Starting this election is the point of its scenario, so every reset has
         # to hand it back as an unstarted draft with no credential mail pending.
         scrub_election_emails(election=large_start_election)
+        # Credential emails are re-seeded below, so start from a clean slate and
+        # keep the delivery gap each election reports deterministic.
+        for seeded in (open_election, manager_open_election, partial_delivery_election):
+            scrub_election_emails(election=seeded)
         open_candidate_definitions = (
             {"username": "alice", "nominated_by": "regular21", "description": "Platform continuity candidate."},
             {"username": "bob", "nominated_by": "regular22", "description": "Infrastructure reliability candidate."},
@@ -632,6 +671,7 @@ class Command(BaseCommand):
                 draft_election,
                 manager_open_election,
                 large_start_election,
+                partial_delivery_election,
             ]
         ).delete()
         employees_group.candidates.set([tallied_candidates[0], tallied_candidates[1]])
@@ -644,6 +684,7 @@ class Command(BaseCommand):
                 manager_open_election,
                 tallied_election,
                 large_start_election,
+                partial_delivery_election,
             )
         )
 
@@ -657,7 +698,7 @@ class Command(BaseCommand):
                 "wave6-open-candidate-two-credential",
             ),
         )
-        self._start_seed_election(
+        manager_open_credentials = self._start_seed_election(
             election=manager_open_election,
             actor=MANAGER_USERNAME,
             started_at=_dt(year=2026, month=4, day=11, hour=10),
@@ -667,6 +708,37 @@ class Command(BaseCommand):
                 "wave6-manager-open-candidate-two-credential",
             ),
         )
+        partial_delivery_credentials = self._start_seed_election(
+            election=partial_delivery_election,
+            actor=MANAGER_USERNAME,
+            started_at=_dt(year=2026, month=4, day=2, hour=10),
+            credential_public_ids=(
+                "wave6-partial-manager-credential",
+                "wave6-partial-candidate-one-credential",
+                "wave6-partial-candidate-two-credential",
+            ),
+        )
+
+        # Seeded starts issue credentials without emailing anyone, which the app
+        # correctly reports as an unfinished delivery. Queue the credential
+        # emails these elections would really have sent...
+        for seeded, seeded_credentials in (
+            (open_election, open_credentials),
+            (manager_open_election, manager_open_credentials),
+        ):
+            self._queue_seed_credential_emails(election=seeded, credentials=seeded_credentials)
+
+        # ...and leave this one looking exactly like a start that was killed part
+        # way: some voters never emailed, and the start never recorded, so it was
+        # never announced either.
+        self._queue_seed_credential_emails(
+            election=partial_delivery_election,
+            credentials=partial_delivery_credentials[:-PARTIAL_DELIVERY_MISSING_COUNT],
+        )
+        AuditLogEntry.objects.filter(
+            election=partial_delivery_election,
+            event_type="election_started",
+        ).delete()
         if closed_preserved:
             closed_credentials = self._replay_append_only_seed_election(
                 election=closed_election,
@@ -801,6 +873,7 @@ class Command(BaseCommand):
             DETAIL_OPEN_ALIAS: self._election_payload(open_election, route_name="election-detail"),
             DETAIL_TALLIED_ALIAS: self._election_payload(tallied_election, route_name="election-detail"),
             LARGE_START_ALIAS: self._election_payload(large_start_election, route_name="election-edit"),
+            PARTIAL_DELIVERY_ALIAS: self._election_payload(partial_delivery_election, route_name="election-detail"),
         }
 
         return {
@@ -812,6 +885,7 @@ class Command(BaseCommand):
             },
             "elections": elections_payload,
             "large_electorate_size": LARGE_ELECTORATE_SIZE,
+            "partial_delivery_missing_count": PARTIAL_DELIVERY_MISSING_COUNT,
             "receipts": {
                 CLOSED_RECEIPT_ALIAS: {
                     "ballot_hash": _ballot_hash_for_seed(
@@ -860,6 +934,7 @@ class Command(BaseCommand):
                 "edit_draft": elections_payload[DRAFT_MANAGER_ALIAS]["route"],
                 "edit_large_start": elections_payload[LARGE_START_ALIAS]["route"],
                 "detail_large_start": reverse("election-detail", args=[large_start_election.id]),
+                "detail_partial_delivery": elections_payload[PARTIAL_DELIVERY_ALIAS]["route"],
                 "open_detail": elections_payload[DETAIL_OPEN_ALIAS]["route"],
                 "open_vote": reverse("election-vote", args=[open_election.id]),
                 "tallied_detail": elections_payload[DETAIL_TALLIED_ALIAS]["route"],
@@ -931,6 +1006,12 @@ class Command(BaseCommand):
                     "aliases": [LARGE_START_ALIAS],
                     "destructive": True,
                     "route_target": elections_payload[LARGE_START_ALIAS]["route"],
+                },
+                "elections-complete-interrupted-credential-delivery": {
+                    "actor": MANAGER_USERNAME,
+                    "aliases": [PARTIAL_DELIVERY_ALIAS],
+                    "destructive": True,
+                    "route_target": elections_payload[PARTIAL_DELIVERY_ALIAS]["route"],
                 },
                 "elections-remind-large-electorate-progress": {
                     "actor": MANAGER_USERNAME,
@@ -1094,6 +1175,28 @@ class Command(BaseCommand):
             )
 
         return list(VotingCredential.objects.filter(election=election).order_by("freeipa_username", "id"))
+
+    def _queue_seed_credential_emails(
+        self,
+        *,
+        election: Election,
+        credentials: list[VotingCredential],
+    ) -> None:
+        """Queue the credential emails a real start would have sent for these voters."""
+        for credential in credentials:
+            username = str(credential.freeipa_username or "").strip()
+            if not username:
+                continue
+            send_voting_credential_email(
+                request=None,
+                election=election,
+                username=username,
+                email=f"{username}@example.test",
+                credential_public_id=str(credential.public_id),
+                subject_template=election.voting_email_subject or "Your voting credential",
+                html_template=election.voting_email_html or "<p>{{ username }}</p>",
+                text_template=election.voting_email_text or "{{ username }}",
+            )
 
     def _replay_append_only_seed_election(
         self,
