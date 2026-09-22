@@ -13,6 +13,14 @@ class _ListBackedQuerySet:
     basic iteration semantics. This avoids hitting the DB for unmanaged models.
     """
 
+    # The backing list is an already-materialized sequence, so it is always in a
+    # fixed, total order. `Paginator` warns when `ordered` is false, and the admin
+    # changelist (Django >= 6.1, which replaced `_get_deterministic_ordering()`)
+    # appends `-pk` when `totally_ordered` is false -- that would re-sort the
+    # listing the FreeIPA backends already ordered.
+    ordered = True
+    totally_ordered = True
+
     def __init__(self, model, items):
         self.model = model
         self._items = list(items)
@@ -37,8 +45,9 @@ class _ListBackedQuerySet:
         return self
 
     def select_related(self, *fields):
-        self.query.select_related = True
-        return self
+        clone = self._clone()
+        clone.query.select_related = True
+        return clone
 
     def filter(self, *args, **kwargs):
         # Django admin may call .filter(Q(...)) even when our backend isn't ORM.
@@ -75,7 +84,6 @@ class _ListBackedQuerySet:
 
     def order_by(self, *fields):
         items = list(self._items)
-        self.query.order_by = list(fields or [])
         # Apply sorts from right to left to mimic multi-key ordering.
         for field in reversed(fields or []):
             reverse_sort = False
@@ -84,7 +92,13 @@ class _ListBackedQuerySet:
                 reverse_sort = True
                 name = name[1:]
             items.sort(key=lambda o: getattr(o, name, ""), reverse=reverse_sort)
-        return _ListBackedQuerySet(self.model, items)
+        # Return a new object rather than mutating: the admin changelist keeps a
+        # single `root_queryset` and probes it with `order_by()` before ordering
+        # it for real, so in-place ordering state would accumulate across calls.
+        clone = _ListBackedQuerySet(self.model, items)
+        clone.query.select_related = self.query.select_related
+        clone.query.order_by = list(fields)
+        return clone
 
     def reverse(self):
         """Return a QuerySet-like with reversed ordering."""

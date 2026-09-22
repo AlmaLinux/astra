@@ -231,3 +231,45 @@ class QuerySetDocsComplianceTests(TestCase):
     def _make_groups(self):
         # compatibility helper for older tests
         return tuple(self.items)
+
+class ChangeListOrderingContractTests(TestCase):
+    """The admin changelist's ordering contract with `_ListBackedQuerySet`.
+
+    Django >= 6.1 replaced `ChangeList._get_deterministic_ordering()` (which only
+    inspected model meta) with a `queryset.order_by(*ordering).totally_ordered`
+    probe, so the changelist now reads ordering state off the queryset itself.
+    A list-backed queryset is an already-materialized sequence, so it is always
+    ordered and totally ordered; claiming otherwise makes the admin append
+    `-pk` and re-sort the FreeIPA listing we deliberately ordered.
+    """
+
+    def _qs(self) -> _ListBackedQuerySet:
+        return _ListBackedQuerySet(
+            IPAGroup,
+            [
+                IPAGroup(cn="g-a"),
+                IPAGroup(cn="g-b"),
+                IPAGroup(cn="g-c"),
+            ],
+        )
+
+    def test_queryset_reports_itself_as_totally_ordered(self):
+        qs = self._qs()
+        self.assertTrue(qs.ordered)
+        self.assertTrue(qs.totally_ordered)
+        self.assertTrue(qs.order_by("cn").totally_ordered)
+
+    def test_order_by_does_not_mutate_the_source_queryset(self):
+        # `ChangeList.get_ordering()` reads `queryset.query.order_by` and then
+        # probes with `queryset.order_by(...)`; a mutating `order_by()` would
+        # make the ordering accumulate across calls.
+        qs = self._qs()
+        ordered = qs.order_by("-cn")
+        self.assertEqual(qs.query.order_by, [])
+        self.assertEqual(ordered.query.order_by, ["-cn"])
+
+    def test_select_related_does_not_mutate_the_source_queryset(self):
+        qs = self._qs()
+        related = qs.select_related("whatever")
+        self.assertTrue(related.query.select_related)
+        self.assertFalse(qs.query.select_related)
