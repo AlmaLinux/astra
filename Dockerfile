@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.14-slim AS base
 
 ARG ASTRA_BUILD_SHA=""
 ENV ASTRA_BUILD_SHA=$ASTRA_BUILD_SHA
@@ -19,7 +19,20 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app/astra_app
 
 COPY requirements.txt .
+
+# Resolution-only stage, built by `scripts/update-requirements-lock.sh`, which
+# freezes it into requirements.lock. It shares `base` so versions are resolved
+# against the same Python and system libraries the app image actually uses.
+FROM base AS resolve-deps
 RUN pip install --no-cache-dir -r requirements.txt
+
+FROM base AS app
+
+# requirements.txt declares intent; requirements.lock pins every resolved
+# version, transitive ones included, so a rebuild installs what was tested
+# rather than whatever is newest on the day.
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.txt -c requirements.lock
 
 # Keep entrypoint outside the bind-mounted /app volume (devcontainers/compose)
 COPY docker/entrypoint.sh /usr/local/bin/astra-entrypoint

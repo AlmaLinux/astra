@@ -138,6 +138,18 @@ Pre-change checklist (must answer mentally before finishing):
 - DO NOT write trivial tests that test something we know already works, like
   instantiating a Pydantic object.
 
+## Python dependencies
+
+- `requirements.txt` declares intent (the direct dependencies and their acceptable ranges).
+  `requirements.lock` pins every resolved version, transitive ones included, and is what
+  image builds install via `pip install -r requirements.txt -c requirements.lock`.
+- Never hand-edit `requirements.lock`. Add or change a dependency in `requirements.txt`,
+  then regenerate with `scripts/update-requirements-lock.sh` and commit both files.
+- `scripts/update-requirements-lock.sh --check` fails when the lock is stale; run it if a
+  build installs something unexpected.
+- Why this exists: the lock was added after an unpinned `Django>=6.0.5,<7.0` let production
+  rebuild onto Django 6.1 while dev stayed on 6.0, which broke the FreeIPA admin changelists.
+
 ## Test tips
 - You don't need to restart the web container after code changes; it refreshes automatically.
 - This is python, you don't need to compile the code.
