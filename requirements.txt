@@ -3,7 +3,7 @@
 # minor bump needs a deliberate check rather than an implicit one at build time.
 Django>=6.1.1,<6.2
 django-vite==3.2.0
-# Lock to 3.0.1 until https://github.com/farridav/django-jazzmin/issues/651 is resolved
+# Lock to 3.0.1 until https://github.com/farridav/django-jazzmin/pull/682 is resolved
 django-jazzmin==3.0.1
 django-import-export
 psycopg2-binary
