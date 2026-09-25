@@ -181,6 +181,26 @@ class SentryBrowserTemplateTests(TestCase):
         SENTRY_REPLAY_SESSION_SAMPLE_RATE=0.0,
         SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE=0.0,
     )
+    def test_sentry_browser_init_denies_browser_extension_frames(self) -> None:
+        """Extension scripts injected into our pages trip the global onerror handler."""
+        response = self.client.get("/login/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "denyUrls:")
+        for pattern in (
+            r"/^chrome-extension:\/\//i",
+            r"/^moz-extension:\/\//i",
+            r"/^safari-(web-)?extension:\/\//i",
+            r"/^chrome:\/\//i",
+            r"/^resource:\/\//i",
+        ):
+            self.assertContains(response, pattern)
+
+    @override_settings(
+        SENTRY_DSN="https://public@example.ingest.sentry.io/1",
+        SENTRY_REPLAY_SESSION_SAMPLE_RATE=0.0,
+        SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE=0.0,
+    )
     def test_settings_security_shell_runtime_disables_sentry_replay(self) -> None:
         self._login_as_freeipa("alice")
         otp_client = SimpleNamespace(otptoken_find=lambda **_kwargs: {"result": []})

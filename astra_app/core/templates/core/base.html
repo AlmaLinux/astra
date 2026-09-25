@@ -74,6 +74,17 @@
           release: config.release || undefined,
           tunnel: config.tunnel,
           integrations: integrations,
+          // The global onerror handler captures every uncaught error on the page, including
+          // ones thrown by user-installed browser extensions injected into our markup. Those
+          // are not our bugs and they get tagged with whatever release is deployed, so drop
+          // any event whose stack frames come from an extension or browser-internal script.
+          denyUrls: [
+            /^chrome-extension:\/\//i,
+            /^moz-extension:\/\//i,
+            /^safari-(web-)?extension:\/\//i,
+            /^chrome:\/\//i,
+            /^resource:\/\//i,
+          ],
           sendDefaultPii: config.sendDefaultPii === true,
           initialScope: {
             tags: {
