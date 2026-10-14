@@ -27,7 +27,10 @@ services:
       - "${MAILHOG_SMTP_PORT:-1025}:1025"
 
   minio:
-    image: minio/minio:latest
+    image: bitnamilegacy/minio:latest
+    # The Bitnami image defaults to uid 1001, which cannot write minio_data
+    # volumes initialised by the root-running upstream minio/minio image.
+    user: "0:0"
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=minio
@@ -44,7 +47,7 @@ services:
       retries: 20
 
   minio_init:
-    image: minio/mc:latest
+    image: bitnamilegacy/minio-client:latest
     depends_on:
       minio:
         condition: service_healthy
