@@ -2,6 +2,8 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
+from core.tests.utils_test_data import migrate_to_latest
+
 EXPECTED_DESCRIPTION = "Approval for a membership renewal"
 EXPECTED_SUBJECT = "Membership Renewal Approved!"
 EXPECTED_CONTENT = (
@@ -32,6 +34,7 @@ class MembershipRenewalApprovedEmailTemplateSeedTests(TransactionTestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        self.addCleanup(migrate_to_latest)
         executor = MigrationExecutor(connection)
         executor.migrate(self.migrate_from)
 

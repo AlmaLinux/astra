@@ -1,7 +1,19 @@
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 from post_office.models import EmailTemplate
 
 from core.models import MembershipTypeCategory
 from core.templated_email import configured_email_template_names
+
+
+def migrate_to_latest() -> None:
+    """Restore the full schema after a test pinned the database to an older migration.
+
+    Register with `addCleanup` in migration tests: the test database is shared, so
+    leaving it mid-history breaks later tests that use newer columns.
+    """
+    executor = MigrationExecutor(connection)
+    executor.migrate(executor.loader.graph.leaf_nodes())
 
 
 def ensure_core_categories() -> None:

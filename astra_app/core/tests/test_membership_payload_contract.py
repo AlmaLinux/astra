@@ -138,6 +138,25 @@ class MembershipPayloadContractTests(TestCase):
         self.assertTrue(entries, "expected an active membership in the user profile payload")
         return entries[0]
 
+    def test_membership_type_payload_carries_annual_dues(self) -> None:
+        MembershipType.objects.filter(code="gold").update(annual_dues_usd=20000)
+
+        payload = serialize_pending_membership_entry(
+            membership_type=MembershipType.objects.get(code="gold"),
+            request_id=1,
+            status="pending",
+        )
+
+        self.assertEqual(
+            payload["membershipType"],
+            {
+                "name": "Gold Sponsor Member",
+                "code": "gold",
+                "description": "Gold Sponsor Member",
+                "annualDuesUsd": 20000,
+            },
+        )
+
     def test_both_surfaces_emit_the_same_membership_entry_keys(self) -> None:
         organization_entry = self._organization_membership_entry(username="bob")
         profile_entry = self._user_profile_membership_entry(username="carol")

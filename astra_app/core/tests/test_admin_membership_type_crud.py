@@ -112,3 +112,24 @@ class AdminMembershipTypeCRUDTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         obj = MembershipType.objects.get(code="partner")
         self.assertEqual(obj.group_cn, "mirror-admins")
+
+    def test_changelist_shows_annual_dues_with_thousands_separators(self) -> None:
+        from core.models import MembershipType
+
+        MembershipType.objects.update_or_create(
+            code="platinum",
+            defaults={"name": "Platinum Sponsor", "category_id": "sponsorship", "annual_dues_usd": 100000},
+        )
+        self._login_as_freeipa_admin("alice")
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user):
+            # Column 3 is the dues column; "-" sorts it descending.
+            resp = self.client.get(reverse("admin:core_membershiptype_changelist"), {"o": "-3"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "$100,000")
+        # Sorting by the dues column orders by the stored number: the default
+        # sort_order would list individual (10) before platinum (30).
+        row_codes = [obj.code for obj in resp.context["cl"].result_list]
+        self.assertLess(row_codes.index("platinum"), row_codes.index("individual"))

@@ -51,6 +51,16 @@ function dateLabelFromParts(parts: Intl.DateTimeFormatPart[]): string {
   return `${month} ${day} ${year}`;
 }
 
+export function membershipTypeDescription(membershipType: { description: string; annualDuesUsd: number }): string {
+  const { description, annualDuesUsd } = membershipType;
+  if (!(annualDuesUsd > 0)) {
+    return description;
+  }
+
+  const dues = `Annual dues: $${annualDuesUsd.toLocaleString("en-US")} USD`;
+  return description ? `${description} (${dues})` : dues;
+}
+
 export function membershipTierClass(code: string): string {
   return MEMBERSHIP_TIER_CLASSES[String(code || "").trim().toLowerCase()] || "membership-standard";
 }

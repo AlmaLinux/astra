@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 
 import MembershipCard from "../shared/components/MembershipCard.vue";
-import { formatDateInputValue, formatFullDate, membershipTierClass, pendingMembershipBadge } from "../shared/membershipPresentation";
+import { formatDateInputValue, formatFullDate, membershipTierClass, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   OrganizationDetailBootstrap,
@@ -132,10 +132,6 @@ function organizationName(): string {
 
 function membershipLabel(membership: OrganizationDetailMembership): string {
   return membership.membershipType.name;
-}
-
-function membershipDescription(membership: OrganizationDetailMembership): string {
-  return membership.membershipType.description;
 }
 
 function membershipBadgeClass(membership: OrganizationDetailMembership): string {
@@ -356,7 +352,7 @@ onMounted(async () => {
             >
               <div>
                 <div class="font-weight-bold">{{ membershipLabel(membership) }}</div>
-                <div v-if="membershipDescription(membership)" class="text-muted small">{{ membershipDescription(membership) }}</div>
+                <div v-if="membershipTypeDescription(membership.membershipType)" class="text-muted small">{{ membershipTypeDescription(membership.membershipType) }}</div>
                 <div v-if="memberSinceLabel(membership)" class="text-muted small">Member since {{ memberSinceLabel(membership) }}</div>
                 <div v-if="expiresLabel(membership)" class="small" :class="expiresToneClass(membership)">
                   <i v-if="membership.isExpiringSoon" class="fas fa-exclamation-triangle mr-1" />
@@ -511,8 +507,8 @@ onMounted(async () => {
                 <div class="small text-muted">
                   <a :href="requestDetailUrl(pendingMembership.requestId)">Request #{{ pendingMembership.requestId }}</a>
                 </div>
-                <div v-if="pendingMembership.membershipType.description" class="small text-muted">
-                  {{ pendingMembership.membershipType.description }}
+                <div v-if="membershipTypeDescription(pendingMembership.membershipType)" class="small text-muted">
+                  {{ membershipTypeDescription(pendingMembership.membershipType) }}
                 </div>
               </div>
               <span :class="pendingBadge(pendingMembership.status).className">{{ pendingBadge(pendingMembership.status).label }}</span>

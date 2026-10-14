@@ -38,18 +38,20 @@ def serialize_datetime(value: object) -> str | None:
     return None
 
 
-def serialize_membership_type(membership_type: MembershipType | dict[str, object]) -> dict[str, str]:
+def serialize_membership_type(membership_type: MembershipType | dict[str, object]) -> dict[str, object]:
     if isinstance(membership_type, MembershipType):
         return {
             "name": membership_type.name,
             "code": membership_type.code,
             "description": membership_type.description,
+            "annualDuesUsd": membership_type.annual_dues_usd,
         }
     if isinstance(membership_type, dict):
         return {
             "name": str(membership_type.get("name", "")),
             "code": str(membership_type.get("code", "")),
             "description": str(membership_type.get("description", "")),
+            "annualDuesUsd": membership_type.get("annual_dues_usd", 0),
         }
     raise TypeError("Expected MembershipType data")
 

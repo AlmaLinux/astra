@@ -1988,6 +1988,7 @@ class MembershipTypeAdmin(admin.ModelAdmin):
     list_display = (
         "code",
         "name",
+        "annual_dues_display",
         "group_cn",
         "category",
         "sort_order",
@@ -1996,6 +1997,10 @@ class MembershipTypeAdmin(admin.ModelAdmin):
     list_filter = ("enabled", "category")
     ordering = ("sort_order", "code")
     search_fields = ("code", "name")
+
+    @admin.display(description="Annual dues (USD)", ordering="annual_dues_usd")
+    def annual_dues_display(self, obj: MembershipType) -> str:
+        return f"${obj.annual_dues_usd:,}"
 
     @override
     def get_readonly_fields(self, request, obj=None):

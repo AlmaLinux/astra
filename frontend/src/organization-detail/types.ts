@@ -5,6 +5,7 @@ export interface OrganizationDetailMembershipType {
   name: string;
   code: string;
   description: string;
+  annualDuesUsd: number;
 }
 
 export interface OrganizationDetailMembership {

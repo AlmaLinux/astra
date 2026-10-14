@@ -218,6 +218,12 @@ class MembershipType(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     votes = models.PositiveIntegerField(blank=True, default=0)
+    annual_dues_usd = models.PositiveIntegerField(
+        blank=True,
+        default=0,
+        verbose_name="Annual dues (USD)",
+        help_text="Yearly dues in whole US dollars.",
+    )
     group_cn = models.CharField(max_length=255, blank=True, default="", verbose_name="Group")
     acceptance_template = models.ForeignKey(
         "post_office.EmailTemplate",

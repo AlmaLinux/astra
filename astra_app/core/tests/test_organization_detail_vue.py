@@ -240,6 +240,7 @@ class OrganizationDetailVueTests(TestCase):
                     "name": sponsor_type.name,
                     "code": sponsor_type.code,
                     "description": sponsor_type.description,
+                    "annualDuesUsd": sponsor_type.annual_dues_usd,
                 },
                 "organizationName": "",
             }

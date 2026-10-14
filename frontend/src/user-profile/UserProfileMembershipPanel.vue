@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 
 import MembershipCard from "../shared/components/MembershipCard.vue";
-import { formatDateInputValue, formatFullDate, formatPreciseDateTime, membershipTierClass, pendingMembershipBadge } from "../shared/membershipPresentation";
+import { formatDateInputValue, formatFullDate, formatPreciseDateTime, membershipTierClass, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   UserProfileMembershipEntry,
@@ -143,7 +143,7 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
     <li v-for="(entry, index) in membership.entries" :key="entry.key" class="list-group-item d-flex justify-content-between align-items-center">
       <div>
         <div class="font-weight-bold">{{ entry.membershipType.name }}</div>
-        <div v-if="entry.membershipType.description" class="text-muted small">{{ entry.membershipType.description }}</div>
+        <div v-if="membershipTypeDescription(entry.membershipType)" class="text-muted small">{{ membershipTypeDescription(entry.membershipType) }}</div>
         <div v-if="memberSinceLabel(entry)" class="text-muted small">Member since {{ memberSinceLabel(entry) }}</div>
         <div v-if="expiresLabel(entry)" class="small" :class="expiresToneClass(entry)">
           <i v-if="entry.isExpiringSoon" class="fas fa-exclamation-triangle mr-1" />
@@ -289,7 +289,7 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
           <a :href="requestDetailUrl(entry.requestId)">Request #{{ entry.requestId }}</a>
         </div>
         <div v-if="entry.organizationName" class="small text-muted">Organization: {{ entry.organizationName }}</div>
-        <div v-if="entry.membershipType.description" class="small text-muted">{{ entry.membershipType.description }}</div>
+        <div v-if="membershipTypeDescription(entry.membershipType)" class="small text-muted">{{ membershipTypeDescription(entry.membershipType) }}</div>
       </div>
       <component :is="badgeTag(entry.requestId)" :href="requestDetailUrl(entry.requestId) || undefined" :class="pendingBadge(entry.status).className">{{ pendingBadge(entry.status).label }}</component>
     </li>

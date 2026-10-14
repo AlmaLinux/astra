@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatFullDate, formatMembershipTimestamp } from "../membershipPresentation";
+import { formatFullDate, formatMembershipTimestamp, membershipTypeDescription } from "../membershipPresentation";
 
 function expectedLocalTimestamp(value: string): string {
   const parsed = new Date(value);
@@ -37,5 +37,21 @@ describe("formatFullDate", () => {
   it("returns an empty string for invalid values", () => {
     expect(formatFullDate("not-a-date")).toBe("");
     expect(formatFullDate(null)).toBe("");
+  });
+});
+describe("membershipTypeDescription", () => {
+  it("appends the annual dues to the description for paid tiers", () => {
+    expect(membershipTypeDescription({ description: "Platinum Sponsor Member", annualDuesUsd: 100000 })).toBe(
+      "Platinum Sponsor Member (Annual dues: $100,000 USD)",
+    );
+  });
+
+  it("shows only the description for tiers without dues", () => {
+    expect(membershipTypeDescription({ description: "Individual member", annualDuesUsd: 0 })).toBe("Individual member");
+    expect(membershipTypeDescription({ description: "", annualDuesUsd: 0 })).toBe("");
+  });
+
+  it("shows the dues alone when a paid tier has no description", () => {
+    expect(membershipTypeDescription({ description: "", annualDuesUsd: 2500 })).toBe("Annual dues: $2,500 USD");
   });
 });
