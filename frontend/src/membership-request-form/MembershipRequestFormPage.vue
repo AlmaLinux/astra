@@ -291,6 +291,11 @@ onMounted(async () => {
                     </template>
                   </select>
                   <div v-for="fieldError in field.errors" :key="fieldError" class="invalid-feedback d-block">{{ fieldError }}</div>
+                  <small class="form-text text-muted">
+                    Not sure which to choose?
+                    <a href="https://almalinux.org/members/" target="_blank" rel="noopener">Compare the membership levels</a>
+                    on almalinux.org.
+                  </small>
                 </div>
               </template>
 

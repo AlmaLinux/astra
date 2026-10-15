@@ -93,6 +93,14 @@ const bootstrap: MembershipRequestFormBootstrap = {
 };
 
 describe("MembershipRequestFormPage", () => {
+  // Opens in a new tab so a half-filled form is not lost.
+  function expectMembershipLevelsLink(wrapper: ReturnType<typeof mount>): void {
+    const link = wrapper.get('a[href="https://almalinux.org/members/"]');
+    expect(link.text()).toBe("Compare the membership levels");
+    expect(link.attributes("target")).toBe("_blank");
+    expect(link.attributes("rel")).toBe("noopener");
+  }
+
   it("renders the self-service create form and switches question groups by membership type", async () => {
     const wrapper = mount(MembershipRequestFormPage, {
       props: { bootstrap },
@@ -102,6 +110,7 @@ describe("MembershipRequestFormPage", () => {
     expect(wrapper.find('form[action="/membership/request/"]').exists()).toBe(true);
     expect(wrapper.find('a[href="/user/alice/"]').text()).toContain("Cancel");
     expect(wrapper.find('a[href="/privacy-policy/"]').exists()).toBe(true);
+    expectMembershipLevelsLink(wrapper);
     expect(wrapper.find('[data-test="questions-individual"]').attributes("style") || "").not.toContain("display: none");
     expect(wrapper.find('[data-test="questions-mirror"]').attributes("style") || "").toContain("display: none");
 
@@ -179,6 +188,7 @@ describe("MembershipRequestFormPage", () => {
     });
 
     expect(wrapper.find('form[action="/organization/7/membership/request/"]').exists()).toBe(true);
+    expectMembershipLevelsLink(wrapper);
     expect(wrapper.find('[data-test="questions-sponsorship"]').attributes("style") || "").not.toContain("display: none");
     expect(wrapper.get("#id_q_sponsorship_details").attributes("required")).toBeDefined();
   });
