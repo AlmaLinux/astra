@@ -34,6 +34,7 @@ describe("sendMail entrypoint", () => {
         "data-send-mail-api-url": "/api/v1/email-tools/send-mail/detail",
         "data-send-mail-submit-url": "/email-tools/send-mail/",
         "data-send-mail-preview-url": "/email-tools/send-mail/render-preview/",
+        "data-send-mail-attachments-upload-url": "/email-tools/send-mail/attachments/",
         "data-send-mail-csrf-token": "csrf",
       },
       {
@@ -46,6 +47,7 @@ describe("sendMail entrypoint", () => {
         form: { is_bound: false, non_field_errors: [], fields: [] },
         recipient_preview: { variables: [], recipient_count: 0, first_context: {}, skipped_count: 0 },
         compose: { selected_template_id: null, preview: { subject: "", html: "", text: "" } },
+        attachments: [],
       },
     );
 

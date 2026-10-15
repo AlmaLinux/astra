@@ -192,6 +192,7 @@ class MembershipPayloadContractTests(TestCase):
             can_act=True,
             can_view=True,
             can_manage=True,
+            invoice=None,
         )
         boolean_capability_keys = {
             key for key, value in entry.items() if key.startswith("can") and isinstance(value, bool)

@@ -1,8 +1,9 @@
 import logging
 from typing import override
 
-from django.core.management import call_command
 from django.core.management.base import BaseCommand
+
+from core.operations import run_operations
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +38,12 @@ class Command(BaseCommand):
             dry_run,
         )
 
-        for command_name, command_kwargs in (
-            ("membership_pending_requests", {"force": force, "dry_run": dry_run}),
-            ("membership_embargoed_members", {"force": force, "dry_run": dry_run}),
-        ):
-            logger.info("operations_weekly: running %s", command_name)
-            call_command(command_name, **command_kwargs)
+        run_operations(
+            name="operations_weekly",
+            jobs=(
+                ("membership_pending_requests", {"force": force, "dry_run": dry_run}),
+                ("membership_embargoed_members", {"force": force, "dry_run": dry_run}),
+            ),
+        )
 
         logger.info("operations_weekly: complete")

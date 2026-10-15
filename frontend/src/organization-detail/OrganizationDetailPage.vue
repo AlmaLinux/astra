@@ -126,6 +126,18 @@ function terminateActionUrl(membership: OrganizationDetailResponse["organization
   return fillUrlTemplate(props.bootstrap.sponsorshipTerminateUrlTemplate, "__membership_type_code__", membershipTypeCode(membership));
 }
 
+function invoiceModalId(membership: OrganizationDetailMembership): string {
+  return `sponsorship-invoice-modal-${membershipTypeCode(membership)}`;
+}
+
+function invoiceActionLabel(membership: OrganizationDetailMembership): string {
+  return membership.invoice?.url ? "Regenerate invoice" : "Generate invoice";
+}
+
+function invoiceRegenerateActionUrl(membership: OrganizationDetailMembership): string {
+  return fillUrlTemplate(props.bootstrap.sponsorshipInvoiceRegenerateUrlTemplate, "__membership_type_code__", membershipTypeCode(membership));
+}
+
 function organizationName(): string {
   return payload.value?.organization.name || "";
 }
@@ -316,6 +328,11 @@ onMounted(async () => {
                       <div v-for="line in addressLines()" :key="line">{{ line }}</div>
                     </address>
                     <div v-else class="text-muted">No address provided.</div>
+
+                    <div v-if="payload.organization.billing_notes" class="mt-3">
+                      <div class="small font-weight-bold text-muted">Billing notes</div>
+                      <div style="white-space: pre-line;">{{ payload.organization.billing_notes }}</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -358,30 +375,90 @@ onMounted(async () => {
                   <i v-if="membership.isExpiringSoon" class="fas fa-exclamation-triangle mr-1" />
                   Expires {{ expiresLabel(membership) }}
                 </div>
+                <div v-if="membership.invoice?.url" class="small">
+                  <a
+                    :href="membership.invoice.url"
+                    target="_blank"
+                    rel="noopener"
+                    title="Download the invoice (PDF)"
+                  ><i class="fas fa-file-pdf mr-1" />Download invoice {{ membership.invoice.number }}</a>
+                </div>
               </div>
 
-              <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;">
-                <span :class="membershipBadgeClass(membership)">{{ membershipLabel(membership) }}</span>
-                <a
-                  v-if="renewalUrl(membership)"
-                  :href="renewalUrl(membership)"
-                  class="btn btn-sm btn-primary"
-                  title="Request renewal for this membership"
-                >Request renewal</a>
-                <a
-                  v-if="tierChangeUrl(membership)"
-                  :href="tierChangeUrl(membership)"
-                  class="btn btn-sm btn-outline-primary"
-                  title="Request a change of tier"
-                >Change tier</a>
-                <button
+              <div class="d-flex flex-column align-items-end" style="gap: .5rem;">
+                <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;" data-membership-actions="representative">
+                  <span :class="membershipBadgeClass(membership)">{{ membershipLabel(membership) }}</span>
+                  <a
+                    v-if="renewalUrl(membership)"
+                    :href="renewalUrl(membership)"
+                    class="btn btn-sm btn-primary"
+                    title="Request renewal for this membership"
+                  >Request renewal</a>
+                  <a
+                    v-if="tierChangeUrl(membership)"
+                    :href="tierChangeUrl(membership)"
+                    class="btn btn-sm btn-outline-primary"
+                    title="Request a change of tier"
+                  >Change tier</a>
+                  <button
+                    v-if="membership.invoice"
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    data-toggle="modal"
+                    :data-target="`#${invoiceModalId(membership)}`"
+                    title="Rebuild the renewal invoice from the current organization details"
+                  >{{ invoiceActionLabel(membership) }}</button>
+                </div>
+
+                <div
                   v-if="canManageExpiration(membership)"
-                  type="button"
-                  class="btn btn-sm btn-outline-secondary"
-                  data-toggle="modal"
-                  :data-target="`#${managementModalId(membership)}`"
-                  title="Edit membership expiration date"
-                >Edit expiration</button>
+                  class="d-flex align-items-center justify-content-end flex-wrap"
+                  style="gap: .5rem;"
+                  data-membership-actions="committee"
+                >
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    data-toggle="modal"
+                    :data-target="`#${managementModalId(membership)}`"
+                    title="Edit membership expiration date"
+                  >Edit expiration</button>
+                </div>
+              </div>
+
+              <div
+                v-if="membership.invoice"
+                class="modal fade"
+                :id="invoiceModalId(membership)"
+                tabindex="-1"
+                role="dialog"
+                :aria-labelledby="`${invoiceModalId(membership)}-label`"
+                aria-hidden="true"
+              >
+                <div class="modal-dialog" role="document">
+                  <div class="modal-content">
+                    <form method="post" :action="invoiceRegenerateActionUrl(membership)" class="m-0">
+                      <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
+
+                      <div class="modal-header">
+                        <h5 class="modal-title mb-0" :id="`${invoiceModalId(membership)}-label`">{{ invoiceActionLabel(membership) }}: {{ membershipLabel(membership) }} for {{ organizationName() }}</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
+                          <span aria-hidden="true">&times;</span>
+                        </button>
+                      </div>
+
+                      <div class="modal-body">
+                        The invoice will be rebuilt from the organization's current name, address and billing notes.
+                        Its download link stays the same.
+                      </div>
+
+                      <div class="modal-footer d-flex justify-content-between">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal" title="Close dialog without generating">Cancel</button>
+                        <button type="submit" class="btn btn-primary" title="Generate the invoice now">{{ invoiceActionLabel(membership) }}</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
               </div>
 
               <div

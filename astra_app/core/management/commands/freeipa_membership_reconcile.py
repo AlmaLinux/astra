@@ -8,6 +8,7 @@ from django.utils import timezone
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
+from core.membership_notifications import admin_group_emails
 from core.models import Membership, MembershipRequest, MembershipType
 from core.templated_email import queue_templated_email
 
@@ -444,24 +445,8 @@ class Command(BaseCommand):
             logger.info("freeipa_membership_reconcile: no_drift")
             return
 
-        admin_group_cn = str(settings.FREEIPA_ADMIN_GROUP or "").strip()
-        admin_group = FreeIPAGroup.get(admin_group_cn) if admin_group_cn else None
-        if admin_group is None:
-            logger.error(
-                "freeipa_membership_reconcile: admin_group_missing group=%s",
-                admin_group_cn,
-            )
-            return
-
-        recipients: list[str] = []
-        for username in admin_group.members:
-            user = get_freeipa_user(username)
-            if user is not None and user.email:
-                recipients.append(user.email)
-
-        unique_recipients = sorted({email.strip() for email in recipients if email.strip()}, key=str.lower)
+        unique_recipients = admin_group_emails(user_getter=get_freeipa_user)
         if not unique_recipients:
-            logger.error("freeipa_membership_reconcile: no_admin_recipients group=%s", admin_group_cn)
             return
 
         alert_group_reports = [

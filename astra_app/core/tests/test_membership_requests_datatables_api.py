@@ -821,6 +821,9 @@ class MembershipRequestsDataTablesApiTests(TestCase):
         self.assertContains(response, 'data-membership-request-reject-template=')
         self.assertContains(response, 'data-membership-request-rfi-template=')
         self.assertContains(response, 'data-membership-request-ignore-template=')
+        for action in ("approve", "reject", "rfi"):
+            custom_email_template = reverse(f"membership-request-{action}", args=[123456789])
+            self.assertContains(response, f'data-membership-request-{action}-custom-email-template="{custom_email_template}"')
         self.assertContains(response, 'data-membership-request-note-add-template=')
         self.assertContains(response, 'data-membership-request-note-summary-template=')
         self.assertContains(response, 'data-membership-request-note-detail-template=')

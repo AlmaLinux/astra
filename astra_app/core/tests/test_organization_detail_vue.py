@@ -137,6 +137,7 @@ class OrganizationDetailVueTests(TestCase):
                     "can_request_tier_change": True,
                     "tier_change_membership_type_code": "ruby",
                     "has_pending_request_in_category": False,
+                    "invoice": None,
                 }
             ],
             "pending_requests": [

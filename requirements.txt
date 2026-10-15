@@ -26,4 +26,5 @@ scikit-learn>=1.8.0
 valx
 sentry-sdk[django]
 cryptography
+weasyprint
 ruff

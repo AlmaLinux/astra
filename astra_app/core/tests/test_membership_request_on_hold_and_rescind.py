@@ -1021,6 +1021,10 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             },
         )
         self.assertContains(resp, f'data-membership-request-detail-approve-on-hold-url="{approve_url}"')
+        # Form routes that approve/reject/RFI without emailing, then open Send Mail.
+        for action in ("approve", "reject", "rfi"):
+            custom_email_url = reverse(f"membership-request-{action}", args=[req.pk])
+            self.assertContains(resp, f'data-membership-request-detail-{action}-custom-email-url="{custom_email_url}"')
 
     def test_committee_cannot_use_on_hold_override_for_pending_request(self) -> None:
         from core.models import MembershipType

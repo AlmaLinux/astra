@@ -21,7 +21,11 @@ function actionUrl(template: string): string {
   return replaceTemplateToken(template, props.bootstrap.requestIdSentinel, props.row.request_id);
 }
 
-function openAction(actionKind: MembershipRequestActionIntent["actionKind"], template: string): void {
+function openAction(
+  actionKind: MembershipRequestActionIntent["actionKind"],
+  template: string,
+  customEmailTemplate?: string,
+): void {
   emit("open-action", {
     requestId: props.row.request_id,
     requestStatus: props.row.status,
@@ -29,6 +33,7 @@ function openAction(actionKind: MembershipRequestActionIntent["actionKind"], tem
     actionUrl: actionUrl(template),
     requestTarget: requester.value,
     membershipType: props.row.membership_type.name,
+    ...(customEmailTemplate ? { customEmailUrl: actionUrl(customEmailTemplate) } : {}),
   });
 }
 </script>
@@ -41,7 +46,7 @@ function openAction(actionKind: MembershipRequestActionIntent["actionKind"], tem
       class="btn btn-sm btn-success"
       title="Approve this request"
       aria-label="Approve"
-      @click="openAction('approve', bootstrap.approveTemplate)"
+      @click="openAction('approve', bootstrap.approveTemplate, bootstrap.approveCustomEmailTemplate)"
     >Approve</button>
     <button
       v-if="row.status === 'on_hold'"
@@ -56,7 +61,7 @@ function openAction(actionKind: MembershipRequestActionIntent["actionKind"], tem
       class="btn btn-sm btn-danger"
       title="Reject this request"
       aria-label="Reject"
-      @click="openAction('reject', bootstrap.rejectTemplate)"
+      @click="openAction('reject', bootstrap.rejectTemplate, bootstrap.rejectCustomEmailTemplate)"
     >Reject</button>
     <button
       v-if="row.status === 'pending' && bootstrap.canRequestInfo"
@@ -64,7 +69,7 @@ function openAction(actionKind: MembershipRequestActionIntent["actionKind"], tem
       class="btn btn-sm btn-outline-primary"
       title="Request information and put on hold"
       aria-label="Request for Information"
-      @click="openAction('rfi', bootstrap.requestInfoTemplate)"
+      @click="openAction('rfi', bootstrap.requestInfoTemplate, bootstrap.requestInfoCustomEmailTemplate)"
     >RFI</button>
     <button
       type="button"

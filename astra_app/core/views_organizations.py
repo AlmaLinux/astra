@@ -8,6 +8,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
+from django.core.files.storage import default_storage
 from django.core.paginator import Page, Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
@@ -69,6 +70,14 @@ from core.permissions import (
     has_any_membership_permission,
     json_permission_required_any,
     membership_review_permissions,
+)
+from core.rate_limit import allow_request
+from core.sponsorship_invoices import (
+    InvoiceTerm,
+    get_or_create_invoice_pdf,
+    invoice_eligible,
+    invoice_number,
+    invoice_storage_key,
 )
 from core.templatetags.core_dict import membership_tier_class
 from core.views_utils import (
@@ -352,6 +361,43 @@ def _can_edit_organization(request: HttpRequest, organization: Organization) -> 
 
 def _can_access_organization(request: HttpRequest, organization: Organization) -> bool:
     return request.user.has_perm(ASTRA_VIEW_MEMBERSHIP) or _can_edit_organization(request, organization)
+
+
+def _organization_page_invoice_term(
+    request: HttpRequest,
+    organization: Organization,
+    membership: Membership,
+) -> InvoiceTerm | None:
+    """Return which invoice the viewer may download/regenerate on the page, if any.
+
+    While a renewal is due that's the renewal invoice, for the committee and the
+    representative alike. Otherwise only the committee may work with the current
+    term's invoice (e.g. to correct a new sponsor's welcome invoice).
+    """
+    if not invoice_eligible(membership):
+        return None
+    if membership.expires_at <= expiring_soon_cutoff():
+        if has_any_membership_manage_permission(request.user) or _is_representative(request, organization):
+            return InvoiceTerm.renewal
+        return None
+    if has_any_membership_manage_permission(request.user):
+        return InvoiceTerm.current
+    return None
+
+
+def _serialize_sponsorship_invoice(
+    request: HttpRequest,
+    organization: Organization,
+    membership: Membership,
+) -> dict[str, str | None] | None:
+    term = _organization_page_invoice_term(request, organization, membership)
+    if term is None:
+        return None
+    key = invoice_storage_key(membership, term)
+    return {
+        "number": invoice_number(membership, term),
+        "url": default_storage.url(key) if default_storage.exists(key) else None,
+    }
 
 
 def _require_organization_access(request: HttpRequest, organization: Organization) -> None:
@@ -855,6 +901,7 @@ def _build_organization_detail_page_context(
             "tier_change_membership_type_code": suggested_tier_code,
             "has_pending_request_in_category": has_pending_request_in_category,
             "request_id": sponsorship_request_id_by_type.get(sponsorship.membership_type_id),
+            "invoice": _serialize_sponsorship_invoice(request, organization, sponsorship),
         })
 
     can_edit_organization = _can_edit_organization(request, organization)
@@ -917,6 +964,7 @@ def _serialize_organization_detail_page_membership_entry(
         can_act=can_request_membership,
         can_view=can_view,
         can_manage=can_manage,
+        invoice=entry["invoice"],
     )
 
 
@@ -985,6 +1033,7 @@ def _serialize_organization_detail_page_payload(
                 "postal_code": organization.postal_code,
                 "country_code": organization.country_code,
             },
+            "billing_notes": organization.billing_notes,
         },
     }
 
@@ -1182,6 +1231,10 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
                 "organization-sponsorship-terminate",
                 args=[organization.pk, membership_type_code_sentinel],
             ).replace(membership_type_code_sentinel, "__membership_type_code__"),
+            "sponsorship_invoice_regenerate_url_template": reverse(
+                "organization-sponsorship-invoice-regenerate",
+                args=[organization.pk, membership_type_code_sentinel],
+            ).replace(membership_type_code_sentinel, "__membership_type_code__"),
             "csrf_token": get_token(request),
             "next_url": reverse("organization-detail", args=[organization.pk]),
             "user_profile_url_template": reverse("user-profile", args=[username_sentinel]).replace(
@@ -1268,6 +1321,51 @@ def organization_sponsorship_extend(request: HttpRequest, organization_id: int) 
 
     request_path = reverse("organization-membership-request", kwargs={"organization_id": organization.pk})
     return redirect(f"{request_path}?{urlencode({'membership_type': membership_type_code})}")
+
+
+@post_only_404
+def organization_sponsorship_invoice_regenerate(
+    request: HttpRequest,
+    organization_id: int,
+    membership_type_code: str,
+) -> HttpResponse:
+    organization = get_object_or_404(Organization, pk=organization_id)
+    membership = next(
+        (
+            membership
+            for membership in get_valid_memberships(organization=organization)
+            if membership.membership_type_id == membership_type_code
+        ),
+        None,
+    )
+    term = _organization_page_invoice_term(request, organization, membership) if membership is not None else None
+    if term is None:
+        raise Http404("Not found")
+
+    detail_redirect = redirect("organization-detail", organization_id=organization.pk)
+    # Rendering is CPU-heavy, so cap how often one user can trigger it.
+    if not allow_request(
+        scope="sponsorship_invoice_regenerate",
+        key_parts=[str(organization.pk), get_username(request)],
+        limit=settings.SPONSORSHIP_INVOICE_REGENERATE_LIMIT,
+        window_seconds=settings.SPONSORSHIP_INVOICE_REGENERATE_WINDOW_SECONDS,
+    ):
+        messages.error(request, "Too many invoice regenerations. Please try again later.")
+        return detail_redirect
+
+    try:
+        get_or_create_invoice_pdf(membership, term, regenerate=True)
+    except Exception:
+        logger.exception(
+            "organization_sponsorship_invoice_regenerate: failed org_id=%s membership_id=%s",
+            organization.pk,
+            membership.pk,
+            extra=current_exception_log_fields(),
+        )
+        messages.error(request, "The invoice could not be generated. Please try again later.")
+    else:
+        messages.success(request, "Invoice generated.")
+    return detail_redirect
 
 
 def organization_edit(request: HttpRequest, organization_id: int) -> HttpResponse:

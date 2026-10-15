@@ -12,6 +12,7 @@ _SETTINGS_EMAIL_VALIDATION_TOKEN_PURPOSE = "settings-email-validate"
 _ORGANIZATION_CLAIM_TOKEN_PURPOSE = "org_claim"
 _ACCOUNT_INVITATION_TOKEN_PURPOSE = "account-invitation"
 _MEMBERSHIP_NOTES_AGGREGATE_TARGET_TOKEN_PURPOSE = "membership-notes-aggregate-target"
+_MAIL_ATTACHMENT_TOKEN_PURPOSE = "mail-attachment"
 
 
 def _salt_for_purpose(*, purpose: str) -> str:
@@ -102,6 +103,18 @@ def read_membership_notes_aggregate_target_token(token: str) -> dict[str, Any]:
         purpose=_MEMBERSHIP_NOTES_AGGREGATE_TARGET_TOKEN_PURPOSE,
         token=token,
         max_age_seconds=None,
+    )
+
+
+def make_mail_attachment_token(payload: Mapping[str, Any]) -> str:
+    return _dumps(purpose=_MAIL_ATTACHMENT_TOKEN_PURPOSE, payload=payload)
+
+
+def read_mail_attachment_token(token: str) -> dict[str, Any]:
+    return _loads(
+        purpose=_MAIL_ATTACHMENT_TOKEN_PURPOSE,
+        token=token,
+        max_age_seconds=settings.MAIL_ATTACHMENT_TOKEN_TTL_SECONDS,
     )
 
 

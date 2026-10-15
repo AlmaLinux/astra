@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Invoice {{ invoice_number }}</title>
+  <style>
+    @page { size: letter; margin: 0; }
+    html, body { margin: 0; }
+    /* Header, content and footer stack in a page-high column: the footer sits at the
+       bottom of the page, and long content pushes it onward instead of hiding under it. */
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 11in;
+      font-family: Montserrat, sans-serif;
+      font-size: 11pt;
+      line-height: 1.3;
+      color: #00245d;
+    }
+    .content { flex: 1 0 auto; padding-bottom: 0.3in; }
+    .header {
+      position: relative;
+      flex: none;
+      height: 2.2in;
+      overflow: hidden;
+      background: #00245d;
+      color: #fff;
+    }
+    .header .logo { position: absolute; top: 0.15in; left: 0.22in; height: 1in; }
+    .header .watermark { position: absolute; top: -0.3in; left: 6.05in; height: 2.6in; opacity: 0.38; }
+    .foundation { position: absolute; top: 1.22in; left: 0.5in; font-size: 9pt; }
+    .foundation strong { font-size: 10pt; }
+    h1 { margin: 0.12in 0 0.1in 0.22in; font-size: 30pt; font-weight: 400; }
+    table { width: 7.3in; margin-left: 0.5in; border-collapse: collapse; }
+    td { padding: 0; vertical-align: top; }
+    td.right { text-align: right; }
+    .label { font-weight: 700; padding-top: 0.1in; }
+    .membership { margin-top: 1.1in; }
+    .membership .description { width: 3.6in; }
+    .footer {
+      flex: none;
+      break-inside: avoid;
+      height: 3.92in;
+      box-sizing: border-box;
+      padding: 0.25in 0.3in;
+      background: #00245d;
+      color: #fff;
+      font-family: "Liberation Sans", Arial, sans-serif;
+      font-size: 9.5pt;
+    }
+    .footer p { margin: 0 0 0.16in; }
+    .payment-details { white-space: pre-line; }
+    .disclaimer { width: 3.3in; font-size: 7pt; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img class="logo" src="almalinux-logo-white.svg" alt="AlmaLinux">
+    <img class="watermark" src="almalinux-icon-white.svg" alt="">
+    <div class="foundation">
+      <strong>AlmaLinux OS Foundation</strong><br>
+      20791 Three Oaks Pkwy, #980<br>
+      Estero FL 33929<br>
+      membership@almalinux.org<br>
+      https://almalinux.org
+    </div>
+  </div>
+
+  <div class="content">
+    <h1>Sponsor member invoice</h1>
+
+    <table>
+      <tr>
+        <td>
+          <div class="label">Bill to:</div>
+          <div>{{ organization.name }}</div>
+          {% if organization.billing_notes %}<div>{{ organization.billing_notes|linebreaksbr }}</div>{% endif %}
+          {% for line in address_lines %}<div>{{ line }}</div>{% endfor %}
+        </td>
+        <td class="right">
+          <div class="label">Invoice #</div>
+          <div>{{ invoice_number }}</div>
+          <div class="label">Invoice date</div>
+          <div>{{ invoice_date|date:"F j, Y" }}</div>
+        </td>
+      </tr>
+    </table>
+
+    <table class="membership">
+      <tr>
+        <td class="description">
+          <div class="label">Membership type</div>
+          <div>{{ membership_type_name }}</div>
+          <div>from {{ term_start_date|date:"F jS Y" }} to {{ term_end_date|date:"F jS Y" }}</div>
+        </td>
+        <td class="right">
+          <div class="label">Amount</div>
+          <div>{{ amount_usd }}</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="footer">
+    <p>Please complete payment upon receipt.</p>
+    <p class="payment-details">{{ payment_details }}</p>
+    <p>Our TaxID number, as a registered 501(c)(6) in the US<br>86-2791864</p>
+    <p class="disclaimer">
+      AlmaLinux is a 501(c)(6) organization under US law. Contributions to AlmaLinux are typically not
+      considered charitable contributions and would not be tax-deductible as such. Please contact your
+      financial or tax advisor for specific guidance.
+    </p>
+  </div>
+</body>
+</html>

@@ -8,6 +8,12 @@ export interface OrganizationDetailMembershipType {
   annualDuesUsd: number;
 }
 
+// Present only when the viewer may (re)generate it; url is null until a PDF is stored.
+export interface OrganizationDetailInvoice {
+  number: string;
+  url: string | null;
+}
+
 export interface OrganizationDetailMembership {
   kind: "membership";
   key: string;
@@ -21,6 +27,7 @@ export interface OrganizationDetailMembership {
   canRequestTierChange: boolean;
   tierChangeMembershipTypeCode: string;
   canManage: boolean;
+  invoice: OrganizationDetailInvoice | null;
 }
 
 export interface OrganizationDetailPendingMembership {
@@ -77,6 +84,7 @@ export interface OrganizationDetailOrganization {
   representative: OrganizationDetailRepresentative;
   contact_groups: OrganizationDetailContactGroup[];
   address: OrganizationDetailAddress;
+  billing_notes: string;
 }
 
 export interface OrganizationDetailResponse {
@@ -90,6 +98,7 @@ export interface OrganizationDetailBootstrap {
   membershipHistoryUrl: string;
   sponsorshipSetExpiryUrlTemplate: string;
   sponsorshipTerminateUrlTemplate: string;
+  sponsorshipInvoiceRegenerateUrlTemplate: string;
   csrfToken: string;
   nextUrl: string;
   expiryMinDate: string;
@@ -109,6 +118,7 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
   const membershipHistoryUrl = String(root.dataset.organizationDetailMembershipHistoryUrl || "").trim();
   const sponsorshipSetExpiryUrlTemplate = String(root.dataset.organizationDetailSponsorshipSetExpiryUrlTemplate || "").trim();
   const sponsorshipTerminateUrlTemplate = String(root.dataset.organizationDetailSponsorshipTerminateUrlTemplate || "").trim();
+  const sponsorshipInvoiceRegenerateUrlTemplate = String(root.dataset.organizationDetailSponsorshipInvoiceRegenerateUrlTemplate || "").trim();
   const csrfToken = String(root.dataset.organizationDetailCsrfToken || "").trim();
   const nextUrl = String(root.dataset.organizationDetailNextUrl || "").trim();
   const expiryMinDate = String(root.dataset.organizationDetailExpiryMinDate || "").trim();
@@ -121,6 +131,7 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
     || !membershipHistoryUrl
     || !sponsorshipSetExpiryUrlTemplate
     || !sponsorshipTerminateUrlTemplate
+    || !sponsorshipInvoiceRegenerateUrlTemplate
     || !csrfToken
     || !nextUrl
     || !expiryMinDate
@@ -155,6 +166,7 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
     membershipHistoryUrl,
     sponsorshipSetExpiryUrlTemplate,
     sponsorshipTerminateUrlTemplate,
+    sponsorshipInvoiceRegenerateUrlTemplate,
     csrfToken,
     nextUrl,
     expiryMinDate,

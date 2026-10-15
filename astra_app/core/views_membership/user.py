@@ -756,6 +756,10 @@ def _committee_detail_bootstrap(
         "reject_url": reverse("api-membership-request-reject", args=[membership_request.pk]),
         "rfi_url": reverse("api-membership-request-rfi", args=[membership_request.pk]),
         "ignore_url": reverse("api-membership-request-ignore", args=[membership_request.pk]),
+        # Form routes that act without emailing, then hand off to Send Mail for a custom email.
+        "approve_custom_email_url": reverse("membership-request-approve", args=[membership_request.pk]),
+        "reject_custom_email_url": reverse("membership-request-reject", args=[membership_request.pk]),
+        "rfi_custom_email_url": reverse("membership-request-rfi", args=[membership_request.pk]),
     }
 
 
@@ -882,6 +886,9 @@ def _build_membership_request_detail_state(request: HttpRequest, *, pk: int) -> 
         "reject_url": "",
         "rfi_url": "",
         "ignore_url": "",
+        "approve_custom_email_url": "",
+        "reject_custom_email_url": "",
+        "rfi_custom_email_url": "",
         "rescind_url": "",
         "form_action_url": reverse("membership-request-detail", args=[membership_request.pk]),
     }

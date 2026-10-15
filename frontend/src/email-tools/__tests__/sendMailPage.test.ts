@@ -110,12 +110,14 @@ const initialPayload: NonNullable<SendMailBootstrap["initialPayload"]> = {
       text: "Hello jim@example.com",
     },
   },
+  attachments: [],
 };
 
 const bootstrap: SendMailBootstrap = {
   apiUrl: "/api/v1/email-tools/send-mail/detail",
   submitUrl: "/email-tools/send-mail/",
   previewUrl: "/email-tools/send-mail/render-preview/",
+  attachmentsUploadUrl: "/email-tools/send-mail/attachments/",
   mailProgressApiUrl: "/api/v1/mail-progress?kind=send_mail",
   mailProgressAckApiUrl: "/api/v1/mail-progress/ack",
   csrfToken: "csrf-token",
@@ -241,5 +243,146 @@ describe("SendMailPage", () => {
 
     expect(wrapper.find("[data-mail-progress-counts]").exists()).toBe(false);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("mail-progress/ack"))).toBe(true);
+  });
+
+  it("keeps attached files as references and lets the operator remove them", async () => {
+    const wrapper = mount(SendMailPage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          initialPayload: {
+            ...initialPayload,
+            attachments: [
+              { token: "tok-invoice", name: "AlmaLinux_OS_Foundation_Invoice_0042-2026-482915.pdf", size: 45122 },
+              { token: "tok-agenda", name: "agenda.pdf", size: 2048 },
+            ],
+          },
+        },
+      },
+    });
+    await flushPromises();
+
+    const options = wrapper.get("#send-mail-extra-options");
+    // Attachments must be visible without the operator having to open the section.
+    expect(options.classes()).toContain("show");
+    const references = () => options.findAll('input[type="hidden"][name="attachment"]').map((input) => (input.element as HTMLInputElement).value);
+    expect(references()).toEqual(["tok-invoice", "tok-agenda"]);
+    expect(options.text()).toContain("AlmaLinux_OS_Foundation_Invoice_0042-2026-482915.pdf");
+    expect(options.text()).toContain("44.1 KB");
+
+    await options.get('button[aria-label="Remove agenda.pdf"]').trigger("click");
+
+    expect(references()).toEqual(["tok-invoice"]);
+    expect(options.text()).not.toContain("agenda.pdf");
+  });
+
+  it("offers a multi-file attachment input beside the address options", async () => {
+    const wrapper = mount(SendMailPage, { props: { bootstrap } });
+    await flushPromises();
+
+    const columns = wrapper.get("#send-mail-extra-options").findAll(".row > .col-md-6");
+    expect(columns).toHaveLength(2);
+    expect(columns[0]!.find('input[name="cc"]').exists()).toBe(true);
+    const fileInput = columns[1]!.get('input[type="file"]#send-mail-attachments');
+    expect(fileInput.attributes("multiple")).toBeDefined();
+    // Files are uploaded on selection, never again with the form.
+    expect(fileInput.attributes("name")).toBeUndefined();
+    expect(wrapper.get("#send-mail-extra-options").classes()).not.toContain("show");
+  });
+
+  it("places additional options below the recipient columns at full width", async () => {
+    const wrapper = mount(SendMailPage, { props: { bootstrap } });
+    await flushPromises();
+
+    const options = wrapper.get("#send-mail-extra-options").element;
+    const recipientColumns = wrapper.get("#send-mail-recipient-count").element.closest(".row") as HTMLElement;
+    expect(recipientColumns.contains(options)).toBe(false);
+    expect(recipientColumns.parentElement!.contains(options)).toBe(true);
+    // Rendered after the recipient columns, not beside them.
+    expect(recipientColumns.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  function pickFiles(input: HTMLInputElement, files: File[]): void {
+    Object.defineProperty(input, "files", { value: files, configurable: true });
+    input.dispatchEvent(new Event("change"));
+  }
+
+  it("uploads picked files right away and keeps the picker free for more", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      attachments: [{ token: "tok-notes", name: "notes.txt", size: 5 }],
+    })));
+    vi.stubGlobal("fetch", fetchMock);
+    const wrapper = mount(SendMailPage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          initialPayload: { ...initialPayload, attachments: [{ token: "tok-agenda", name: "agenda.pdf", size: 2048 }] },
+        },
+      },
+    });
+    await flushPromises();
+
+    const input = wrapper.get("#send-mail-attachments").element as HTMLInputElement;
+    pickFiles(input, [new File(["notes"], "notes.txt", { type: "text/plain" })]);
+    await flushPromises();
+
+    // The page also polls delivery progress on load; only the upload matters here.
+    const uploadCalls = (fetchMock.mock.calls as unknown as Array<[string, RequestInit]>).filter(
+      ([url]) => url === "/email-tools/send-mail/attachments/",
+    );
+    expect(uploadCalls).toHaveLength(1);
+    const [, init] = uploadCalls[0]!;
+    expect((init.headers as Record<string, string>)["X-CSRFToken"]).toBe("csrf-token");
+    const body = init.body as FormData;
+    expect((body.getAll("files") as File[]).map((file) => file.name)).toEqual(["notes.txt"]);
+    // The server checks size and name clashes against what is already attached.
+    expect(body.getAll("attachment")).toEqual(["tok-agenda"]);
+
+    const references = wrapper.findAll('input[type="hidden"][name="attachment"]').map((node) => (node.element as HTMLInputElement).value);
+    expect(references).toEqual(["tok-agenda", "tok-notes"]);
+    expect(input.value).toBe("");
+    vi.unstubAllGlobals();
+  });
+
+  it("reports a rejected upload without losing the files already attached", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: "Attachments are too large: the total limit is 20 MB." }),
+      { status: 400 },
+    )));
+    const wrapper = mount(SendMailPage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          initialPayload: { ...initialPayload, attachments: [{ token: "tok-agenda", name: "agenda.pdf", size: 2048 }] },
+        },
+      },
+    });
+    await flushPromises();
+
+    pickFiles(wrapper.get("#send-mail-attachments").element as HTMLInputElement, [new File(["x"], "huge.bin")]);
+    await flushPromises();
+
+    expect(wrapper.get("#send-mail-extra-options").text()).toContain("Attachments are too large: the total limit is 20 MB.");
+    expect(wrapper.findAll('input[type="hidden"][name="attachment"]')).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps what the operator typed when a file is attached", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      attachments: [{ token: "tok-notes", name: "notes.txt", size: 5 }],
+    }))));
+    const wrapper = mount(SendMailPage, { props: { bootstrap }, attachTo: document.body });
+    await flushPromises();
+
+    // The form's fields are plain inputs; a re-render of the page must not reset them.
+    const cc = wrapper.get('input[name="cc"]').element as HTMLInputElement;
+    cc.value = "typed@example.com";
+    pickFiles(wrapper.get("#send-mail-attachments").element as HTMLInputElement, [new File(["notes"], "notes.txt")]);
+    await flushPromises();
+
+    expect(wrapper.findAll('input[type="hidden"][name="attachment"]')).toHaveLength(1);
+    expect(cc.value).toBe("typed@example.com");
+    wrapper.unmount();
+    vi.unstubAllGlobals();
   });
 });

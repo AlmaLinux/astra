@@ -3,7 +3,8 @@ FROM python:3.14-slim AS base
 ARG ASTRA_BUILD_SHA=""
 ENV ASTRA_BUILD_SHA=$ASTRA_BUILD_SHA
 
-# Install system dependencies for Postgres, Pillow, and in-container JS execution tests.
+# Install system dependencies for Postgres, Pillow, in-container JS execution tests,
+# and WeasyPrint (Pango/HarfBuzz plus the fonts used by the sponsorship invoice).
 RUN apt-get update && apt-get install -y \
     build-essential \
     libssl-dev \
@@ -14,6 +15,11 @@ RUN apt-get update && apt-get install -y \
     git \
     nodejs \
     npm \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz-subset0 \
+    fonts-montserrat \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/astra_app

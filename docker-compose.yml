@@ -117,6 +117,8 @@ services:
       - SELF_SERVICE_ADDRESS_COUNTRY_ATTR=fasstatusnote
       - ELECTION_REKOR_ENDPOINT=https://rekor.sigstore.dev
       - ELECTION_REKOR_SIGNING_KEY=/run/secrets/rekor-signing-key.pem
+      # Placeholder bank details; production reads a root-owned file outside the repo.
+      - SPONSORSHIP_INVOICE_PAYMENT_DETAILS_FILE=/app/docker/invoice-payment-details.example.txt
 
   vite:
     build: .

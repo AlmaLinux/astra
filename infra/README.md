@@ -88,6 +88,28 @@ After updating the env file on the host:
 sudo systemctl restart astra-app@1.service astra-app@2.service astra-caddy.service
 ```
 
+## Sponsorship invoice payment details
+
+Sponsorship invoices print the bank/payment instructions from a plain-text file on the host, so they
+can only be changed by root, never through the repo or the app. Ansible creates `/etc/astra/invoices/`
+and the app units mount it read-only; create the file by hand:
+
+```bash
+sudo install -m 0644 -o root -g root /dev/stdin /etc/astra/invoices/payment-details.txt <<'EOF'
+Pay by ACH, Wire
+Bank: ...
+Account Number: ...
+EOF
+```
+
+and make sure `/etc/astra/astra.env` contains
+`SPONSORSHIP_INVOICE_PAYMENT_DETAILS_FILE=/etc/astra/invoices/payment-details.txt`. Until the file exists,
+`manage.py check` reports `core.W002` and reminders are sent without invoices.
+
+`operations_daily` emails the FreeIPA admins if the file becomes unreadable, stops mentioning both
+"Bank" and "Account Number", or changes in any way since the previous day's check. After editing it on
+purpose, expect one "changed" alert the next morning.
+
 ## Deployment scripts
 
 Ansible installs the following scripts:

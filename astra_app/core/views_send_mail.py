@@ -12,6 +12,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
 from django.core.validators import validate_email
 from django.http import HttpRequest, HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import render
@@ -26,6 +27,14 @@ from core.forms_base import StyledForm
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
+from core.mail_attachments import (
+    MailAttachment,
+    create_post_office_attachments,
+    discard_uploaded_mail_attachments,
+    mail_attachments_from_tokens,
+    store_uploaded_mail_attachments,
+    validate_mail_attachments,
+)
 from core.mail_delivery import MailDelivery, deliver_in_batches
 from core.mail_progress import MailRunKind
 from core.membership_notes import add_note
@@ -70,6 +79,7 @@ class SendMailGetState:
     action_notice: str
     action_status: str
     has_saved_csv_recipients: bool
+    attachments: list[MailAttachment]
 
 
 def _best_example_context(*, recipients: list[dict[str, str]], var_names: list[str]) -> dict[str, str]:
@@ -149,6 +159,7 @@ def _extra_context_from_query(query: QueryDict) -> dict[str, str]:
         "action_status",
         "invitation_action",
         "invitation_org_id",
+        "attachment",
     }
 
     raw_items: list[tuple[str, str]] = []
@@ -803,7 +814,37 @@ def _serialize_send_mail_get_payload(*, state: SendMailGetState) -> dict[str, ob
             "selected_template_id": state.selected_template_id,
             "preview": state.rendered_preview,
         },
+        "attachments": [_serialize_mail_attachment(attachment) for attachment in state.attachments],
     }
+
+
+def _serialize_mail_attachment(attachment: MailAttachment) -> dict[str, object]:
+    return {"token": attachment.to_token(), "name": attachment.name, "size": attachment.size}
+
+
+def _mail_attachments_from_request(request: HttpRequest) -> tuple[list[MailAttachment], bool]:
+    """Return (attachments, ok) for the files referenced by the page.
+
+    Files are uploaded beforehand (send_mail_attachments_upload); limits are checked
+    again here since references can be combined freely. Problems are reported as
+    messages, and ok is False so sending can be refused rather than going out
+    without a file the operator expects to be attached.
+    """
+    query = request.POST if request.method == "POST" else request.GET
+    try:
+        attachments = mail_attachments_from_tokens(query.getlist("attachment"))
+        validate_mail_attachments(attachments)
+    except ValueError as error:
+        messages.error(request, str(error))
+        return [], False
+    # References are re-signed on every render, so one can outlive an upload the
+    # daily cleanup already removed.
+    available = [attachment for attachment in attachments if default_storage.exists(attachment.key)]
+    if len(available) != len(attachments):
+        missing = ", ".join(attachment.name for attachment in attachments if attachment not in available)
+        messages.error(request, f"{missing} is no longer available. Please attach it again.")
+        return available, False
+    return attachments, True
 
 
 def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
@@ -956,6 +997,7 @@ def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
         action_notice=action_notice,
         action_status=action_status,
         has_saved_csv_recipients=bool(request.session.get(_CSV_SESSION_KEY)),
+        attachments=_mail_attachments_from_request(request)[0],
     )
 
 
@@ -966,20 +1008,24 @@ def _send_mail_templates(*, recipient_mode: str) -> list[EmailTemplate]:
     return list(templates_qs)
 
 
+def _render_send_mail_shell(request: HttpRequest, *, state: SendMailGetState) -> HttpResponse:
+    return render(
+        request,
+        "core/send_mail_shell.html",
+        {
+            "send_mail_api_url": reverse_lazy("api-send-mail-detail"),
+            "send_mail_submit_url": reverse_lazy("send-mail"),
+            "send_mail_preview_url": reverse_lazy("send-mail-render-preview"),
+            "send_mail_attachments_upload_url": reverse_lazy("send-mail-attachments-upload"),
+            "send_mail_initial_payload": _serialize_send_mail_get_payload(state=state),
+        },
+    )
+
+
 @permission_required(ASTRA_ADD_SEND_MAIL, login_url=reverse_lazy("users"))
 def send_mail(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
-        state = _prepare_send_mail_get_state(request)
-        return render(
-            request,
-            "core/send_mail_shell.html",
-            {
-                "send_mail_api_url": reverse_lazy("api-send-mail-detail"),
-                "send_mail_submit_url": reverse_lazy("send-mail"),
-                "send_mail_preview_url": reverse_lazy("send-mail-render-preview"),
-                "send_mail_initial_payload": _serialize_send_mail_get_payload(state=state),
-            },
-        )
+        return _render_send_mail_shell(request, state=_prepare_send_mail_get_state(request))
 
     group_choices = _group_select_choices()
     user_choices = _user_select_choices()
@@ -1000,6 +1046,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
     action_notice = _build_send_mail_action_notice(action_status=action_status)
 
     if request.method == "POST":
+        attachments, attachments_ok = _mail_attachments_from_request(request)
         selected_recipient_mode = str(request.POST.get("recipient_mode") or "").strip().lower()
         form = SendMailForm(request.POST, request.FILES, group_choices=group_choices, user_choices=user_choices)
         selected_template_id = _selected_template_id_from_form(form=form)
@@ -1119,6 +1166,10 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             if action == "send":
                 if preview is None or not recipients:
                     messages.error(request, "No recipients to send to.")
+                elif not attachments_ok:
+                    messages.error(request, "Nothing was sent. Fix the attachments and try again.")
+                elif invitation_action == "org_claim" and attachments:
+                    messages.error(request, "Organization claim invitations can't include attachments.")
                 elif invitation_action == "org_claim":
                     if recipient_mode != SendMailForm.RECIPIENT_MODE_MANUAL:
                         messages.error(request, "Organization claim invitations require manual recipients.")
@@ -1167,6 +1218,11 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                         email_kind = "rfi"
                     elif membership_request is not None:
                         email_kind = "custom"
+
+                    # Copied into post_office once; every email in the run links to the same rows.
+                    post_office_attachments = create_post_office_attachments(attachments)
+                    discard_uploaded_mail_attachments(attachments)
+                    attachments = []
 
                     deliverable = [
                         recipient for recipient in recipients if str(recipient.get("email") or "").strip()
@@ -1227,6 +1283,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                             prepare=_prepare,
                             skipped=skipped,
                             on_progress=on_progress,
+                            attachments=post_office_attachments,
                         )
                         _add_pending_notes()
                         return delivery
@@ -1373,18 +1430,10 @@ def send_mail(request: HttpRequest) -> HttpResponse:
         action_notice=action_notice,
         action_status=action_status,
         has_saved_csv_recipients=bool(request.session.get(_CSV_SESSION_KEY)),
+        attachments=attachments,
     )
 
-    return render(
-        request,
-        "core/send_mail_shell.html",
-        {
-            "send_mail_api_url": reverse_lazy("api-send-mail-detail"),
-            "send_mail_submit_url": reverse_lazy("send-mail"),
-            "send_mail_preview_url": reverse_lazy("send-mail-render-preview"),
-            "send_mail_initial_payload": _serialize_send_mail_get_payload(state=state),
-        },
-    )
+    return _render_send_mail_shell(request, state=state)
 
 
 @require_GET
@@ -1392,6 +1441,18 @@ def send_mail(request: HttpRequest) -> HttpResponse:
 def send_mail_detail_api(request: HttpRequest) -> JsonResponse:
     state = _prepare_send_mail_get_state(request)
     return JsonResponse(_serialize_send_mail_get_payload(state=state))
+
+
+@require_POST
+@json_permission_required(ASTRA_ADD_SEND_MAIL)
+def send_mail_attachments_upload(request: HttpRequest) -> JsonResponse:
+    """Store picked files right away, so the page can keep adding more."""
+    try:
+        attached = mail_attachments_from_tokens(request.POST.getlist("attachment"))
+        stored = store_uploaded_mail_attachments(request.FILES.getlist("files"), attached=attached)
+    except ValueError as error:
+        return JsonResponse({"error": str(error)}, status=400)
+    return JsonResponse({"attachments": [_serialize_mail_attachment(attachment) for attachment in stored]})
 
 
 @require_POST

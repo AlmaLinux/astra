@@ -62,6 +62,11 @@ urlpatterns = [
         views_membership.membership_terminate,
         name="organization-sponsorship-terminate",
     ),
+    path(
+        "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/invoice/regenerate/",
+        views_organizations.organization_sponsorship_invoice_regenerate,
+        name="organization-sponsorship-invoice-regenerate",
+    ),
     path("organization/<int:organization_id>/edit/", views_organizations.organization_edit, name="organization-edit"),
 
     path("search/", views_search.global_search, name="global-search"),
@@ -139,6 +144,11 @@ urlpatterns = [
         "email-tools/send-mail/render-preview/",
         views_send_mail.send_mail_render_preview,
         name="send-mail-render-preview",
+    ),
+    path(
+        "email-tools/send-mail/attachments/",
+        views_send_mail.send_mail_attachments_upload,
+        name="send-mail-attachments-upload",
     ),
 
     path(

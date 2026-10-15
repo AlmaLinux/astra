@@ -87,6 +87,9 @@
         mode: "0755"
       loop:
         - /etc/astra
+        # Holds payment-details.txt for sponsorship invoices; created by hand so
+        # bank details never pass through the repo or the app.
+        - /etc/astra/invoices
         - /var/lib/caddy
 
     - name: Ensure Caddy data directory is writable by the container

@@ -333,6 +333,7 @@ class Command(BaseCommand):
                     template_name=template,
                     expires_at=sponsorship.expires_at,
                     organization=target_organization,
+                    membership=sponsorship,
                     days=days_until,
                     force=force,
                     tz_name=rep_timezone,

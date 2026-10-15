@@ -1,6 +1,23 @@
+import { readFileSync } from "node:fs";
+
 import { expect, test, type Page } from "@playwright/test";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 import { readOrganizationsResetState } from "./resetState";
+
+// The E2E stack prints the bank details from this file (see docker-compose.yml).
+const PAYMENT_DETAILS_FILE = new URL("../../../docker/invoice-payment-details.example.txt", import.meta.url);
+
+/** Extract a PDF's text, with whitespace collapsed so assertions ignore line wrapping. */
+async function pdfText(data: Buffer): Promise<string> {
+  const pdf = await getDocument({ data: new Uint8Array(data) }).promise;
+  const pages: string[] = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const content = await (await pdf.getPage(pageNumber)).getTextContent();
+    pages.push(content.items.map((item) => ("str" in item ? item.str : "")).join(" "));
+  }
+  return pages.join(" ").replace(/\s+/g, " ");
+}
 
 async function loginViaForm(page: Page, username: string, password: string): Promise<void> {
   await page.goto("/login/");
@@ -295,3 +312,115 @@ test("organizations-detail-delete-modal exposes destructive confirmation copy wi
   await expect(page.locator("[data-organization-detail-root]")).toBeVisible();
   await expect(page.getByRole("heading", { name: orgName, exact: true })).toBeVisible();
 });
+// As a representative with a renewal due, I can generate, download, and regenerate my sponsorship invoice.
+test("organizations-detail-invoice lets the representative generate download and regenerate the renewal invoice", async ({ page }) => {
+  const resetState = readOrganizationsResetState();
+  const actor = resetState.actors.renewal_representative;
+  const detailTarget = resetState.scenarios["organizations-detail-renewal-cta"].route_target;
+
+  await loginViaForm(page, actor.username, actor.password);
+  await page.goto(detailTarget);
+  await expect(page.locator("[data-organization-detail-root]")).toBeVisible();
+
+  const representativeActions = page.locator('[data-membership-actions="representative"]');
+  await expect(page.locator('[data-membership-actions="committee"]')).toHaveCount(0);
+
+  // A fresh reset has no invoice yet; a rerun without a reset may already have one.
+  await representativeActions.getByRole("button", { name: /^(Generate|Regenerate) invoice$/ }).click();
+  const modal = page.locator(".modal.show").filter({ hasText: "will be rebuilt" });
+  await expect(modal).toBeVisible();
+  await modal.getByRole("button", { name: /^(Generate|Regenerate) invoice$/ }).click();
+
+  await expect(page.getByText("Invoice generated.", { exact: true })).toBeVisible();
+  const download = page.getByRole("link", { name: /Download invoice \d{4}-\d{4}-\d{6}$/ });
+  await expect(download).toBeVisible();
+  const pdf = await page.request.get((await download.getAttribute("href")) ?? "");
+  expect(pdf.status()).toBe(200);
+  expect(pdf.headers()["content-type"]).toBe("application/pdf");
+  expect((await pdf.body()).subarray(0, 5).toString()).toBe("%PDF-");
+
+  await expect(representativeActions.getByRole("button", { name: "Regenerate invoice", exact: true })).toBeVisible();
+});
+
+// As a membership committee member, my committee-only controls sit on their own row below the representative actions.
+test("organizations-detail-sponsorship-actions separate committee-only controls from representative actions", async ({ page }) => {
+  const resetState = readOrganizationsResetState();
+  const observer = resetState.actors.representative_observer;
+  const detailTarget = resetState.scenarios["organizations-detail-membership-state"].route_target;
+
+  await loginViaForm(page, observer.username, observer.password);
+  await page.goto(detailTarget);
+  await expect(page.locator("[data-membership-card-root]")).toBeVisible();
+
+  const representativeActions = page.locator('[data-membership-actions="representative"]');
+  const committeeActions = page.locator('[data-membership-actions="committee"]');
+  await expect(representativeActions.getByRole("link", { name: "Change tier", exact: true })).toBeVisible();
+  // Outside the renewal window only the committee may (re)issue the current term's invoice.
+  await expect(representativeActions.getByRole("button", { name: /^(Generate|Regenerate) invoice$/ })).toBeVisible();
+  await expect(committeeActions.getByRole("button", { name: "Edit expiration", exact: true })).toBeVisible();
+  await expect(representativeActions.getByRole("button", { name: "Edit expiration", exact: true })).toHaveCount(0);
+});
+
+// As a representative, I can record billing notes, such as a PO number, that are printed on my invoices.
+test("organizations-edit-billing-notes saves billing notes shown on the detail page", async ({ page }) => {
+  const resetState = readOrganizationsResetState();
+  const observer = resetState.actors.representative_observer;
+  const detailTarget = resetState.scenarios["organizations-detail-membership-state"].route_target;
+
+  await loginViaForm(page, observer.username, observer.password);
+  await page.goto(detailTarget);
+  await page.getByRole("link", { name: /Edit details$/ }).click();
+  await expect(page.locator("[data-organization-form-root]")).toBeVisible();
+
+  await page.getByLabel("Billing notes:", { exact: true }).fill("PO: 4500012345");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+
+  await expect(page.locator("[data-organization-detail-root]")).toBeVisible();
+  const infoCard = page.locator(".organization-info-card");
+  await expect(infoCard.getByText("Billing notes", { exact: true })).toBeVisible();
+  await expect(infoCard.getByText("PO: 4500012345", { exact: true })).toBeVisible();
+});
+
+// As a sponsor, I receive an invoice that bills my organization, tier, and price, carries my billing notes, and tells me how to pay.
+test("organizations-invoice-pdf-content prints billing details notes price and payment instructions", async ({ page }) => {
+  const resetState = readOrganizationsResetState();
+  const observer = resetState.actors.representative_observer;
+  const organization = resetState.organizations.detail_focus_org;
+  const detailTarget = resetState.scenarios["organizations-detail-membership-state"].route_target;
+  const billingNotes = "PO: 4500067890 Attn: Accounts Payable";
+
+  await loginViaForm(page, observer.username, observer.password);
+  await page.goto(detailTarget);
+  await page.getByRole("link", { name: /Edit details$/ }).click();
+  await page.getByLabel("Billing notes:", { exact: true }).fill(billingNotes);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.locator("[data-organization-detail-root]")).toBeVisible();
+
+  // Regenerate (or generate) so the stored PDF reflects the notes just saved.
+  const representativeActions = page.locator('[data-membership-actions="representative"]');
+  await representativeActions.getByRole("button", { name: /^(Generate|Regenerate) invoice$/ }).click();
+  const modal = page.locator(".modal.show").filter({ hasText: "will be rebuilt" });
+  await modal.getByRole("button", { name: /^(Generate|Regenerate) invoice$/ }).click();
+  await expect(page.getByText("Invoice generated.", { exact: true })).toBeVisible();
+
+  const download = page.getByRole("link", { name: /Download invoice \d{4}-\d{4}-\d{6}$/ });
+  const invoiceNumber = ((await download.textContent()) ?? "").match(/\d{4}-\d{4}-\d{6}/)?.[0] ?? "";
+  const response = await page.request.get((await download.getAttribute("href")) ?? "");
+  expect(response.status()).toBe(200);
+  const text = await pdfText(await response.body());
+
+  expect(text).toContain("Sponsor member invoice");
+  expect(text).toContain(organization.name);
+  expect(text).toContain(billingNotes);
+  expect(text).toContain("United States");
+  expect(text).toContain(`Invoice # ${invoiceNumber}`);
+  expect(text).toMatch(/Invoice date \w+ \d{1,2}, \d{4}/);
+  expect(text).toContain("Gold Sponsor Member");
+  expect(text).toMatch(/from \w+ \d{1,2}(st|nd|rd|th) \d{4} to \w+ \d{1,2}(st|nd|rd|th) \d{4}/);
+  expect(text).toContain("Amount $20,000");
+  expect(text).toContain("Please complete payment upon receipt.");
+  for (const line of readFileSync(PAYMENT_DETAILS_FILE, "utf-8").split("\n").map((value) => value.trim()).filter(Boolean)) {
+    expect(text).toContain(line.replace(/\s+/g, " "));
+  }
+});
+

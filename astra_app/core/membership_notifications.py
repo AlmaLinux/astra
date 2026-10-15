@@ -1,4 +1,5 @@
 import datetime
+import logging
 from collections.abc import Callable, Iterable, Mapping
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
@@ -16,9 +17,12 @@ from core.email_context import (
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.membership import visible_committee_membership_requests
-from core.models import FreeIPAPermissionGrant, MembershipRequest, MembershipType, Organization
+from core.models import FreeIPAPermissionGrant, Membership, MembershipRequest, MembershipType, Organization
 from core.public_urls import build_public_absolute_url
+from core.sponsorship_invoices import InvoiceTerm, invoice_eligible, invoice_email_parts
 from core.templated_email import queue_templated_email
+
+logger = logging.getLogger(__name__)
 
 
 def membership_extend_url(*, membership_type_code: str, base_url: str | None = None) -> str:
@@ -159,6 +163,31 @@ def would_queue_membership_notification(
     )
 
 
+def admin_group_emails(
+    *,
+    user_getter: Callable[[str], FreeIPAUser | None] | None = None,
+) -> list[str]:
+    """Return the email addresses of the FreeIPA admin group, for operational alerts.
+
+    Logs an error and returns an empty list when nobody can be reached.
+    """
+    resolved_user_getter = user_getter or FreeIPAUser.get
+    admin_group_cn = str(settings.FREEIPA_ADMIN_GROUP or "").strip()
+    admin_group = FreeIPAGroup.get(admin_group_cn) if admin_group_cn else None
+    if admin_group is None:
+        logger.error("admin_group_emails: admin_group_missing group=%s", admin_group_cn)
+        return []
+
+    emails: set[str] = set()
+    for username in admin_group.members:
+        user = resolved_user_getter(username)
+        if user is not None and str(user.email or "").strip():
+            emails.add(str(user.email).strip())
+    if not emails:
+        logger.error("admin_group_emails: no_admin_recipients group=%s", admin_group_cn)
+    return sorted(emails, key=str.lower)
+
+
 def committee_recipient_emails_for_permission(
     *,
     permission: str,
@@ -245,6 +274,7 @@ def send_membership_notification(
     expires_at: datetime.datetime | None,
     username: str | None = None,
     organization: Organization | None = None,
+    membership: Membership | None = None,
     days: int | None = None,
     force: bool = False,
     base_url: str | None = None,
@@ -252,6 +282,9 @@ def send_membership_notification(
     extra_context: dict[str, str] | None = None,
 ) -> bool:
     """Queue a templated email via django-post-office.
+
+    Passing an organization's paid *membership* attaches its renewal invoice and
+    copies the business contact.
 
     Returns True if an email was queued, False if skipped (e.g. deduped).
     """
@@ -310,6 +343,13 @@ def send_membership_notification(
     if extra_context:
         context |= extra_context
 
+    attachments: dict[str, object] | None = None
+    if membership is not None and invoice_eligible(membership):
+        invoice_parts = invoice_email_parts(membership, InvoiceTerm.renewal, recipient=address, cc=cc)
+        cc = invoice_parts.cc
+        attachments = invoice_parts.attachments
+        context |= invoice_parts.context
+
     queue_templated_email(
         recipients=[address],
         sender=settings.DEFAULT_FROM_EMAIL,
@@ -317,6 +357,7 @@ def send_membership_notification(
         context=context,
         cc=cc,
         reply_to=reply_to,
+        attachments=attachments,
     )
 
     return True

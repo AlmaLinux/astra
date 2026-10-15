@@ -35,6 +35,12 @@ def privacy_reason_cleanup_due_at(*, reference_time: datetime.datetime | None = 
     return base_time + datetime.timedelta(days=30)
 
 
+def generate_invoice_token() -> str:
+    # Invoices live in a public bucket, so this random path segment is what keeps
+    # one sponsor from fetching another sponsor's invoices.
+    return secrets.token_urlsafe(24)
+
+
 def organization_logo_upload_to(instance: Organization, filename: str) -> str:
     # Always store organizations' logos with a deterministic name.
     # Access control (bucket policy / auth) must be the security boundary.
@@ -310,6 +316,13 @@ class Organization(models.Model):
     state = models.CharField(max_length=255, blank=True, default="")
     postal_code = models.CharField(max_length=40, blank=True, default="")
     country_code = models.CharField(max_length=2, blank=True, default="")
+    billing_notes = models.TextField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Printed on sponsorship invoices, e.g. a purchase order (PO) number.",
+    )
+    invoice_token = models.CharField(max_length=64, unique=True, default=generate_invoice_token, editable=False)
     logo = models.ImageField(
         upload_to=organization_logo_upload_to,
         blank=True,

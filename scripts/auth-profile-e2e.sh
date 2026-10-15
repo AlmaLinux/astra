@@ -453,6 +453,15 @@ playwright_version() {
   printf '%s\n' "$version"
 }
 
+build_frontend_bundle() {
+  # The E2E web container bind-mounts the repo over /app, hiding the bundle baked into
+  # the image: it serves frontend/dist from the host, so build that from current sources.
+  (
+    cd "$FRONTEND_DIR"
+    "$NPM_BIN" run build
+  )
+}
+
 ensure_browser() {
   local current_version=""
   local recorded_version=""
@@ -1071,6 +1080,7 @@ case "$command_name" in
   run)
     ensure_stack
     ensure_frontend_dependencies
+    build_frontend_bundle
     ensure_browser
     if [[ "$reset_requested" == "yes" ]]; then
       run_theme_resets "${resolved_themes[@]}"

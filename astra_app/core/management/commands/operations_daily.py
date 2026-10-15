@@ -1,8 +1,9 @@
 import logging
 from typing import override
 
-from django.core.management import call_command
 from django.core.management.base import BaseCommand
+
+from core.operations import run_operations
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +38,18 @@ class Command(BaseCommand):
             dry_run,
         )
 
-        for command_name, command_kwargs in (
-            ("membership_expired_cleanup", {"force": force, "dry_run": dry_run}),
-            ("membership_expiration_notifications", {"force": force, "dry_run": dry_run}),
-            ("freeipa_membership_reconcile", {"report": True, "dry_run": dry_run}),
-            ("freeipa_team_leads_sync", {"dry_run": dry_run}),
-            ("selfservice_lifecycle_cleanup", {"dry_run": dry_run}),
-            ("account_invitations_refresh", {}),
-        ):
-            logger.info("operations_daily: running %s", command_name)
-            call_command(command_name, **command_kwargs)
+        run_operations(
+            name="operations_daily",
+            jobs=(
+                ("sponsorship_invoice_payment_details_check", {"dry_run": dry_run}),
+                ("membership_expired_cleanup", {"force": force, "dry_run": dry_run}),
+                ("membership_expiration_notifications", {"force": force, "dry_run": dry_run}),
+                ("freeipa_membership_reconcile", {"report": True, "dry_run": dry_run}),
+                ("freeipa_team_leads_sync", {"dry_run": dry_run}),
+                ("selfservice_lifecycle_cleanup", {"dry_run": dry_run}),
+                ("account_invitations_refresh", {}),
+                ("send_mail_attachments_cleanup", {"dry_run": dry_run}),
+            ),
+        )
 
         logger.info("operations_daily: complete")

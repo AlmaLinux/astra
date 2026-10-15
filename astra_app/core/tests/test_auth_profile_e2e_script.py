@@ -362,6 +362,21 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
         self.assertEqual(sum("account_invitations_reset" in line for line in log_lines), 0, log_lines)
         self.assertEqual(sum("organizations_reset" in line for line in log_lines), 0, log_lines)
 
+    def test_run_builds_the_served_frontend_bundle_before_playwright(self) -> None:
+        # The E2E web container bind-mounts the repo over the image's own build, so it
+        # serves frontend/dist from the host: a stale bundle would test old UI code.
+        env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
+
+        result = self._run_script(env, "run", "--theme", "mail-tools", "--no-rebuild")
+
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"script failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        log_lines = log_path.read_text(encoding="utf-8").splitlines()
+        self.assertLess(log_lines.index("npm\trun build"), log_lines.index("npm\trun e2e:mail-tools"))
+
     def test_run_theme_shell_routes_runs_ordered_resets_and_theme_command(self) -> None:
         env, log_path = self._make_fake_environment(ps_output="astra-e2e_web_1\n")
 

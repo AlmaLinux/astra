@@ -4,7 +4,7 @@ FreeIPA attribute manipulation helpers live in ``core.ipa_user_attrs``.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import wraps
 from typing import Any
 from urllib.parse import urlencode
@@ -40,6 +40,8 @@ def send_mail_url(
     extra_context: dict[str, str],
     action_status: str = "",
     reply_to: str | None = None,
+    cc: str | None = None,
+    attachment_tokens: Sequence[str] = (),
 ) -> str:
     """Build a deep-link URL for the send-mail view.
 
@@ -56,6 +58,9 @@ def send_mail_url(
             ``"approved"``).
         reply_to: Optional reply-to address list (comma-separated when
             multiple values are needed).
+        cc: Optional CC address list (comma-separated).
+        attachment_tokens: Signed references (``MailAttachment.to_token()``)
+            to files to pre-attach.
 
     Returns:
         Absolute path for ``send-mail`` including URL-encoded query params.
@@ -86,8 +91,13 @@ def send_mail_url(
         query_params["reply_to"] = reply_to_value
     if action_status:
         query_params["action_status"] = action_status
+    cc_value = str(cc or "").strip()
+    if cc_value:
+        query_params["cc"] = cc_value
+    if attachment_tokens:
+        query_params["attachment"] = list(attachment_tokens)
     send_mail_path = reverse("send-mail")
-    return f"{send_mail_path}?{urlencode(query_params)}"
+    return f"{send_mail_path}?{urlencode(query_params, doseq=True)}"
 
 
 def require_post_or_404(request: HttpRequest, *, message: str = "Not found") -> None:

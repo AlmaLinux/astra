@@ -232,6 +232,13 @@ export type SendMailTemplateOption = ComposeTemplateOption;
 
 export type SendMailRecipientVariable = ComposeVariable;
 
+// A file already stored server-side; the token is posted back so it survives re-renders.
+export interface SendMailAttachment {
+  token: string;
+  name: string;
+  size: number;
+}
+
 export interface SendMailPayload {
   selectedRecipientMode: string;
   actionStatus: string;
@@ -253,6 +260,7 @@ export interface SendMailPayload {
       text: string;
     };
   };
+  attachments: SendMailAttachment[];
 }
 
 interface SendMailApiPayload {
@@ -290,12 +298,14 @@ interface SendMailApiPayload {
       text: string;
     };
   };
+  attachments: SendMailAttachment[];
 }
 
 export interface SendMailBootstrap {
   apiUrl: string;
   submitUrl: string;
   previewUrl: string;
+  attachmentsUploadUrl: string;
   mailProgressApiUrl: string;
   mailProgressAckApiUrl: string;
   csrfToken: string;
@@ -404,6 +414,7 @@ function normalizeSendMailPayload(payload: SendMailApiPayload): SendMailPayload 
       selectedTemplateId: payload.compose.selected_template_id,
       preview: payload.compose.preview,
     },
+    attachments: payload.attachments,
   };
 }
 
@@ -507,13 +518,14 @@ export function readSendMailBootstrap(root: HTMLElement): SendMailBootstrap | nu
   const apiUrl = String(root.dataset.sendMailApiUrl || "").trim();
   const submitUrl = String(root.dataset.sendMailSubmitUrl || "").trim();
   const previewUrl = String(root.dataset.sendMailPreviewUrl || "").trim();
+  const attachmentsUploadUrl = String(root.dataset.sendMailAttachmentsUploadUrl || "").trim();
   const mailProgressApiUrl = String(root.dataset.sendMailProgressApiUrl || "").trim();
   const mailProgressAckApiUrl = String(root.dataset.sendMailProgressAckApiUrl || "").trim();
   const csrfToken = String(root.dataset.sendMailCsrfToken || "").trim();
   const initialPayloadRaw = parseJsonScript<SendMailApiPayload>(root, "#send-mail-initial-payload");
   const initialPayload = initialPayloadRaw === null ? null : normalizeSendMailPayload(initialPayloadRaw);
 
-  if (!submitUrl || !previewUrl || (!apiUrl && initialPayload === null)) {
+  if (!submitUrl || !previewUrl || !attachmentsUploadUrl || (!apiUrl && initialPayload === null)) {
     return null;
   }
 
@@ -521,6 +533,7 @@ export function readSendMailBootstrap(root: HTMLElement): SendMailBootstrap | nu
     apiUrl,
     submitUrl,
     previewUrl,
+    attachmentsUploadUrl,
     mailProgressApiUrl,
     mailProgressAckApiUrl,
     csrfToken,

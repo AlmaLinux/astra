@@ -2,7 +2,7 @@ import logging
 import os
 import re
 import tempfile
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
@@ -14,7 +14,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.http import HttpRequest, JsonResponse
 from django.template import Context, Template, engines
 from django.template.exceptions import TemplateSyntaxError
-from post_office.models import Email, EmailTemplate
+from post_office.models import Attachment, Email, EmailTemplate
 
 from core.email_context import system_email_context
 from core.logging_extras import current_exception_log_fields
@@ -73,6 +73,7 @@ def configured_email_template_names() -> frozenset[str]:
             settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME,
             settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME,
             settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
+            settings.SPONSORSHIP_INVOICE_PAYMENT_DETAILS_ALERT_EMAIL_TEMPLATE_NAME,
             settings.PASSWORD_RESET_EMAIL_TEMPLATE_NAME,
             settings.PASSWORD_RESET_SUCCESS_EMAIL_TEMPLATE_NAME,
             settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME,
@@ -255,6 +256,7 @@ def queue_templated_email(
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
     reply_to: list[str] | None = None,
+    attachments: Mapping[str, object] | None = None,
     strict_inline_images: bool = False,
     commit: bool = True,
 ) -> Email:
@@ -296,6 +298,7 @@ def queue_templated_email(
         cc=cc,
         bcc=bcc,
         reply_to=reply_to,
+        attachments=attachments,
         strict_inline_images=strict_inline_images,
         template_name=template_name,
         commit=commit,
@@ -372,6 +375,7 @@ def queue_composed_email(
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
     reply_to: list[str] | None = None,
+    attachments: Mapping[str, object] | None = None,
     strict_inline_images: bool = False,
     template_name: str = "unknown",
     commit: bool = True,
@@ -386,6 +390,9 @@ def queue_composed_email(
     saved to the database.  The caller is responsible for persisting it (e.g.
     via ``Email.objects.bulk_create``).  Attachments are not supported in
     deferred-commit mode.
+
+    *attachments* uses post_office's format ({filename: file or
+    {"file": ..., "mimetype": ...}}) and is sent alongside inline images.
     """
 
     staged_files: list[str] = []
@@ -409,10 +416,13 @@ def queue_composed_email(
         )
         rendered_text = text_template.render(rendered_context)
         rendered_html = html_template.render(rendered_context)
-        attachments = _attachments_from_html_template(
-            html_template=html_template,
-            rendered_html=rendered_html,
-        )
+        attachments = {
+            **_attachments_from_html_template(
+                html_template=html_template,
+                rendered_html=rendered_html,
+            ),
+            **(attachments or {}),
+        }
 
         headers: dict[str, str] | None = None
         if reply_to:
@@ -463,16 +473,25 @@ def queue_composed_email(
                 )
 
 
-def bulk_save_emails(emails: list[Email], batch_size: int = 500) -> None:
+def bulk_save_emails(
+    emails: list[Email],
+    batch_size: int = 500,
+    attachments: Sequence[Attachment] = (),
+) -> None:
     """Bulk-insert deferred Email objects and dispatch any with priority='now'.
 
     In dev (default priority='now'), emails are dispatched immediately after
     the bulk insert.  In production (priority='medium' / 'low'), emails remain
     queued for the ``send_queued_mail`` management command.
+
+    *attachments* are shared post_office Attachment rows linked to every email
+    (before dispatch, so immediate sends include them).
     """
     if not emails:
         return
     Email.objects.bulk_create(emails, batch_size=batch_size)
+    for attachment in attachments:
+        attachment.emails.add(*emails)
     for email in emails:
         # create() sets status=None for priority='now'; dispatch sends
         # the email immediately through the configured backend.

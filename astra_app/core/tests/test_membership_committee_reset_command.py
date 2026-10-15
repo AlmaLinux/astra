@@ -63,6 +63,9 @@ class MembershipCommitteeResetCommandTests(TestCase):
                 "on_hold_bulk_approve_secondary",
                 "on_hold_bulk_select_all_extra",
                 "on_hold_row_approve",
+                "pending_custom_email_approve",
+                "pending_custom_email_reject",
+                "pending_custom_email_rfi",
             },
         )
         self.assertEqual(
@@ -75,6 +78,7 @@ class MembershipCommitteeResetCommandTests(TestCase):
                 "committee-on-hold-bulk-approve",
                 "committee-row-actions",
                 "committee-request-detail",
+                "committee-custom-email-actions",
             },
         )
         self.assertEqual(

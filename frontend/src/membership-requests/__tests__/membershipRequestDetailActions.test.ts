@@ -92,4 +92,45 @@ describe("MembershipRequestDetailActions", () => {
 
     expect(enabledWrapper.find("button.btn-success").exists()).toBe(true);
   });
+
+  it("hands each email-sending action its custom-email URL", async () => {
+    const wrapper = mount(MembershipRequestDetailActions, {
+      props: {
+        requestId: 42,
+        requestStatus: "pending",
+        membershipTypeName: "Sponsor",
+        requestTarget: "sponsor@example.com",
+        approveUrl: "/api/v1/membership/request/42/approve",
+        approveOnHoldUrl: "/api/v1/membership/request/42/approve-on-hold",
+        rejectUrl: "/api/v1/membership/request/42/reject",
+        rfiUrl: "/api/v1/membership/request/42/rfi",
+        ignoreUrl: "/api/v1/membership/request/42/ignore",
+        approveCustomEmailUrl: "/membership/requests/42/approve/",
+        rejectCustomEmailUrl: "/membership/requests/42/reject/",
+        rfiCustomEmailUrl: "/membership/requests/42/rfi/",
+        canRequestInfo: true,
+        showOnHoldApprove: false,
+        csrfToken: "csrf-token",
+      },
+      global: {
+        stubs: {
+          MembershipRequestActionModal: {
+            props: ["action", "csrfToken"],
+            template: '<div class="modal-stub">{{ action ? action.customEmailUrl || "none" : "" }}</div>',
+          },
+        },
+      },
+    });
+
+    const expected: Array<[string, string]> = [
+      ["Approve", "/membership/requests/42/approve/"],
+      ["Reject", "/membership/requests/42/reject/"],
+      ["RFI", "/membership/requests/42/rfi/"],
+      ["Ignore", "none"],
+    ];
+    for (const [label, url] of expected) {
+      await wrapper.findAll("button").find((button) => button.text() === label)!.trigger("click");
+      expect(wrapper.get(".modal-stub").text()).toBe(url);
+    }
+  });
 });

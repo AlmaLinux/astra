@@ -19,6 +19,7 @@ const bootstrap: OrganizationDetailBootstrap = {
   membershipHistoryUrl: "/membership/log/org/1/",
   sponsorshipSetExpiryUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/expiry/",
   sponsorshipTerminateUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/terminate/",
+  sponsorshipInvoiceRegenerateUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/invoice/regenerate/",
   csrfToken: "csrf-token",
   nextUrl: "/organization/1/",
   expiryMinDate: "2026-04-01",
@@ -601,5 +602,138 @@ describe("OrganizationDetailPage", () => {
     expect(html.indexOf("notes")).toBeGreaterThan(html.indexOf("Organization information"));
     expect(wrapper.find(".organization-info-card").classes()).not.toContain("col-md-5");
     expect(wrapper.find(".organization-info-card").element.closest(".col-12")?.className).toContain("col-12");
+  });
+
+  function mountWithOrganization(organization: Record<string, unknown>) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        organization: {
+          id: 1,
+          name: "Acme Org",
+          status: "active",
+          website: "",
+          logo_url: "",
+          pending_memberships: [],
+          representative: { username: "alice", full_name: "Alice Example" },
+          contact_groups: [],
+          address: { street: "", city: "", state: "", postal_code: "", country_code: "" },
+          billing_notes: "",
+          ...organization,
+        },
+      }))),
+    );
+    return mount(OrganizationDetailPage, {
+      props: { bootstrap },
+      global: {
+        stubs: {
+          MembershipNotesCard: { template: "<div />" },
+        },
+      },
+    });
+  }
+
+  function goldMembership(invoice: { number: string; url: string | null } | null) {
+    return {
+      requestId: null,
+      kind: "membership" as const,
+      key: "membership-gold",
+      membershipType: { name: "Gold Sponsor Member", code: "gold", description: "", annualDuesUsd: 20000 },
+      createdAt: null,
+      expiresAt: "2026-11-18T23:59:59Z",
+      isExpiringSoon: true,
+      canRenew: false,
+      renewalMembershipTypeCode: "",
+      canRequestTierChange: false,
+      tierChangeMembershipTypeCode: "",
+      canManage: false,
+      invoice,
+    };
+  }
+
+  it("renders the invoice download link and a confirmed regenerate form", async () => {
+    const wrapper = mountWithOrganization({
+      memberships: [goldMembership({ number: "0001-2026-318305", url: "https://static.example.com/invoices/tok/AlmaLinux_OS_Foundation_Invoice_0001-2026-318305.pdf" })],
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    const download = wrapper.find('a[href="https://static.example.com/invoices/tok/AlmaLinux_OS_Foundation_Invoice_0001-2026-318305.pdf"]');
+    expect(download.exists()).toBe(true);
+    expect(download.text()).toBe("Download invoice 0001-2026-318305");
+
+    const trigger = wrapper.find('button[data-target="#sponsorship-invoice-modal-gold"]');
+    expect(trigger.text()).toBe("Regenerate invoice");
+    const form = wrapper.find('#sponsorship-invoice-modal-gold form[action="/organization/1/sponsorship/gold/invoice/regenerate/"]');
+    expect(form.exists()).toBe(true);
+    expect(form.attributes("method")).toBe("post");
+    expect(form.find('input[name="csrfmiddlewaretoken"]').attributes("value")).toBe("csrf-token");
+  });
+
+  it("offers to generate the invoice when none is stored yet", async () => {
+    const wrapper = mountWithOrganization({ memberships: [goldMembership({ number: "0001-2026-318305", url: null })] });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("Download invoice");
+    expect(wrapper.text()).not.toContain("0001-2026-318305");
+    expect(wrapper.find('button[data-target="#sponsorship-invoice-modal-gold"]').text()).toBe("Generate invoice");
+  });
+
+  it("omits invoice controls when the backend withholds the invoice", async () => {
+    const wrapper = mountWithOrganization({ memberships: [goldMembership(null)] });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("invoice");
+    expect(wrapper.find("#sponsorship-invoice-modal-gold").exists()).toBe(false);
+  });
+
+  it("renders billing notes with the organization information", async () => {
+    const wrapper = mountWithOrganization({ memberships: [], billing_notes: "PO: 70001165892" });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find(".organization-info-card").text()).toContain("PO: 70001165892");
+  });
+
+  it("groups representative actions above committee-only actions", async () => {
+    const wrapper = mountWithOrganization({
+      memberships: [{
+        ...goldMembership({ number: "0001-2026-318305", url: null }),
+        canRenew: true,
+        renewalMembershipTypeCode: "gold",
+        canRequestTierChange: true,
+        tierChangeMembershipTypeCode: "platinum",
+        canManage: true,
+      }],
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    const representativeRow = wrapper.find('[data-membership-actions="representative"]');
+    const committeeRow = wrapper.find('[data-membership-actions="committee"]');
+    expect(representativeRow.text()).toContain("Request renewal");
+    expect(representativeRow.text()).toContain("Change tier");
+    expect(representativeRow.text()).toContain("Generate invoice");
+    expect(representativeRow.text()).not.toContain("Edit expiration");
+    expect(committeeRow.text()).toBe("Edit expiration");
+  });
+
+  it("omits the committee action row for viewers who cannot manage the membership", async () => {
+    const wrapper = mountWithOrganization({
+      memberships: [{ ...goldMembership({ number: "0001-2026-318305", url: null }), canRenew: true, renewalMembershipTypeCode: "gold" }],
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('[data-membership-actions="representative"]').text()).toContain("Request renewal");
+    expect(wrapper.find('[data-membership-actions="committee"]').exists()).toBe(false);
   });
 });

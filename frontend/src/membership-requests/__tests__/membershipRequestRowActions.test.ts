@@ -17,6 +17,9 @@ const bootstrap: MembershipRequestsBootstrap = {
   approveTemplate: "/membership/requests/123456789/approve/",
   approveOnHoldTemplate: "/membership/requests/123456789/approve-on-hold/",
   rejectTemplate: "/membership/requests/123456789/reject/",
+  approveCustomEmailTemplate: "/membership/requests/123456789/approve/custom/",
+  rejectCustomEmailTemplate: "/membership/requests/123456789/reject/custom/",
+  requestInfoCustomEmailTemplate: "/membership/requests/123456789/rfi/custom/",
   requestInfoTemplate: "/membership/requests/123456789/rfi/",
   ignoreTemplate: "/membership/requests/123456789/ignore/",
   noteAddTemplate: "/membership/requests/123456789/notes/add/",
@@ -114,6 +117,10 @@ describe("MembershipRequestRowActions", () => {
       requestStatus: "pending",
       actionUrl: "/membership/requests/51/ignore/",
     });
+    expect(events[0]?.[0]).toMatchObject({ customEmailUrl: "/membership/requests/51/approve/custom/" });
+    expect(events[1]?.[0]).toMatchObject({ customEmailUrl: "/membership/requests/51/reject/custom/" });
+    expect(events[2]?.[0]).toMatchObject({ customEmailUrl: "/membership/requests/51/rfi/custom/" });
+    expect(events[3]?.[0]).not.toHaveProperty("customEmailUrl");
 
     expect(approve.attributes("title")).toBe("Approve this request");
     expect(approve.attributes("aria-label")).toBe("Approve");

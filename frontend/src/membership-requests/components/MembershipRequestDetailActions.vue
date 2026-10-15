@@ -21,6 +21,9 @@ const props = defineProps<{
   rejectUrl: string;
   rfiUrl: string;
   ignoreUrl: string;
+  approveCustomEmailUrl?: string;
+  rejectCustomEmailUrl?: string;
+  rfiCustomEmailUrl?: string;
   canRequestInfo: boolean;
   showOnHoldApprove: boolean;
   csrfToken: string;
@@ -32,7 +35,11 @@ const emit = defineEmits<{
 
 const activeAction = ref<MembershipRequestActionIntent | null>(null);
 
-function openAction(actionKind: MembershipRequestActionIntent["actionKind"], actionUrl: string): void {
+function openAction(
+  actionKind: MembershipRequestActionIntent["actionKind"],
+  actionUrl: string,
+  customEmailUrl?: string,
+): void {
   activeAction.value = {
     requestId: props.requestId,
     requestStatus: props.requestStatus,
@@ -40,6 +47,7 @@ function openAction(actionKind: MembershipRequestActionIntent["actionKind"], act
     actionUrl,
     requestTarget: props.requestTarget,
     membershipType: props.membershipTypeName,
+    ...(customEmailUrl ? { customEmailUrl } : {}),
   };
 }
 
@@ -61,7 +69,7 @@ function onActionSuccess(payload: MembershipActionSuccessEventDetail): void {
       class="btn btn-sm btn-success"
       title="Approve this request"
       aria-label="Approve"
-      @click="openAction('approve', approveUrl)"
+      @click="openAction('approve', approveUrl, approveCustomEmailUrl)"
     >Approve</button>
 
     <button
@@ -79,7 +87,7 @@ function onActionSuccess(payload: MembershipActionSuccessEventDetail): void {
       class="btn btn-sm btn-danger"
       title="Reject this request"
       aria-label="Reject"
-      @click="openAction('reject', rejectUrl)"
+      @click="openAction('reject', rejectUrl, rejectCustomEmailUrl)"
     >Reject</button>
 
     <button
@@ -88,7 +96,7 @@ function onActionSuccess(payload: MembershipActionSuccessEventDetail): void {
       class="btn btn-sm btn-outline-primary"
       title="Request information and put on hold"
       aria-label="Request for Information"
-      @click="openAction('rfi', rfiUrl)"
+      @click="openAction('rfi', rfiUrl, rfiCustomEmailUrl)"
     >RFI</button>
 
     <button

@@ -69,6 +69,7 @@ def serialize_membership_entry(
     can_act: bool,
     can_view: bool,
     can_manage: bool,
+    invoice: dict[str, str | None] | None,
 ) -> dict[str, object]:
     """Serialize one active membership for the shared membership panel.
 
@@ -80,6 +81,9 @@ def serialize_membership_entry(
     ``tier_change_membership_type_code`` is supplied by the caller because the
     two surfaces genuinely differ: the organization page pre-fills a *suggested*
     neighbouring tier, while the user profile pre-fills the held tier.
+
+    ``invoice`` is the sponsorship invoice ({number, url}) the viewer may
+    (re)generate, if any; individual memberships never have one.
     """
 
     membership_type_data = serialize_membership_type(membership_type)
@@ -102,6 +106,7 @@ def serialize_membership_entry(
         "canRequestTierChange": can_change_tier,
         "tierChangeMembershipTypeCode": str(tier_change_membership_type_code) if can_change_tier else "",
         "canManage": bool(can_manage),
+        "invoice": invoice,
     }
 
 

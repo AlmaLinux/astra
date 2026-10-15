@@ -50,6 +50,7 @@ describe("mountOrganizationDetailPage", () => {
       "data-organization-detail-membership-history-url": "/membership/log/org/1/",
       "data-organization-detail-sponsorship-set-expiry-url-template": "/organization/1/sponsorship/__membership_type_code__/expiry/",
       "data-organization-detail-sponsorship-terminate-url-template": "/organization/1/sponsorship/__membership_type_code__/terminate/",
+      "data-organization-detail-sponsorship-invoice-regenerate-url-template": "/organization/1/sponsorship/__membership_type_code__/invoice/regenerate/",
       "data-organization-detail-csrf-token": "csrf-token",
       "data-organization-detail-next-url": "/organization/1/",
       "data-organization-detail-expiry-min-date": "2026-04-01",

@@ -4,6 +4,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import MailProgressModal from "../mail-progress/MailProgressModal.vue";
 import { useMailProgress } from "../mail-progress/useMailProgress";
 import ComposeCard from "./ComposeCard.vue";
+import SendMailAttachments from "./SendMailAttachments.vue";
 import { fetchSendMailPayload, toComposeFieldSpec, type SendMailBootstrap, type SendMailField, type SendMailFieldOption, type SendMailPayload } from "./types";
 
 declare global {
@@ -131,7 +132,10 @@ const actionNotice = computed(() => {
 });
 
 const showExtraOptions = computed(() => {
-  return ["cc", "bcc", "reply_to"].some((name) => stringFieldValue(name).trim().length > 0);
+  return (
+    ["cc", "bcc", "reply_to"].some((name) => stringFieldValue(name).trim().length > 0)
+    || (payload.value?.attachments.length ?? 0) > 0
+  );
 });
 
 const subjectField = computed(() => toComposeFieldSpec(field("subject"), "subject"));
@@ -281,14 +285,27 @@ onMounted(async () => {
                   </div>
 
                   <div class="alert alert-warning mt-2 d-none" id="send-mail-recipients-inline-warning" role="alert"></div>
+                </div>
 
-                  <div class="mb-2">
-                    <a class="text-muted" id="send-mail-extra-options-toggle" data-toggle="collapse" href="#send-mail-extra-options" role="button" :aria-expanded="showExtraOptions ? 'true' : 'false'" aria-controls="send-mail-extra-options">
-                      <span aria-hidden="true" class="mr-1 send-mail-collapse-chevron">▸</span>
-                      Additional options
-                    </a>
-                    <div class="collapse mt-2" :class="{ show: showExtraOptions }" id="send-mail-extra-options">
-                      <div class="card card-body">
+                <div class="col-md-6">
+                  <div class="alert alert-info mb-3">
+                    Recipient count:
+                    <strong>
+                      <span id="send-mail-recipient-count" :data-server-count="recipientCount">{{ recipientCount }}</span>
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mb-2">
+                <a class="text-muted" id="send-mail-extra-options-toggle" data-toggle="collapse" href="#send-mail-extra-options" role="button" :aria-expanded="showExtraOptions ? 'true' : 'false'" aria-controls="send-mail-extra-options">
+                  <span aria-hidden="true" class="mr-1 send-mail-collapse-chevron">▸</span>
+                  Additional options
+                </a>
+                <div class="collapse mt-2" :class="{ show: showExtraOptions }" id="send-mail-extra-options">
+                  <div class="card card-body">
+                    <div class="row">
+                      <div class="col-md-6">
                         <div class="form-group">
                           <label :for="field('cc')?.id || 'id_cc'">Cc:</label>
                           <input :id="field('cc')?.id || 'id_cc'" type="text" name="cc" :class="fieldClass('cc')" :value="stringFieldValue('cc')" v-bind="fieldAttrs('cc')">
@@ -308,16 +325,14 @@ onMounted(async () => {
                           <div v-for="errorItem in fieldErrors('reply_to')" :key="errorItem" class="invalid-feedback d-block">{{ errorItem }}</div>
                         </div>
                       </div>
+                      <div class="col-md-6">
+                        <SendMailAttachments
+                          :initial-attachments="payload.attachments"
+                          :upload-url="bootstrap.attachmentsUploadUrl"
+                          :csrf-token="bootstrap.csrfToken"
+                        />
+                      </div>
                     </div>
-                  </div>
-                </div>
-
-                <div class="col-md-6">
-                  <div class="alert alert-info mb-3">
-                    Recipient count:
-                    <strong>
-                      <span id="send-mail-recipient-count" :data-server-count="recipientCount">{{ recipientCount }}</span>
-                    </strong>
                   </div>
                 </div>
               </div>

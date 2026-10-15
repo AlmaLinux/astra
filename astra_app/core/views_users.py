@@ -887,6 +887,7 @@ def _serialize_user_profile_membership_entry_data(
         can_act=is_owner,
         can_view=can_view,
         can_manage=can_manage,
+        invoice=None,
     )
 
 

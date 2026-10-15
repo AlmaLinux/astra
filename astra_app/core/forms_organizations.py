@@ -59,6 +59,7 @@ class OrganizationEditForm(StyledModelForm):
             "state",
             "postal_code",
             "country_code",
+            "billing_notes",
             "logo",
         )
 
@@ -80,6 +81,7 @@ class OrganizationEditForm(StyledModelForm):
             "state": "State / Province / Region",
             "postal_code": "Postal code",
             "country_code": "Country code",
+            "billing_notes": "Billing notes",
             "logo": "Accounts logo (upload)",
         }
 
@@ -88,6 +90,7 @@ class OrganizationEditForm(StyledModelForm):
             "website_logo": "Share a direct link to your logo file, or a link to your brand assets.",
             "website": "Enter the URL you want your logo to link to (homepage or a dedicated landing page).",
             "country_code": "Use a 2-letter ISO country code, for example US, CA, or DE.",
+            "billing_notes": "Printed on your sponsorship invoices, e.g. a purchase order (PO) number.",
         }
 
     @override
@@ -120,6 +123,7 @@ class OrganizationEditForm(StyledModelForm):
         self.fields["city"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "address-level2"})
         self.fields["state"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "address-level1"})
         self.fields["postal_code"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "postal-code"})
+        self.fields["billing_notes"].widget = forms.Textarea(attrs={"class": "form-control", "rows": 3, "maxlength": "500"})
         self.fields["country_code"].widget = forms.TextInput(
             attrs={
                 "class": "form-control",

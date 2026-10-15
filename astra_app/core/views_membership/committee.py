@@ -1,6 +1,6 @@
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from django.conf import settings
 from django.contrib import messages
@@ -37,6 +37,7 @@ from core.membership_request_workflow import (
     put_membership_request_on_hold,
     reject_membership_request,
     reopen_ignored_membership_request,
+    welcome_invoice_membership,
 )
 from core.membership_requests_datatables import (
     build_datatables_payload,
@@ -58,6 +59,7 @@ from core.permissions import (
     json_permission_required_any,
     membership_review_permissions,
 )
+from core.sponsorship_invoices import InvoiceTerm, invoice_email_parts
 from core.views_utils import (
     _normalize_str,
     _resolve_post_redirect,
@@ -147,6 +149,8 @@ def _custom_email_redirect(
     extra_context: dict[str, str],
     redirect_to: str,
     action_status: str,
+    cc: Sequence[str] = (),
+    attachment_tokens: Sequence[str] = (),
 ) -> HttpResponse:
     recipient = _custom_email_recipient_for_request(membership_request)
     if recipient is None:
@@ -165,6 +169,8 @@ def _custom_email_redirect(
             extra_context=merged_context,
             action_status=action_status,
             reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
+            cc=", ".join(cc),
+            attachment_tokens=attachment_tokens,
         )
     )
 
@@ -178,6 +184,8 @@ def _maybe_custom_email_redirect(
     extra_context: dict[str, str],
     redirect_to: str,
     action_status: str,
+    cc: Sequence[str] = (),
+    attachment_tokens: Sequence[str] = (),
 ) -> HttpResponse | None:
     """Handle org/user custom-email branching for membership request actions.
 
@@ -209,6 +217,8 @@ def _maybe_custom_email_redirect(
         extra_context=merged,
         redirect_to=redirect_to,
         action_status=action_status,
+        cc=cc,
+        attachment_tokens=attachment_tokens,
     )
 
 
@@ -260,6 +270,10 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             "membership_request_reject_template": reverse("api-membership-request-reject", args=[request_id_sentinel]),
             "membership_request_rfi_template": reverse("api-membership-request-rfi", args=[request_id_sentinel]),
             "membership_request_ignore_template": reverse("api-membership-request-ignore", args=[request_id_sentinel]),
+            # Form routes that act without emailing, then hand off to Send Mail for a custom email.
+            "membership_request_approve_custom_email_template": reverse("membership-request-approve", args=[request_id_sentinel]),
+            "membership_request_reject_custom_email_template": reverse("membership-request-reject", args=[request_id_sentinel]),
+            "membership_request_rfi_custom_email_template": reverse("membership-request-rfi", args=[request_id_sentinel]),
             "membership_request_reopen_template": reverse("api-membership-request-reopen", args=[request_id_sentinel]),
             "membership_request_note_add_template": reverse("api-membership-request-notes-add", args=[request_id_sentinel]),
             "membership_request_note_summary_template": reverse("api-membership-request-notes-summary", args=[request_id_sentinel]),
@@ -1125,6 +1139,22 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
         if req.is_user_target:
             approve_extras["group_cn"] = membership_type.group_cn
 
+        # Like the standard welcome email, a custom one carries a new sponsor's invoice.
+        invoice_cc: list[str] = []
+        invoice_attachment_tokens: list[str] = []
+        invoice_membership = (
+            welcome_invoice_membership(membership_request=req, previous_expires_at=previous_expires_at)
+            if custom_email
+            else None
+        )
+        if invoice_membership is not None:
+            # The recipient is only chosen in Send Mail, so the business contact is always copied.
+            invoice_parts = invoice_email_parts(invoice_membership, InvoiceTerm.current, recipient="", cc=None)
+            approve_extras.update(invoice_parts.context)
+            invoice_cc = invoice_parts.cc or []
+            if invoice_parts.attachment is not None:
+                invoice_attachment_tokens.append(invoice_parts.attachment.to_token())
+
         custom_email_redirect = _maybe_custom_email_redirect(
             request=request,
             membership_request=req,
@@ -1133,6 +1163,8 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
             extra_context=approve_extras,
             redirect_to=redirect_to,
             action_status="approved",
+            cc=invoice_cc,
+            attachment_tokens=invoice_attachment_tokens,
         )
         if custom_email_redirect is not None:
             return custom_email_redirect

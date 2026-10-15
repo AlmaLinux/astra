@@ -44,6 +44,7 @@ from core.models import (
     MembershipType,
     Organization,
 )
+from core.sponsorship_invoices import InvoiceTerm, invoice_eligible, invoice_email_parts
 from core.templated_email import queue_templated_email
 
 logger = logging.getLogger(__name__)
@@ -252,6 +253,7 @@ def _send_membership_request_notification(
     template_name: str,
     extra_context: dict[str, object] | None = None,
     log_context: dict[str, object] | None = None,
+    invoice_membership: Membership | None = None,
 ) -> object | None:
     if not target.email:
         request_id = None
@@ -292,12 +294,22 @@ def _send_membership_request_notification(
     if extra_context:
         context.update(extra_context)
 
+    cc: list[str] | None = None
+    attachments: dict[str, object] | None = None
+    if invoice_membership is not None:
+        invoice_parts = invoice_email_parts(invoice_membership, InvoiceTerm.current, recipient=target.email, cc=cc)
+        cc = invoice_parts.cc
+        attachments = invoice_parts.attachments
+        context.update(invoice_parts.context)
+
     return queue_templated_email(
         recipients=[target.email],
         sender=settings.DEFAULT_FROM_EMAIL,
         template_name=template_name,
         context=context,
+        cc=cc,
         reply_to=[settings.MEMBERSHIP_COMMITTEE_EMAIL],
+        attachments=attachments,
     )
 
 
@@ -382,6 +394,25 @@ def emit_membership_request_signal_on_commit(
         )
 
     transaction.on_commit(_send_user_signal)
+
+
+def welcome_invoice_membership(
+    *,
+    membership_request: MembershipRequest,
+    previous_expires_at: datetime.datetime | None,
+) -> Membership | None:
+    """Return the just-granted membership whose invoice belongs with the welcome email.
+
+    Sponsors are only invoiced once approved: a newly granted term ships its invoice
+    with the welcome email, renewals already got theirs with the reminders.
+    """
+    if previous_expires_at is not None or membership_request.requested_organization is None:
+        return None
+    membership = Membership.objects.select_related("membership_type", "target_organization").get(
+        target_organization=membership_request.requested_organization,
+        membership_type=membership_request.membership_type,
+    )
+    return membership if invoice_eligible(membership) else None
 
 
 def previous_expires_at_for_extension(
@@ -1034,6 +1065,10 @@ def approve_membership_request(
         target = _build_membership_target(membership_request)
         if target.email:
             _ensure_configured_email_template_exists(template_name=template_name)
+        invoice_membership = welcome_invoice_membership(
+            membership_request=membership_request,
+            previous_expires_at=previous_expires_at,
+        )
         try:
             sent_email = _send_membership_request_notification(
                 target=target,
@@ -1043,6 +1078,7 @@ def approve_membership_request(
                     "request_id": membership_request.pk,
                     "action": "approved",
                 },
+                invoice_membership=invoice_membership,
             )
         except Exception:
             logger.exception(

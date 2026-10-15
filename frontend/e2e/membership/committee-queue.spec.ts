@@ -429,3 +429,53 @@ test("committee-row-actions execute approve reject rfi and on-hold approve throu
   await onHoldApproveResponse;
   await expect(modal).toHaveCount(0);
 });
+
+// As a committee operator, I can approve, reject, or request information with a custom email written in Send Mail.
+test("committee-custom-email-actions hand approve reject and rfi off to Send Mail with the usual template", async ({ page }) => {
+  await loginViaForm(page, "regular01", "password");
+
+  const cases = [
+    {
+      username: "regular19",
+      rowButton: "Approve",
+      customButton: "Approve with custom email",
+      template: "membership-request-approved-mirror",
+      notice: "This request has already been approved. No email has been sent yet.",
+    },
+    {
+      username: "regular20",
+      rowButton: "Reject",
+      customButton: "Reject with custom email",
+      message: "The mirror could not be reached during review.",
+      template: "membership-request-rejected",
+      notice: "This request has already been rejected. No email has been sent yet.",
+    },
+    {
+      username: "regular21",
+      rowButton: "Request for Information",
+      customButton: "Send RFI with custom email",
+      message: "Please share the rsync endpoint for your mirror.",
+      template: "membership-request-rfi",
+      notice: "This request has already been placed on hold. No email has been sent yet.",
+    },
+  ];
+
+  for (const action of cases) {
+    const queue = await gotoCommitteeQueue(page);
+    const requestId = findRequestId(queue.pendingRows, action.username, "mirror");
+    await rowByRequestId(pendingCard(page), requestId).getByRole("button", { name: action.rowButton, exact: true }).click();
+
+    const modal = page.locator('.modal[aria-modal="true"]');
+    await expect(modal).toBeVisible();
+    if (action.message) {
+      await modal.locator("#membership-request-action-text").fill(action.message);
+    }
+    await modal.getByRole("button", { name: action.customButton, exact: true }).click();
+
+    // The action is applied without the standard email, and Send Mail opens with that email's template.
+    await page.waitForURL(/\/email-tools\/send-mail\/\?/);
+    await expect(page.locator("[data-send-mail-root]")).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: action.notice })).toBeVisible();
+    await expect(page.locator('select[name="email_template_id"] option:checked')).toHaveText(action.template);
+  }
+});

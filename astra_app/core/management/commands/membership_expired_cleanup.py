@@ -436,6 +436,7 @@ class Command(BaseCommand):
                         template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                         expires_at=sponsorship.expires_at,
                         organization=org,
+                        membership=sponsorship,
                         force=force,
                         tz_name=tz_name,
                         extra_context=sponsor_context | {"extend_url": request_url},

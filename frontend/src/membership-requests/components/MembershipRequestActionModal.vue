@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 
 import type { MembershipRequestActionIntent } from "../types";
 
@@ -44,6 +44,7 @@ const emit = defineEmits<{
 
 const message = ref("");
 const selectedPreset = ref("");
+const customEmailForm = ref<HTMLFormElement | null>(null);
 const error = ref("");
 const isSubmitting = ref(false);
 
@@ -99,6 +100,13 @@ const submitLabel = computed(() => {
     return "Ignore";
   }
   return "Approve";
+});
+
+const customEmailLabel = computed(() => {
+  if (!props.action?.customEmailUrl || isBulkAction.value) {
+    return "";
+  }
+  return `${submitLabel.value} with custom email`;
 });
 
 const submitClass = computed(() => {
@@ -217,6 +225,23 @@ function buildRequestBody(trimmedMessage: string): FormData {
   }
 
   return formData;
+}
+
+async function submitCustomEmail(): Promise<void> {
+  if (!customEmailForm.value || isSubmitting.value) {
+    return;
+  }
+  if (requiresMessage.value && !message.value.trim()) {
+    error.value = "This field is required.";
+    return;
+  }
+
+  error.value = "";
+  isSubmitting.value = true;
+  // A regular form post: the server performs the action without emailing and
+  // redirects to Send Mail, pre-filled with the usual template, for the committee to edit.
+  await nextTick();
+  customEmailForm.value.submit();
 }
 
 function closeModal(): void {
@@ -339,8 +364,24 @@ async function submitAction(): Promise<void> {
 
             <div class="d-flex justify-content-between">
               <button type="button" class="btn btn-secondary" :disabled="isSubmitting" @click="closeModal">Cancel</button>
-              <button type="button" :class="submitClass" :disabled="isSubmitting" @click="submitAction">{{ submitLabel }}</button>
+              <div class="d-flex flex-wrap justify-content-end" style="gap: .5rem;">
+                <button
+                  v-if="customEmailLabel"
+                  type="button"
+                  class="btn btn-outline-secondary"
+                  :disabled="isSubmitting"
+                  title="Skip the standard email and write a custom one in Send Mail"
+                  @click="submitCustomEmail"
+                >{{ customEmailLabel }}</button>
+                <button type="button" :class="submitClass" :disabled="isSubmitting" @click="submitAction">{{ submitLabel }}</button>
+              </div>
             </div>
+
+            <form v-if="customEmailLabel" ref="customEmailForm" method="post" :action="action?.customEmailUrl" class="d-none">
+              <input type="hidden" name="csrfmiddlewaretoken" :value="csrfToken">
+              <input type="hidden" name="custom_email" value="1">
+              <input v-if="fieldName && message.trim()" type="hidden" :name="fieldName" :value="message.trim()">
+            </form>
           </div>
         </div>
       </div>

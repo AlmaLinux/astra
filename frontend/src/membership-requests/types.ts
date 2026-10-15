@@ -15,6 +15,9 @@ export interface MembershipRequestsBootstrap {
   requestInfoTemplate: string;
   ignoreTemplate: string;
   reopenTemplate?: string;
+  approveCustomEmailTemplate?: string;
+  rejectCustomEmailTemplate?: string;
+  requestInfoCustomEmailTemplate?: string;
   noteAddTemplate: string;
   noteSummaryTemplate: string;
   noteDetailTemplate: string;
@@ -79,6 +82,8 @@ export interface MembershipRequestActionIntent {
   membershipType: string;
   bulkActionUrls?: string[];
   requestCount?: number;
+  // Form route that performs the action without emailing and opens Send Mail instead.
+  customEmailUrl?: string;
 }
 
 export interface PendingFilterOption {
@@ -305,6 +310,9 @@ export function readMembershipRequestsBootstrap(root: HTMLElement): MembershipRe
     membershipRequestRfiTemplate,
     membershipRequestIgnoreTemplate,
     membershipRequestReopenTemplate,
+    membershipRequestApproveCustomEmailTemplate,
+    membershipRequestRejectCustomEmailTemplate,
+    membershipRequestRfiCustomEmailTemplate,
     membershipRequestNoteAddTemplate,
     membershipRequestNoteSummaryTemplate,
     membershipRequestNoteDetailTemplate,
@@ -353,6 +361,9 @@ export function readMembershipRequestsBootstrap(root: HTMLElement): MembershipRe
     requestInfoTemplate: membershipRequestRfiTemplate,
     ignoreTemplate: membershipRequestIgnoreTemplate,
     reopenTemplate: membershipRequestReopenTemplate,
+    approveCustomEmailTemplate: membershipRequestApproveCustomEmailTemplate,
+    rejectCustomEmailTemplate: membershipRequestRejectCustomEmailTemplate,
+    requestInfoCustomEmailTemplate: membershipRequestRfiCustomEmailTemplate,
     noteAddTemplate: membershipRequestNoteAddTemplate,
     noteSummaryTemplate: membershipRequestNoteSummaryTemplate,
     noteDetailTemplate: membershipRequestNoteDetailTemplate,

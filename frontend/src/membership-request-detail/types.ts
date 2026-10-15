@@ -21,6 +21,9 @@ export interface MembershipRequestDetailBootstrap {
   rejectUrl: string;
   rfiUrl: string;
   ignoreUrl: string;
+  approveCustomEmailUrl: string;
+  rejectCustomEmailUrl: string;
+  rfiCustomEmailUrl: string;
   rescindUrl: string;
   formActionUrl: string;
 }
@@ -154,6 +157,9 @@ export function readMembershipRequestDetailBootstrap(root: HTMLElement): Members
     rejectUrl: String(root.dataset.membershipRequestDetailRejectUrl || "").trim(),
     rfiUrl: String(root.dataset.membershipRequestDetailRfiUrl || "").trim(),
     ignoreUrl: String(root.dataset.membershipRequestDetailIgnoreUrl || "").trim(),
+    approveCustomEmailUrl: String(root.dataset.membershipRequestDetailApproveCustomEmailUrl || "").trim(),
+    rejectCustomEmailUrl: String(root.dataset.membershipRequestDetailRejectCustomEmailUrl || "").trim(),
+    rfiCustomEmailUrl: String(root.dataset.membershipRequestDetailRfiCustomEmailUrl || "").trim(),
     rescindUrl: String(root.dataset.membershipRequestDetailRescindUrl || "").trim(),
     formActionUrl: String(root.dataset.membershipRequestDetailFormActionUrl || "").trim(),
   };

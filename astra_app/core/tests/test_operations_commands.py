@@ -3,6 +3,7 @@ from io import StringIO
 from unittest.mock import call, patch
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -20,10 +21,36 @@ from core.models import (
 )
 
 
+class OperationsFailureIsolationTests(TestCase):
+    def test_a_failing_job_does_not_stop_the_others(self) -> None:
+        for operations_command in ("operations_daily", "operations_hourly", "operations_weekly"):
+            with self.subTest(operations_command=operations_command):
+                ran: list[str] = []
+
+                def _run(command_name: str, **_kwargs) -> None:
+                    ran.append(command_name)
+                    if len(ran) == 1:
+                        raise RuntimeError("FreeIPA is down")
+
+                with (
+                    patch("core.operations.call_command", side_effect=_run),
+                    self.assertLogs("core.operations", level="ERROR"),
+                    self.assertRaises(CommandError) as raised,
+                ):
+                    call_command(operations_command)
+
+                # The run as a whole still fails, so the scheduler notices which job broke.
+                self.assertIn(ran[0], str(raised.exception))
+                self.assertGreater(len(ran), 1)
+                with patch("core.operations.call_command") as all_jobs:
+                    call_command(operations_command)
+                self.assertEqual(ran, [job.args[0] for job in all_jobs.mock_calls])
+
+
 class OperationsDailyCommandTests(TestCase):
     def test_command_runs_daily_jobs(self) -> None:
         with (
-            patch("core.management.commands.operations_daily.call_command") as cc,
+            patch("core.operations.call_command") as cc,
             self.assertLogs("core.management.commands.operations_daily", level="INFO") as logs,
         ):
             call_command("operations_daily")
@@ -31,12 +58,14 @@ class OperationsDailyCommandTests(TestCase):
         self.assertEqual(
             cc.mock_calls,
             [
+                call("sponsorship_invoice_payment_details_check", dry_run=False),
                 call("membership_expired_cleanup", force=False, dry_run=False),
                 call("membership_expiration_notifications", force=False, dry_run=False),
                 call("freeipa_membership_reconcile", report=True, dry_run=False),
                 call("freeipa_team_leads_sync", dry_run=False),
                 call("selfservice_lifecycle_cleanup", dry_run=False),
                 call("account_invitations_refresh"),
+                call("send_mail_attachments_cleanup", dry_run=False),
             ],
         )
         self.assertTrue(
@@ -46,37 +75,41 @@ class OperationsDailyCommandTests(TestCase):
 
     def test_force_is_passed_through(self) -> None:
         with patch(
-            "core.management.commands.operations_daily.call_command",
+            "core.operations.call_command",
         ) as cc:
             call_command("operations_daily", "--force")
 
         self.assertEqual(
             cc.mock_calls,
             [
+                call("sponsorship_invoice_payment_details_check", dry_run=False),
                 call("membership_expired_cleanup", force=True, dry_run=False),
                 call("membership_expiration_notifications", force=True, dry_run=False),
                 call("freeipa_membership_reconcile", report=True, dry_run=False),
                 call("freeipa_team_leads_sync", dry_run=False),
                 call("selfservice_lifecycle_cleanup", dry_run=False),
                 call("account_invitations_refresh"),
+                call("send_mail_attachments_cleanup", dry_run=False),
             ],
         )
 
     def test_dry_run_is_passed_through(self) -> None:
         with patch(
-            "core.management.commands.operations_daily.call_command",
+            "core.operations.call_command",
         ) as cc:
             call_command("operations_daily", "--dry-run")
 
         self.assertEqual(
             cc.mock_calls,
             [
+                call("sponsorship_invoice_payment_details_check", dry_run=True),
                 call("membership_expired_cleanup", force=False, dry_run=True),
                 call("membership_expiration_notifications", force=False, dry_run=True),
                 call("freeipa_membership_reconcile", report=True, dry_run=True),
                 call("freeipa_team_leads_sync", dry_run=True),
                 call("selfservice_lifecycle_cleanup", dry_run=True),
                 call("account_invitations_refresh"),
+                call("send_mail_attachments_cleanup", dry_run=True),
             ],
         )
 
@@ -84,7 +117,7 @@ class OperationsDailyCommandTests(TestCase):
 class OperationsWeeklyCommandTests(TestCase):
     def test_command_runs_weekly_jobs(self) -> None:
         with (
-            patch("core.management.commands.operations_weekly.call_command") as cc,
+            patch("core.operations.call_command") as cc,
             self.assertLogs("core.management.commands.operations_weekly", level="INFO") as logs,
         ):
             call_command("operations_weekly")
@@ -103,7 +136,7 @@ class OperationsWeeklyCommandTests(TestCase):
 
     def test_force_is_passed_through(self) -> None:
         with patch(
-            "core.management.commands.operations_weekly.call_command",
+            "core.operations.call_command",
         ) as cc:
             call_command("operations_weekly", "--force")
 
@@ -117,7 +150,7 @@ class OperationsWeeklyCommandTests(TestCase):
 
     def test_dry_run_is_passed_through(self) -> None:
         with patch(
-            "core.management.commands.operations_weekly.call_command",
+            "core.operations.call_command",
         ) as cc:
             call_command("operations_weekly", "--dry-run")
 
@@ -273,7 +306,7 @@ class OperationsHourlyCommandTests(TestCase):
 
     def test_command_runs_hourly_jobs(self) -> None:
         with (
-            patch("core.management.commands.operations_hourly.call_command") as cc,
+            patch("core.operations.call_command") as cc,
             self.assertLogs("core.management.commands.operations_hourly", level="INFO") as logs,
         ):
             call_command("operations_hourly")
@@ -292,7 +325,7 @@ class OperationsHourlyCommandTests(TestCase):
 
     def test_force_is_passed_through(self) -> None:
         with patch(
-            "core.management.commands.operations_hourly.call_command",
+            "core.operations.call_command",
         ) as cc:
             call_command("operations_hourly", "--force")
 
@@ -306,7 +339,7 @@ class OperationsHourlyCommandTests(TestCase):
 
     def test_dry_run_is_passed_through(self) -> None:
         with patch(
-            "core.management.commands.operations_hourly.call_command",
+            "core.operations.call_command",
         ) as cc:
             call_command("operations_hourly", "--dry-run")
 

@@ -11,7 +11,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import batched
 
-from post_office.models import Email
+from post_office.models import Attachment, Email
 
 from core.templated_email import bulk_save_emails
 
@@ -46,6 +46,7 @@ def deliver_in_batches[T](
     prepare: Callable[[T], Email | None],
     skipped: int = 0,
     on_progress: Callable[[MailDelivery], None] | None = None,
+    attachments: Sequence[Attachment] = (),
 ) -> MailDelivery:
     """Render and queue one email per item, reporting progress per batch.
 
@@ -56,6 +57,8 @@ def deliver_in_batches[T](
 
     *skipped* seeds the count of recipients the caller filtered out before the
     run, so the totals still cover everyone it set out to email.
+
+    *attachments* are post_office Attachment rows shared by every email in the run.
     """
     total = len(items) + skipped
     processed = skipped
@@ -88,7 +91,7 @@ def deliver_in_batches[T](
                 pending_emails.append(prepared)
             emailed += 1
 
-        bulk_save_emails(pending_emails)
+        bulk_save_emails(pending_emails, attachments=attachments)
         report()
 
     if not items:

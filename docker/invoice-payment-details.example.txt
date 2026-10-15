@@ -1,0 +1,10 @@
+Pay by ACH, Wire
+Bank: Example Bank (DEVELOPMENT PLACEHOLDER)
+Account Number: 000000000
+ACH Routing Number: 000000000
+Wire Routing Number: 000000000
+SWIFT: EXAMPLEXX
+
+Or send checks to
+AlmaLinux OS Foundation
+123 Placeholder St, Example City, ST 00000, USA

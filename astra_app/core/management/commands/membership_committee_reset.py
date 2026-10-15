@@ -17,7 +17,10 @@ from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, Membe
 from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_ADD_SEND_MAIL
 
 COMMITTEE_REVIEWER_USERNAME = "regular01"
-COMMITTEE_REQUEST_USERNAMES = tuple(f"regular{index:02d}" for index in range(2, 19))
+COMMITTEE_REQUEST_USERNAMES = tuple(f"regular{index:02d}" for index in range(2, 22))
+# Each custom-email action acts on its own request; approving one creates a membership
+# the reset must clear again.
+CUSTOM_EMAIL_USERNAMES = ("regular19", "regular20", "regular21")
 COMMITTEE_SUPPORT_REVIEWERS = ("committee-alpha", "committee-beta")
 
 COMMITTEE_REQUEST_MATRIX: tuple[dict[str, object], ...] = (
@@ -103,6 +106,27 @@ COMMITTEE_REQUEST_MATRIX: tuple[dict[str, object], ...] = (
         "status": MembershipRequest.Status.pending,
         "responses": [{"Domain": "https://mirror-row-rfi.example.test"}],
         "sort_offset_minutes": 22,
+    },
+    {
+        "alias": "pending_custom_email_approve",
+        "username": "regular19",
+        "membership_type_code": "mirror",
+        "status": MembershipRequest.Status.pending,
+        "responses": [{"Domain": "https://mirror-custom-approve.example.test"}],
+    },
+    {
+        "alias": "pending_custom_email_reject",
+        "username": "regular20",
+        "membership_type_code": "mirror",
+        "status": MembershipRequest.Status.pending,
+        "responses": [{"Domain": "https://mirror-custom-reject.example.test"}],
+    },
+    {
+        "alias": "pending_custom_email_rfi",
+        "username": "regular21",
+        "membership_type_code": "mirror",
+        "status": MembershipRequest.Status.pending,
+        "responses": [{"Domain": "https://mirror-custom-rfi.example.test"}],
     },
     {
         "alias": "on_hold_bulk_approve_primary",
@@ -191,6 +215,14 @@ SCENARIO_ALIAS_MATRIX: dict[str, dict[str, object]] = {
         "aliases": ["pending_row_action"],
         "destructive": True,
     },
+    "committee-custom-email-actions": {
+        "aliases": [
+            "pending_custom_email_approve",
+            "pending_custom_email_reject",
+            "pending_custom_email_rfi",
+        ],
+        "destructive": True,
+    },
 }
 
 
@@ -271,7 +303,7 @@ class Command(BaseCommand):
         request_queryset.delete()
         renewal_usernames = [str(row["username"]) for row in COMMITTEE_REQUEST_MATRIX if bool(row.get("is_renewal", False))]
         Membership.objects.filter(
-            target_username__in=renewal_usernames,
+            target_username__in=[*renewal_usernames, *CUSTOM_EMAIL_USERNAMES],
             membership_type_id__in=membership_type_codes,
         ).delete()
 

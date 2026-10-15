@@ -195,6 +195,38 @@ test("mail-tools-send-mail-manual-workflow", async ({ page }) => {
   await confirmSendAndExpectQueued(page, 2);
 });
 
+// As a send-mail operator, I can attach files for every recipient, one pick at a time, and remove one before sending.
+test("mail-tools-send-mail-attachments", async ({ page }) => {
+  await openSendMailWorkflow(page);
+
+  await page.getByRole("tab", { name: "Manual", exact: true }).click();
+  await page.getByLabel("Manual to:", { exact: true }).fill("attachments01@example.test");
+  await expect(page.locator("#send-mail-recipient-count")).toHaveText("1");
+  await selectExistingTemplate(page);
+
+  await page.locator("#send-mail-extra-options-toggle").click();
+  const options = page.locator("#send-mail-extra-options");
+  await expect(options).toBeVisible();
+  const picker = options.locator("#send-mail-attachments");
+
+  for (const [name, body] of [["agenda.txt", "Agenda"], ["notes.txt", "Notes"]]) {
+    const upload = page.waitForResponse((response) => {
+      return response.url().includes("/email-tools/send-mail/attachments/") && response.request().method() === "POST";
+    });
+    await picker.setInputFiles({ name, mimeType: "text/plain", buffer: Buffer.from(body) });
+    expect((await upload).status()).toBe(200);
+    await expect(options.getByText(name, { exact: true })).toBeVisible();
+  }
+  // Each pick uploads straight away, so the picker is free for the next file.
+  await expect(options.locator('input[type="hidden"][name="attachment"]')).toHaveCount(2);
+
+  await options.getByRole("button", { name: "Remove notes.txt", exact: true }).click();
+  await expect(options.getByText("notes.txt", { exact: true })).toHaveCount(0);
+  await expect(options.locator('input[type="hidden"][name="attachment"]')).toHaveCount(1);
+
+  await confirmSendAndExpectQueued(page, 1);
+});
+
 // As a template manager, I can list templates, create new ones, edit details/content, preview rendered HTML/text, and delete unlocked templates.
 // As a mail operator, I can manage uploaded images used by email templates.
 test("mail-tools-template-manager-and-images", async ({ page }) => {

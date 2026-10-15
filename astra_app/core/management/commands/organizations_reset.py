@@ -254,6 +254,8 @@ class Command(BaseCommand):
                 "enabled": True,
                 "group_cn": "almalinux-gold",
                 "description": "Wave 4 gold sponsorship",
+                # Paid tiers, so sponsorship invoices are offered.
+                "annual_dues_usd": 20000,
             },
         )
         MembershipType.objects.update_or_create(
@@ -265,6 +267,8 @@ class Command(BaseCommand):
                 "enabled": True,
                 "group_cn": "almalinux-ruby",
                 "description": "Wave 4 ruby sponsorship",
+                # Paid tiers, so sponsorship invoices are offered.
+                "annual_dues_usd": 5000,
             },
         )
 

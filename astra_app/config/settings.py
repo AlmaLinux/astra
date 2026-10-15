@@ -606,6 +606,15 @@ ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = _env_str(
     "ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME",
     default="organization-sponsorship-expired",
 )
+# Bank/payment instructions printed on sponsorship invoices. Read from a file on the
+# server (not the repo or the database) so payment details can only be changed by
+# someone with root access to the host.
+SPONSORSHIP_INVOICE_PAYMENT_DETAILS_FILE = _env_str("SPONSORSHIP_INVOICE_PAYMENT_DETAILS_FILE", default="")
+SPONSORSHIP_INVOICE_REGENERATE_LIMIT = _env_int("SPONSORSHIP_INVOICE_REGENERATE_LIMIT", default=5)
+SPONSORSHIP_INVOICE_REGENERATE_WINDOW_SECONDS = _env_int(
+    "SPONSORSHIP_INVOICE_REGENERATE_WINDOW_SECONDS",
+    default=60 * 60,
+)
 MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = _env_str(
     "MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME",
     default="membership-expired",
@@ -679,8 +688,18 @@ FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME = _env_str(
     "FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME",
     default="freeipa-membership-reconcile-alert",
 )
+SPONSORSHIP_INVOICE_PAYMENT_DETAILS_ALERT_EMAIL_TEMPLATE_NAME = _env_str(
+    "SPONSORSHIP_INVOICE_PAYMENT_DETAILS_ALERT_EMAIL_TEMPLATE_NAME",
+    default="sponsorship-invoice-payment-details-alert",
+)
 
 PASSWORD_RESET_TOKEN_TTL_SECONDS = _env_int("PASSWORD_RESET_TOKEN_TTL_SECONDS", default=60 * 60)
+# How long a Send Mail attachment reference stays usable; unsent uploads older than
+# this are deleted by the daily cleanup.
+MAIL_ATTACHMENT_TOKEN_TTL_SECONDS = _env_int(
+    "MAIL_ATTACHMENT_TOKEN_TTL_SECONDS",
+    default=int(datetime.timedelta(days=2).total_seconds()),
+)
 ORGANIZATION_CLAIM_TOKEN_TTL_SECONDS = _env_int(
     "ORGANIZATION_CLAIM_TOKEN_TTL_SECONDS",
     default=int(datetime.timedelta(days=7).total_seconds()),
@@ -1103,6 +1122,12 @@ LOGGING = {
             'handlers': ['access_console'],
             'level': 'INFO',
             'filters': ['health_endpoint', 'hetrix_access', 'request_context', 'quiet_request_paths'],
+            'propagate': False,
+        },
+        # WeasyPrint logs every rendering step at INFO; only keep problems (e.g. missing assets).
+        'weasyprint': {
+            'handlers': ['console'],
+            'level': 'WARNING',
             'propagate': False,
         },
         # FreeIPA client libs can be noisy; keep them at INFO by default.
