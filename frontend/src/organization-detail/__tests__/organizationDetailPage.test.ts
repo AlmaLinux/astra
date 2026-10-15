@@ -732,6 +732,19 @@ describe("OrganizationDetailPage", () => {
     expect(save.element.parentElement?.getAttribute("title")).toBe("The annual dues can't exceed the standard price.");
   });
 
+  it("names the membership once, without repeating it as a badge", async () => {
+    const wrapper = mountWithOrganization({ memberships: [goldMembership(null)] });
+
+    await flushPromises();
+    await flushPromises();
+
+    const [row] = wrapper.findAll("li.list-group-item").filter((item) => item.text().includes("Gold Sponsor Member"));
+    expect(row.text().split("Gold Sponsor Member").length - 1).toBe(1);
+    expect(row.find(".badge").exists()).toBe(false);
+    // Nothing for the viewer to do, so no empty action row either.
+    expect(row.find('[data-membership-actions="representative"]').exists()).toBe(false);
+  });
+
   it("shows representatives their discount without any way to change it", async () => {
     const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: false, duesUsd: 5000 }] });
 

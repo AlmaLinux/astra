@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 
 import DuesAmountInput from "../shared/components/DuesAmountInput.vue";
 import MembershipCard from "../shared/components/MembershipCard.vue";
-import { duesAmountError, formatDateInputValue, formatFullDate, formatUsd, membershipTierClass, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
+import { duesAmountError, formatDateInputValue, formatFullDate, formatUsd, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   OrganizationDetailBootstrap,
@@ -184,10 +184,6 @@ function organizationName(): string {
 
 function membershipLabel(membership: OrganizationDetailMembership): string {
   return membership.membershipType.name;
-}
-
-function membershipBadgeClass(membership: OrganizationDetailMembership): string {
-  return `badge alx-status-badge badge-pill p-2 ${membershipTierClass(membershipTypeCode(membership))} alx-status-badge--active`;
 }
 
 function memberSinceLabel(membership: OrganizationDetailMembership): string {
@@ -438,8 +434,12 @@ onMounted(async () => {
               </div>
 
               <div class="d-flex flex-column align-items-end" style="gap: .5rem;">
-                <div class="d-flex align-items-center justify-content-end flex-wrap" style="gap: .5rem;" data-membership-actions="representative">
-                  <span :class="membershipBadgeClass(membership)">{{ membershipLabel(membership) }}</span>
+                <div
+                  v-if="renewalUrl(membership) || tierChangeUrl(membership) || membership.invoice"
+                  class="d-flex align-items-center justify-content-end flex-wrap"
+                  style="gap: .5rem;"
+                  data-membership-actions="representative"
+                >
                   <a
                     v-if="renewalUrl(membership)"
                     :href="renewalUrl(membership)"

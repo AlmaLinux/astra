@@ -89,9 +89,11 @@ test("organizations-detail-membership-state shows active membership metadata and
   await expect(
     page.locator("[data-membership-card-root]").getByRole("link", { name: "History", exact: true }),
   ).toHaveAttribute("href", `/membership/log/org/${resetState.organizations.detail_focus_org.organization_id}/`);
+  // The membership title names the tier; there is no duplicate tier badge.
+  await expect(page.locator("[data-membership-card-root]").getByText("Gold Sponsor Member", { exact: true })).toHaveCount(1);
   await expect(
     page.locator("[data-membership-card-root] .badge").filter({ hasText: /^Gold Sponsor Member$/ }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(page.getByText(/Member since/)).toBeVisible();
   await expect(page.getByText(/Expires/)).toBeVisible();
   await expect(page.getByRole("link", { name: `Request #${requestId}` })).toBeVisible();
