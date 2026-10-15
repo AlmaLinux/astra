@@ -136,19 +136,6 @@ export function buildMembershipAuditLogRouteUrl(state: MembershipAuditLogRouteSt
 }
 
 const SHORT_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const ACTION_LABELS: Record<string, string> = {
-  requested: "Requested",
-  on_hold: "On Hold",
-  resubmitted: "Resubmitted",
-  approved: "Approved",
-  rejected: "Rejected",
-  ignored: "Ignored",
-  reopened: "Reopened",
-  rescinded: "Rescinded",
-  representative_changed: "Representative changed",
-  expiry_changed: "Expiry changed",
-  terminated: "Terminated",
-};
 
 function parseDate(value: string | null | undefined): Date | null {
   if (!value) {
@@ -159,11 +146,6 @@ function parseDate(value: string | null | undefined): Date | null {
     return null;
   }
   return parsed;
-}
-
-export function formatAuditLogAction(action: string): string {
-  const normalized = String(action || "").trim().toLowerCase();
-  return ACTION_LABELS[normalized] || normalized.replace(/_/g, " ");
 }
 
 export function formatAuditLogExpiresAt(value: string | null): string {

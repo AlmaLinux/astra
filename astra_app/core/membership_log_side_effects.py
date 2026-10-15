@@ -92,6 +92,7 @@ def apply_org_side_effects(*, log: MembershipLog) -> None:
     if log.action not in {
         MembershipLog.Action.approved,
         MembershipLog.Action.expiry_changed,
+        MembershipLog.Action.dues_changed,
         MembershipLog.Action.terminated,
     }:
         return
@@ -132,6 +133,7 @@ def apply_org_side_effects(*, log: MembershipLog) -> None:
             new_membership_type=log.membership_type,
             expires_at=log.expires_at,
             created_at=start_at,
+            dues_usd=log.dues_usd,
         )
     if old is not None and old.membership_type_id != log.membership_type_id:
         logger.info(

@@ -19,6 +19,7 @@ from core.views_membership.admin import (
     membership_sponsors_list,
     membership_stats,
     membership_terminate,
+    organization_sponsorship_set_dues,
 )
 from core.views_membership.committee import (
     membership_notes_aggregate_add_api,
@@ -106,6 +107,7 @@ __all__ = [
     "membership_sponsors_list",
     "membership_stats",
     "membership_terminate",
+    "organization_sponsorship_set_dues",
     "record_membership_request_created",
     "reject_membership_request",
     "run_membership_request_action",

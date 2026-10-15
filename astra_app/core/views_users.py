@@ -888,6 +888,7 @@ def _serialize_user_profile_membership_entry_data(
         can_view=can_view,
         can_manage=can_manage,
         invoice=None,
+        dues_usd=None,
     )
 
 

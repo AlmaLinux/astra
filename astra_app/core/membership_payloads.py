@@ -70,6 +70,7 @@ def serialize_membership_entry(
     can_view: bool,
     can_manage: bool,
     invoice: dict[str, str | None] | None,
+    dues_usd: int | None,
 ) -> dict[str, object]:
     """Serialize one active membership for the shared membership panel.
 
@@ -84,6 +85,9 @@ def serialize_membership_entry(
 
     ``invoice`` is the sponsorship invoice ({number, url}) the viewer may
     (re)generate, if any; individual memberships never have one.
+
+    ``dues_usd`` is what a sponsor pays per year after any in-kind discount;
+    None for individual memberships.
     """
 
     membership_type_data = serialize_membership_type(membership_type)
@@ -107,6 +111,7 @@ def serialize_membership_entry(
         "tierChangeMembershipTypeCode": str(tier_change_membership_type_code) if can_change_tier else "",
         "canManage": bool(can_manage),
         "invoice": invoice,
+        "duesUsd": dues_usd,
     }
 
 

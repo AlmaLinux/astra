@@ -175,13 +175,20 @@ async function submitBulkAction(payload: BulkSubmitPayload): Promise<void> {
       }),
     });
 
-    const result = (await response.json()) as { ok?: boolean; error?: string };
+    const result = (await response.json()) as { ok?: boolean; error?: string; skipped_discounted?: number[] };
     if (!response.ok || result.ok === false) {
       bulkError.value = result.error || "Failed to apply bulk action.";
       return;
     }
 
     emit("bulk-success", { scope: bulkScope.value });
+    const skipped = result.skipped_discounted ?? [];
+    if (skipped.length) {
+      const ids = skipped.map((id) => `#${id}`).join(", ");
+      bulkError.value = skipped.length === 1
+        ? `Skipped 1 discounted renewal (${ids}): approve it individually after confirming the in-kind agreement.`
+        : `Skipped ${skipped.length} discounted renewals (${ids}): approve them individually after confirming the in-kind agreement.`;
+    }
   } catch {
     bulkError.value = "Failed to apply bulk action.";
   } finally {

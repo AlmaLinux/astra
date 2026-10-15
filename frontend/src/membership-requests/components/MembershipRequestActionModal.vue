@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 
+import DuesAmountInput from "../../shared/components/DuesAmountInput.vue";
+import { duesAmountError } from "../../shared/membershipPresentation";
 import type { MembershipRequestActionIntent } from "../types";
+import { inKindDuesSummary } from "../types";
 
 interface MembershipActionSuccessEventDetail {
   actionUrl?: string;
@@ -47,6 +50,28 @@ const selectedPreset = ref("");
 const customEmailForm = ref<HTMLFormElement | null>(null);
 const error = ref("");
 const isSubmitting = ref(false);
+// Digits, or "" for the standard price.
+const duesInput = ref("");
+const duesReason = ref("");
+
+const showsDues = computed(() => props.action?.actionKind === "approve" && Boolean(props.action.dues));
+
+// What the sponsor would pay: the amount entered, or the standard price when empty.
+const enteredDuesUsd = computed(() => {
+  const dues = props.action?.dues;
+  if (!dues) {
+    return null;
+  }
+  return duesInput.value === "" ? dues.default_usd : Number(duesInput.value);
+});
+
+// Without a committee decision approval keeps a renewal's waiver, otherwise the standard price.
+const carriedDuesUsd = computed(() => {
+  const dues = props.action?.dues;
+  return dues ? dues.current_usd ?? dues.default_usd : null;
+});
+
+const duesChanged = computed(() => showsDues.value && enteredDuesUsd.value !== carriedDuesUsd.value);
 
 watch(
   () => props.action,
@@ -55,7 +80,10 @@ watch(
     selectedPreset.value = "";
     error.value = "";
     isSubmitting.value = false;
+    duesInput.value = props.action?.dues?.current_usd?.toString() ?? "";
+    duesReason.value = "";
   },
+  { immediate: true },
 );
 
 const isOpen = computed(() => props.action !== null);
@@ -213,6 +241,28 @@ const bodyText = computed(() => {
   return "";
 });
 
+const currentDiscountText = computed(() => {
+  const dues = props.action?.dues;
+  if (!dues || dues.current_usd === null) {
+    return "";
+  }
+  return `${inKindDuesSummary(dues)} under an in-kind agreement, which renewing keeps. Confirm the agreement is still valid.`;
+});
+
+function validationError(): string {
+  if (requiresMessage.value && !message.value.trim()) {
+    return "This field is required.";
+  }
+  const dues = props.action?.dues;
+  if (showsDues.value && dues && duesAmountError(duesInput.value, dues.default_usd)) {
+    return duesAmountError(duesInput.value, dues.default_usd);
+  }
+  if (duesChanged.value && !duesReason.value.trim()) {
+    return "Give a reason for the dues change.";
+  }
+  return "";
+}
+
 function onPresetChange(): void {
   message.value = selectedPreset.value;
 }
@@ -223,6 +273,11 @@ function buildRequestBody(trimmedMessage: string): FormData {
   if (fieldName.value && (trimmedMessage || requiresMessage.value)) {
     formData.append(fieldName.value, trimmedMessage);
   }
+  // Unchanged dues are left to the server, which carries a renewal's waiver.
+  if (duesChanged.value) {
+    formData.append("dues_usd", String(enteredDuesUsd.value));
+    formData.append("dues_reason", duesReason.value.trim());
+  }
 
   return formData;
 }
@@ -231,8 +286,8 @@ async function submitCustomEmail(): Promise<void> {
   if (!customEmailForm.value || isSubmitting.value) {
     return;
   }
-  if (requiresMessage.value && !message.value.trim()) {
-    error.value = "This field is required.";
+  error.value = validationError();
+  if (error.value) {
     return;
   }
 
@@ -256,12 +311,11 @@ async function submitAction(): Promise<void> {
     return;
   }
 
-  if (requiresMessage.value && !message.value.trim()) {
-    error.value = "This field is required.";
+  error.value = validationError();
+  if (error.value) {
     return;
   }
 
-  error.value = "";
   isSubmitting.value = true;
 
   try {
@@ -332,6 +386,26 @@ async function submitAction(): Promise<void> {
 
             <div v-if="bodyText" class="mb-3">{{ bodyText }}</div>
 
+            <div v-if="showsDues && action?.dues" class="mb-3">
+              <div v-if="currentDiscountText" class="alert alert-info py-2 px-3 small" role="note">{{ currentDiscountText }}</div>
+              <DuesAmountInput
+                id="membership-request-action-dues"
+                v-model="duesInput"
+                :default-usd="action.dues.default_usd"
+              />
+              <div v-if="duesChanged" class="form-group mb-0">
+                <label for="membership-request-action-dues-reason">Reason for the dues change</label>
+                <textarea
+                  id="membership-request-action-dues-reason"
+                  v-model="duesReason"
+                  class="form-control"
+                  rows="2"
+                  placeholder="E.g. the in-kind agreement this reflects"
+                  required
+                />
+              </div>
+            </div>
+
             <div v-if="supportsTextarea" class="mb-3">
               <div v-if="presets.length" class="form-group">
                 <label for="membership-request-action-preset">Quick responses</label>
@@ -381,6 +455,10 @@ async function submitAction(): Promise<void> {
               <input type="hidden" name="csrfmiddlewaretoken" :value="csrfToken">
               <input type="hidden" name="custom_email" value="1">
               <input v-if="fieldName && message.trim()" type="hidden" :name="fieldName" :value="message.trim()">
+              <template v-if="duesChanged">
+                <input type="hidden" name="dues_usd" :value="enteredDuesUsd">
+                <input type="hidden" name="dues_reason" :value="duesReason.trim()">
+              </template>
             </form>
           </div>
         </div>

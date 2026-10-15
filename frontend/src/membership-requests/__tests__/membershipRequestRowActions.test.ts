@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import MembershipRequestRowActions from "../components/MembershipRequestRowActions.vue";
 import type { DOMWrapper, VueWrapper } from "@vue/test-utils";
 
-import type { MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
+import type { MembershipRequestActionIntent, MembershipRequestRow, MembershipRequestsBootstrap } from "../types";
 
 const bootstrap: MembershipRequestsBootstrap = {
   clearFilterUrl: "/membership/requests/",
@@ -160,5 +160,19 @@ describe("MembershipRequestRowActions", () => {
 
     expect(approve.attributes("title")).toBe("Approve this on-hold request with committee override");
     expect(approve.attributes("aria-label")).toBe("Approve");
+  });
+
+  it("hands the dues to the approve dialog only for members who may set them", async () => {
+    const dues = { default_usd: 20000, current_usd: 0 };
+    for (const canSetDues of [true, false]) {
+      const wrapper = mount(MembershipRequestRowActions, {
+        props: { row: { ...buildRow("pending"), dues }, bootstrap: { ...bootstrap, canSetDues } },
+      });
+
+      await buttonByLabel(wrapper, "Approve").trigger("click");
+
+      const intent = wrapper.emitted("open-action")?.[0]?.[0] as MembershipRequestActionIntent;
+      expect(intent.dues).toEqual(canSetDues ? dues : undefined);
+    }
   });
 });

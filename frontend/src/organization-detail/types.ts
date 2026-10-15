@@ -28,6 +28,8 @@ export interface OrganizationDetailMembership {
   tierChangeMembershipTypeCode: string;
   canManage: boolean;
   invoice: OrganizationDetailInvoice | null;
+  // What the sponsor pays per year after any in-kind discount.
+  duesUsd: number | null;
 }
 
 export interface OrganizationDetailPendingMembership {
@@ -99,6 +101,7 @@ export interface OrganizationDetailBootstrap {
   sponsorshipSetExpiryUrlTemplate: string;
   sponsorshipTerminateUrlTemplate: string;
   sponsorshipInvoiceRegenerateUrlTemplate: string;
+  sponsorshipSetDuesUrlTemplate: string;
   csrfToken: string;
   nextUrl: string;
   expiryMinDate: string;
@@ -119,6 +122,7 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
   const sponsorshipSetExpiryUrlTemplate = String(root.dataset.organizationDetailSponsorshipSetExpiryUrlTemplate || "").trim();
   const sponsorshipTerminateUrlTemplate = String(root.dataset.organizationDetailSponsorshipTerminateUrlTemplate || "").trim();
   const sponsorshipInvoiceRegenerateUrlTemplate = String(root.dataset.organizationDetailSponsorshipInvoiceRegenerateUrlTemplate || "").trim();
+  const sponsorshipSetDuesUrlTemplate = String(root.dataset.organizationDetailSponsorshipSetDuesUrlTemplate || "").trim();
   const csrfToken = String(root.dataset.organizationDetailCsrfToken || "").trim();
   const nextUrl = String(root.dataset.organizationDetailNextUrl || "").trim();
   const expiryMinDate = String(root.dataset.organizationDetailExpiryMinDate || "").trim();
@@ -132,6 +136,7 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
     || !sponsorshipSetExpiryUrlTemplate
     || !sponsorshipTerminateUrlTemplate
     || !sponsorshipInvoiceRegenerateUrlTemplate
+    || !sponsorshipSetDuesUrlTemplate
     || !csrfToken
     || !nextUrl
     || !expiryMinDate
@@ -167,6 +172,7 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
     sponsorshipSetExpiryUrlTemplate,
     sponsorshipTerminateUrlTemplate,
     sponsorshipInvoiceRegenerateUrlTemplate,
+    sponsorshipSetDuesUrlTemplate,
     csrfToken,
     nextUrl,
     expiryMinDate,

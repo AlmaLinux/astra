@@ -1018,6 +1018,7 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
             {
                 "canRequestInfo": True,
                 "showOnHoldApprove": True,
+                "canSetDues": True,
             },
         )
         self.assertContains(resp, f'data-membership-request-detail-approve-on-hold-url="{approve_url}"')

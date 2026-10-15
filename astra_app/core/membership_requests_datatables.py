@@ -10,6 +10,7 @@ from core.avatar_providers import resolve_avatar_urls_for_users
 from core.freeipa.user import FreeIPAUser
 from core.membership import membership_request_queryset, visible_committee_membership_requests
 from core.membership_constants import MembershipCategoryCode
+from core.membership_dues import request_dues_payloads
 from core.membership_notes import CUSTOS, last_votes
 from core.models import Membership, MembershipLog, MembershipRequest, Note
 from core.templatetags.core_membership_notes import (
@@ -468,9 +469,11 @@ def build_pending_membership_request_queue(
         "sponsorships": MembershipCategoryCode.sponsorship,
     }
     is_renewal_by_id = _build_is_renewal_by_id(pending_visible)
+    dues_by_id = request_dues_payloads(pending_visible)
 
     for row in pending_rows_all:
         row["is_renewal"] = is_renewal_by_id.get(int(row["r"].pk), False)
+        row["dues"] = dues_by_id.get(int(row["r"].pk))
 
     filter_counts = {
         "all": len(pending_visible),
@@ -540,9 +543,11 @@ def build_on_hold_membership_request_queue(
         include_rows=include_rows,
     )
     is_renewal_by_id = _build_is_renewal_by_id(on_hold_visible)
+    dues_by_id = request_dues_payloads(on_hold_visible)
 
     for row in on_hold_rows:
         row["is_renewal"] = is_renewal_by_id.get(int(row["r"].pk), False)
+        row["dues"] = dues_by_id.get(int(row["r"].pk))
 
     return {
         "on_hold_requests": on_hold_visible,
@@ -602,6 +607,7 @@ def serialize_membership_request_row(
             "category": membership_request.membership_type.category_id,
         },
         "is_renewal": bool(row.get("is_renewal", False)),
+        "dues": row.get("dues"),
         "responses": build_response_items(membership_request=membership_request),
     }
 

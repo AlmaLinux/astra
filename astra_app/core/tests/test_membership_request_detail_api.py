@@ -150,6 +150,7 @@ class MembershipRequestDetailApiTests(TestCase):
             {
                 "canRequestInfo": True,
                 "showOnHoldApprove": False,
+                "canSetDues": True,
             },
         )
         self.assertEqual(

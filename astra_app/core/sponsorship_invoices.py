@@ -26,6 +26,7 @@ from weasyprint.urls import URLFetcher, URLFetcherResponse
 from core.country_codes import country_name_from_code
 from core.logging_extras import current_exception_log_fields
 from core.mail_attachments import MailAttachment
+from core.membership_dues import discount_percent, effective_dues_usd
 from core.models import Membership
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,8 @@ def invoice_eligible(membership: Membership) -> bool:
     return (
         membership.target_organization_id is not None
         and membership.expires_at is not None
-        and membership.membership_type.annual_dues_usd > 0
+        # In-kind sponsors whose dues are fully waived are never invoiced.
+        and effective_dues_usd(membership) > 0
     )
 
 
@@ -121,6 +123,9 @@ def render_invoice_html(membership: Membership, term: InvoiceTerm) -> str:
         if line
     ]
     term_start = _term_start(membership, term)
+    list_price = membership.membership_type.annual_dues_usd
+    amount_due = effective_dues_usd(membership)
+    discount = list_price - amount_due
 
     return render_to_string(
         "core/sponsorship_invoice.html",
@@ -131,7 +136,10 @@ def render_invoice_html(membership: Membership, term: InvoiceTerm) -> str:
             "organization": organization,
             "address_lines": address_lines,
             "membership_type_name": membership.membership_type.name,
-            "amount_usd": f"${membership.membership_type.annual_dues_usd:,}",
+            "list_price_usd": f"${list_price:,}",
+            "discount_usd": f"-${discount:,}" if discount else "",
+            "discount_percent": discount_percent(list_price, amount_due),
+            "amount_due_usd": f"${amount_due:,}",
             "term_start_date": term_start,
             "term_end_date": term_start + datetime.timedelta(days=settings.MEMBERSHIP_VALIDITY_DAYS),
             "payment_details": read_payment_details(),

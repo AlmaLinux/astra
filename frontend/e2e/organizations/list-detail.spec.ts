@@ -417,10 +417,113 @@ test("organizations-invoice-pdf-content prints billing details notes price and p
   expect(text).toMatch(/Invoice date \w+ \d{1,2}, \d{4}/);
   expect(text).toContain("Gold Sponsor Member");
   expect(text).toMatch(/from \w+ \d{1,2}(st|nd|rd|th) \d{4} to \w+ \d{1,2}(st|nd|rd|th) \d{4}/);
-  expect(text).toContain("Amount $20,000");
+  expect(text).toContain("Amount due $20,000");
+  expect(text).not.toContain("List price");
   expect(text).toContain("Please complete payment upon receipt.");
   for (const line of readFileSync(PAYMENT_DETAILS_FILE, "utf-8").split("\n").map((value) => value.trim()).filter(Boolean)) {
     expect(text).toContain(line.replace(/\s+/g, " "));
   }
 });
 
+// As a membership committee member, I record an in-kind agreement as a dues discount, and the sponsor's invoice shows it.
+test("organizations-inkind-dues-invoice lets the committee discount dues and prints the discount on the invoice", async ({ page }) => {
+  const resetState = readOrganizationsResetState();
+  const observer = resetState.actors.representative_observer;
+  const detailTarget = resetState.scenarios["organizations-detail-renewal-cta"].route_target;
+
+  await loginViaForm(page, observer.username, observer.password);
+  await page.goto(detailTarget);
+  await expect(page.locator("[data-organization-detail-root]")).toBeVisible();
+
+  await page.locator('[data-membership-actions="committee"]').getByRole("button", { name: "Edit expiration", exact: true }).click();
+  const managementModal = page.locator(".modal.show").filter({ hasText: "Manage membership: Gold Sponsor Member" }).first();
+  const saveDues = managementModal.getByRole("button", { name: "Save dues", exact: true });
+  const duesInput = managementModal.getByLabel("Annual dues (USD)", { exact: true });
+  // A sponsor paying the standard price starts with an empty field, which only takes digits.
+  await expect(duesInput).toHaveValue("");
+  await duesInput.pressSequentially("50a00");
+  await expect(duesInput).toHaveValue("5000");
+  // A dues change cannot even be submitted without a reason.
+  await expect(saveDues).toBeDisabled();
+  await expect(managementModal.locator('span[title="Enter a reason for the dues change first."]')).toContainText("Save dues");
+  await managementModal.getByLabel("Reason", { exact: true }).fill("Hosts our CI runners worth $15,000 a year");
+  await expect(saveDues).toBeEnabled();
+  await saveDues.click();
+
+  await expect(page.getByText("Sponsorship dues updated.", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-membership-dues="gold"]')).toHaveText("Annual dues: $5,000 (discounted from $20,000)");
+
+  await page.locator('[data-membership-actions="representative"]').getByRole("button", { name: /^(Generate|Regenerate) invoice$/ }).click();
+  const invoiceModal = page.locator(".modal.show").filter({ hasText: "will be rebuilt" });
+  await invoiceModal.getByRole("button", { name: /^(Generate|Regenerate) invoice$/ }).click();
+  await expect(page.getByText("Invoice generated.", { exact: true })).toBeVisible();
+
+  const download = page.getByRole("link", { name: /Download invoice \d{4}-\d{4}-\d{6}$/ });
+  const response = await page.request.get((await download.getAttribute("href")) ?? "");
+  expect(response.status()).toBe(200);
+  const text = await pdfText(await response.body());
+  expect(text).toContain("List price $20,000");
+  expect(text).toContain("In-kind discount (75%) -$15,000");
+  expect(text).toContain("Amount due $5,000");
+});
+
+// As a membership committee member, I confirm each in-kind renewal individually, and approving it keeps the sponsor's discount.
+test("organizations-inkind-renewal-review keeps discounted renewals out of bulk approval and carries the discount", async ({ page }) => {
+  const resetState = readOrganizationsResetState();
+  const observer = resetState.actors.representative_observer;
+  const requestId = resetState.requests.inkind_renewal_request.request_id;
+  const organization = resetState.organizations.inkind_renewal_org;
+
+  await loginViaForm(page, observer.username, observer.password);
+  await page.goto("/membership/requests/?filter=sponsorships");
+  const pending = page.locator(".card").filter({ hasText: /Pending:\s*\d+/ }).first();
+  const row = pending.locator(`tbody tr:has(input[type="checkbox"][name="selected"][value="${requestId}"])`);
+  await expect(row.getByText("In-kind", { exact: true })).toHaveAttribute("title", "Pays $5,000 of $20,000");
+
+  await row.locator('input[type="checkbox"][name="selected"]').check();
+  await pending.locator('select[name="bulk_action"]').selectOption("accept");
+  await pending.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(pending.getByText(`Skipped 1 discounted renewal (#${requestId})`)).toBeVisible();
+  await expect(row).toBeVisible();
+
+  await row.getByRole("button", { name: "Approve", exact: true }).click();
+  const modal = page.locator('.modal[aria-modal="true"]');
+  await expect(modal.getByText("Pays $5,000 of $20,000 under an in-kind agreement")).toBeVisible();
+  await expect(modal.getByLabel("Annual dues (USD)", { exact: true })).toHaveValue("5000");
+  await modal.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(row).toHaveCount(0);
+
+  await page.goto(organization.detail_url);
+  await expect(page.locator('[data-membership-dues="gold"]')).toHaveText("Annual dues: $5,000 (discounted from $20,000)");
+});
+
+// As a representative of an in-kind sponsor, I can see my discount, but I can neither change it nor ask for one.
+test("organizations-inkind-representative sees the discount but cannot change or request one", async ({ page }) => {
+  const resetState = readOrganizationsResetState();
+  const representative = resetState.actors.inkind_representative;
+  const organization = resetState.organizations.inkind_renewal_org;
+  const requestId = resetState.requests.inkind_renewal_request.request_id;
+  const discount = "Annual dues: $5,000 (discounted from $20,000)";
+
+  await loginViaForm(page, representative.username, representative.password);
+  await page.goto(organization.detail_url);
+  const root = page.locator("[data-organization-detail-root]");
+  await expect(page.locator('[data-membership-dues="gold"]')).toHaveText(discount);
+  await expect(page.locator('[data-membership-actions="committee"]')).toHaveCount(0);
+  await expect(page.locator('input[name="dues_usd"]')).toHaveCount(0);
+
+  // Posting straight to the committee endpoints changes nothing.
+  const headers = { "X-CSRFToken": (await root.getAttribute("data-organization-detail-csrf-token")) ?? "" };
+  const form = { dues_usd: "0", dues_reason: "We would like a discount" };
+  await page.request.post(`/organization/${organization.organization_id}/sponsorship/gold/dues/`, { headers, form });
+  const approve = await page.request.post(`/api/v1/membership/request/${requestId}/approve`, { headers, form });
+  expect(approve.status()).toBe(403);
+  await page.reload();
+  await expect(page.locator('[data-membership-dues="gold"]')).toHaveText(discount);
+
+  // The sponsorship request form has nowhere to ask for a discount.
+  await page.goto(`/organization/${organization.organization_id}/membership/request/`);
+  await expect(page.locator("form")).not.toHaveCount(0);
+  await expect(page.locator('[name="dues_usd"]')).toHaveCount(0);
+  await expect(page.getByText(/discount|dues waiver/i)).toHaveCount(0);
+});

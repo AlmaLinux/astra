@@ -34,6 +34,7 @@ function openAction(
     requestTarget: requester.value,
     membershipType: props.row.membership_type.name,
     ...(customEmailTemplate ? { customEmailUrl: actionUrl(customEmailTemplate) } : {}),
+    ...(actionKind === "approve" && props.bootstrap.canSetDues && props.row.dues ? { dues: props.row.dues } : {}),
   });
 }
 </script>

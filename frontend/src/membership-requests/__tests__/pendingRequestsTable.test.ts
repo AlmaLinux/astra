@@ -332,6 +332,45 @@ describe("PendingRequestsTable", () => {
     });
   });
 
+  function mountPending(rows: MembershipRequestRow[]) {
+    return mount(PendingRequestsTable, {
+      props: {
+        bootstrap,
+        rows,
+        count: rows.length,
+        filterOptions,
+        selectedFilter: "all",
+        currentPage: 1,
+        totalPages: 1,
+        pageSize: 25,
+        isLoading: false,
+        error: "",
+      },
+      global: { stubs: { MembershipNotesCard: true } },
+    });
+  }
+
+  it("flags discounted renewals as in-kind", () => {
+    const wrapper = mountPending([{ ...row, dues: { default_usd: 20000, current_usd: 5000 } }]);
+
+    const badge = wrapper.get('[data-membership-request-dues="101"]');
+    expect(badge.text()).toBe("In-kind");
+    expect(badge.attributes("title")).toBe("Pays $5,000 of $20,000");
+    expect(mountPending([{ ...row, dues: { default_usd: 20000, current_usd: null } }]).find("[data-membership-request-dues]").exists()).toBe(false);
+  });
+
+  it("explains which requests bulk approval left for individual review", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, approved: 0, skipped_discounted: [101] }))));
+    const wrapper = mountPending([row]);
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="101"]').setValue(true);
+    await wrapper.get('select[name="bulk_action"]').setValue("accept");
+    await wrapper.get("form").trigger("submit");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(wrapper.text()).toContain("Skipped 1 discounted renewal (#101)");
+  });
+
   it("shows the pending table selected count only for rows checked in the pending table", async () => {
     const wrapper = mount(PendingRequestsTable, {
       props: {

@@ -58,6 +58,11 @@ urlpatterns = [
         name="organization-sponsorship-set-expiry",
     ),
     path(
+        "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/dues/",
+        views_membership.organization_sponsorship_set_dues,
+        name="organization-sponsorship-set-dues",
+    ),
+    path(
         "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/terminate/",
         views_membership.membership_terminate,
         name="organization-sponsorship-terminate",

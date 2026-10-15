@@ -129,6 +129,20 @@ class AdminMembershipCRUDTests(TestCase):
         self.assertContains(response, "Reachable Org")
         self.assertContains(response, "Gold Sponsor")
 
+    def _assert_recorded_as_approved_request(self, approved_log, *, actor: str, at: datetime.datetime) -> None:
+        """Direct grants still get a request, so notes always have one to attach to."""
+        from post_office.models import Email
+
+        from core.models import MembershipRequest
+
+        membership_request = approved_log.membership_request
+        self.assertIsNotNone(membership_request)
+        self.assertEqual(membership_request.status, MembershipRequest.Status.approved)
+        self.assertEqual(membership_request.membership_type_id, approved_log.membership_type_id)
+        self.assertEqual(membership_request.decided_by_username, actor)
+        self.assertEqual((membership_request.requested_at, membership_request.decided_at), (at, at))
+        self.assertFalse(Email.objects.exists())
+
     def test_admin_can_create_user_membership_and_logs_side_effects(self) -> None:
         from core.models import Membership, MembershipLog, MembershipType
 
@@ -184,6 +198,7 @@ class AdminMembershipCRUDTests(TestCase):
             action=MembershipLog.Action.expiry_changed,
         )
         self.assertEqual(expiry_log.expires_at, datetime.datetime(2026, 4, 15, 23, 59, 59, tzinfo=datetime.UTC))
+        self._assert_recorded_as_approved_request(approved_log, actor="alice", at=datetime.datetime(2026, 1, 10, 0, 0, tzinfo=datetime.UTC))
 
         add_to_group.assert_called_once()
 
@@ -450,12 +465,10 @@ class AdminMembershipCRUDTests(TestCase):
         self.assertEqual(membership.created_at, datetime.datetime(2026, 2, 1, 0, 0, tzinfo=datetime.UTC))
         self.assertEqual(membership.expires_at, datetime.datetime(2026, 8, 31, 23, 59, 59, tzinfo=datetime.UTC))
 
-        self.assertTrue(
-            MembershipLog.objects.filter(
-                target_organization=organization,
-                membership_type=membership_type,
-                action=MembershipLog.Action.approved,
-            ).exists()
+        approved_log = MembershipLog.objects.get(
+            target_organization=organization,
+            membership_type=membership_type,
+            action=MembershipLog.Action.approved,
         )
         self.assertTrue(
             MembershipLog.objects.filter(
@@ -464,6 +477,7 @@ class AdminMembershipCRUDTests(TestCase):
                 action=MembershipLog.Action.expiry_changed,
             ).exists()
         )
+        self._assert_recorded_as_approved_request(approved_log, actor="alice", at=datetime.datetime(2026, 2, 1, 0, 0, tzinfo=datetime.UTC))
 
         sync_groups.assert_called_once()
 

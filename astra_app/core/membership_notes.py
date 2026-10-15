@@ -94,6 +94,7 @@ _ACTION_DISPLAY: dict[str, tuple[str, str]] = {
     "request_rescinded": ("Request rescinded", "fa-ban"),
     "on_hold_override_approved": ("Request approved (on hold override)", "fa-circle-check"),
     "contacted": ("User contacted", "fa-envelope"),
+    "dues_waiver_review": ("Dues waiver to review", "fa-hand-holding-dollar"),
 }
 
 _VOTE_LABELS: dict[str, str] = {"approve": "Voted approve", "disapprove": "Voted disapprove"}
@@ -123,6 +124,13 @@ def note_action_label(action: dict[str, Any]) -> str:
         kind = str(action.get("kind") or "").strip().lower()
         return _CONTACTED_LABELS.get(kind, "User contacted")
 
+    if action_type == "dues_changed":
+        new = int(action.get("new_dues_usd") or 0)
+        default = int(action.get("default_dues_usd") or 0)
+        if new == default:
+            return f"Dues set to the default ${default:,}"
+        return f"Dues set to ${new:,} of ${default:,} ({action.get('discount_percent')}% in-kind discount)"
+
     if action_type == "representative_changed":
         old = str(action.get("old") or "").strip()
         new = str(action.get("new") or "").strip()
@@ -144,6 +152,9 @@ def note_action_icon(action: dict[str, Any]) -> str:
 
     if action_type == "representative_changed":
         return "fa-user-check"
+
+    if action_type == "dues_changed":
+        return "fa-hand-holding-dollar"
 
     _, icon = _ACTION_DISPLAY.get(action_type, (None, None))
     return icon or "fa-bolt"

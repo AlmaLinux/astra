@@ -25,6 +25,7 @@ from core.membership import (
     membership_request_queryset,
     visible_committee_membership_requests,
 )
+from core.membership_dues import parse_dues_usd, request_dues_payloads
 from core.membership_notes import add_note
 from core.membership_notes_preload import build_notes_by_membership_request_id
 from core.membership_notifications import organization_sponsor_notification_recipient_email
@@ -281,6 +282,7 @@ def membership_requests(request: HttpRequest) -> HttpResponse:
             "membership_user_profile_template": reverse("user-profile", args=["__username__"]),
             "membership_organization_detail_template": reverse("organization-detail", args=[request_id_sentinel]),
             "membership_requests_can_request_info": request.user.has_perm(ASTRA_ADD_SEND_MAIL),
+            "membership_requests_can_set_dues": review_permissions["membership_can_change"],
             "membership_requests_notes_can_view": review_permissions["membership_can_view"],
             "membership_requests_notes_can_write": (
                 review_permissions["membership_can_add"]
@@ -928,6 +930,10 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
             messages.error(request, "No matching pending requests were found.")
         return redirect(redirect_to)
 
+    skipped_discounted: list[int] = []
+    if action == "approve":
+        reqs, skipped_discounted = _split_discounted_renewals(reqs)
+
     approved = 0
     rejected = 0
     ignored = 0
@@ -998,6 +1004,11 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
         messages.success(request, f"Ignored {ignored} request(s).")
     if failures:
         messages.error(request, f"Failed to process {failures} request(s).")
+    if skipped_discounted:
+        messages.warning(
+            request,
+            f"Skipped {len(skipped_discounted)} discounted renewal(s); approve them individually after confirming the in-kind agreement.",
+        )
     if already_in_target:
         status_label = str(target_status).replace("_", " ") if target_status is not None else "processed"
         messages.info(request, f"Selected request(s) already {status_label}.")
@@ -1005,17 +1016,36 @@ def membership_requests_bulk(request: HttpRequest) -> HttpResponse:
     return redirect(redirect_to)
 
 
+def _approval_dues_input(request: HttpRequest, data: Mapping[str, object]) -> tuple[int | None, str]:
+    """Committee-set dues for an approval: (dues_usd or None for no decision, reason)."""
+    dues_usd = parse_dues_usd(data.get("dues_usd"))
+    # Dues are part of the membership terms, so they need the same permission as editing expiry.
+    if dues_usd is not None and not request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP):
+        raise ValidationError("You do not have permission to set sponsorship dues.")
+    return dues_usd, str(data.get("dues_reason") or "")
+
+
+def _split_discounted_renewals(reqs: list[MembershipRequest]) -> tuple[list[MembershipRequest], list[int]]:
+    """Bulk approval skips discounted renewals: the in-kind agreement needs individual confirmation."""
+    discounted = {pk for pk, dues in request_dues_payloads(reqs).items() if dues["current_usd"] is not None}
+    return [req for req in reqs if req.pk not in discounted], [req.pk for req in reqs if req.pk in discounted]
+
+
 def _execute_approve_membership_request(
     *,
     membership_request: MembershipRequest,
     actor_username: str,
     send_approved_email: bool,
+    dues_usd: int | None = None,
+    dues_reason: str = "",
 ) -> None:
     approve_membership_request(
         membership_request=membership_request,
         actor_username=actor_username,
         send_approved_email=send_approved_email,
         approved_email_template_name=None,
+        dues_usd=dues_usd,
+        dues_reason=dues_reason,
     )
 
 
@@ -1109,10 +1139,13 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
         )
 
         try:
+            dues_usd, dues_reason = _approval_dues_input(request, request.POST)
             _execute_approve_membership_request(
                 membership_request=req,
                 actor_username=get_username(request),
                 send_approved_email=not custom_email,
+                dues_usd=dues_usd,
+                dues_reason=dues_reason,
             )
         except ValidationError as exc:
             message = exc.messages[0] if exc.messages else str(exc)
@@ -1298,10 +1331,13 @@ def membership_request_approve_api(request: HttpRequest, pk: int) -> JsonRespons
 
     req = req_or_error
     try:
+        dues_usd, dues_reason = _approval_dues_input(request, _membership_request_data(request))
         _execute_approve_membership_request(
             membership_request=req,
             actor_username=get_username(request),
             send_approved_email=True,
+            dues_usd=dues_usd,
+            dues_reason=dues_reason,
         )
     except ValidationError as exc:
         message = exc.messages[0] if exc.messages else str(exc)
@@ -1535,6 +1571,10 @@ def membership_requests_bulk_api(request: HttpRequest) -> JsonResponse:
             return _membership_action_json_error("No matching on-hold requests were found.", status=400)
         return _membership_action_json_error("No matching pending requests were found.", status=400)
 
+    skipped_discounted: list[int] = []
+    if action == "approve":
+        reqs, skipped_discounted = _split_discounted_renewals(reqs)
+
     approved = 0
     rejected = 0
     ignored = 0
@@ -1605,6 +1645,7 @@ def membership_requests_bulk_api(request: HttpRequest) -> JsonResponse:
             "ignored": ignored,
             "failures": failures,
             "already_in_target": len(already_in_target),
+            "skipped_discounted": skipped_discounted,
         }
     )
 

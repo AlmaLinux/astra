@@ -31,8 +31,11 @@ from core.membership import (
     sync_organization_representative_membership_groups,
 )
 from core.membership_notes import add_note
-from core.membership_request_workflow import emit_membership_request_signal_on_commit
-from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
+from core.membership_request_workflow import (
+    create_approved_membership_request,
+    emit_membership_request_signal_on_commit,
+)
+from core.models import Membership, MembershipLog, MembershipType, Organization
 from core.views_utils import _normalize_str
 
 logger = logging.getLogger(__name__)
@@ -704,18 +707,14 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
                 old_group_cn_for_cleanup,
             )
 
-        membership_request = MembershipRequest.objects.create(
-            requested_username="",
-            requested_organization=organization,
+        membership_request = create_approved_membership_request(
+            actor_username=self._actor_username,
             membership_type=membership_type,
-            status=MembershipRequest.Status.approved,
             decided_at=approved_at,
-            decided_by_username=self._actor_username,
+            requested_at=start_at,
+            target_organization=organization,
             responses=responses,
         )
-
-        if start_at is not None and membership_request.requested_at != start_at:
-            MembershipRequest.objects.filter(pk=membership_request.pk).update(requested_at=start_at)
 
         MembershipLog.create_for_request(
             actor_username=self._actor_username,

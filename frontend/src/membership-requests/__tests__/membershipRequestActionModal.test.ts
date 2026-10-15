@@ -99,4 +99,110 @@ describe("MembershipRequestActionModal", () => {
       expect(wrapper.text()).not.toContain("with custom email");
     }
   });
+
+  describe("dues at approval", () => {
+    const approveAction: MembershipRequestActionIntent = {
+      requestId: 7,
+      requestStatus: "pending",
+      actionKind: "approve",
+      actionUrl: "/api/v1/membership/request/7/approve",
+      requestTarget: "Acme Org",
+      membershipType: "Gold Sponsor Member",
+      customEmailUrl: "/membership/requests/7/approve/",
+      dues: { default_usd: 20000, current_usd: 5000 },
+    };
+
+    function mockApproveFetch() {
+      const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ ok: true })));
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    function sentBody(fetchMock: ReturnType<typeof mockApproveFetch>): FormData {
+      return fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    }
+
+    it("keeps a renewal's in-kind discount unless the committee changes it", async () => {
+      const fetchMock = mockApproveFetch();
+      const wrapper = mount(MembershipRequestActionModal, { props: { action: approveAction, csrfToken: "csrf-token" } });
+
+      expect(wrapper.text()).toContain("Pays $5,000 of $20,000 under an in-kind agreement");
+      expect((wrapper.get("#membership-request-action-dues").element as HTMLInputElement).value).toBe("5000");
+
+      await buttonByText(wrapper, "Approve")!.trigger("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(sentBody(fetchMock).has("dues_usd")).toBe(false);
+    });
+
+    it("requires a reason when the committee changes the dues", async () => {
+      const fetchMock = mockApproveFetch();
+      const wrapper = mount(MembershipRequestActionModal, {
+        props: { action: { ...approveAction, dues: { default_usd: 20000, current_usd: null } }, csrfToken: "csrf-token" },
+      });
+
+      expect((wrapper.get("#membership-request-action-dues").element as HTMLInputElement).value).toBe("");
+      await wrapper.get("#membership-request-action-dues").setValue("0");
+      await buttonByText(wrapper, "Approve")!.trigger("click");
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(wrapper.text()).toContain("Give a reason for the dues change.");
+
+      await wrapper.get("#membership-request-action-dues-reason").setValue("Mirror bandwidth in kind");
+      await buttonByText(wrapper, "Approve")!.trigger("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(sentBody(fetchMock).get("dues_usd")).toBe("0");
+      expect(sentBody(fetchMock).get("dues_reason")).toBe("Mirror bandwidth in kind");
+    });
+
+    it("carries changed dues through the custom-email form", async () => {
+      vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
+      const wrapper = mount(MembershipRequestActionModal, { props: { action: approveAction, csrfToken: "csrf-token" } });
+
+      await wrapper.get("#membership-request-action-dues").setValue("20000");
+      await wrapper.get("#membership-request-action-dues-reason").setValue("In-kind agreement ended");
+      await buttonByText(wrapper, "Approve with custom email")!.trigger("click");
+
+      const fields = Object.fromEntries(
+        wrapper.get('form[action="/membership/requests/7/approve/"]').findAll("input")
+          .map((input) => [input.attributes("name"), (input.element as HTMLInputElement).value]),
+      );
+      expect(fields).toMatchObject({ dues_usd: "20000", dues_reason: "In-kind agreement ended" });
+    });
+
+    it("charges the standard price when the committee empties a renewal's discounted dues", async () => {
+      const fetchMock = mockApproveFetch();
+      const wrapper = mount(MembershipRequestActionModal, { props: { action: approveAction, csrfToken: "csrf-token" } });
+
+      await wrapper.get("#membership-request-action-dues").setValue("");
+      await buttonByText(wrapper, "Approve")!.trigger("click");
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      await wrapper.get("#membership-request-action-dues-reason").setValue("In-kind agreement ended");
+      await buttonByText(wrapper, "Approve")!.trigger("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(sentBody(fetchMock).get("dues_usd")).toBe("20000");
+    });
+
+    it("refuses dues above the standard price before contacting the server", async () => {
+      const fetchMock = mockApproveFetch();
+      const wrapper = mount(MembershipRequestActionModal, { props: { action: approveAction, csrfToken: "csrf-token" } });
+
+      await wrapper.get("#membership-request-action-dues").setValue("25000");
+      await wrapper.get("#membership-request-action-dues-reason").setValue("Typo");
+      await buttonByText(wrapper, "Approve")!.trigger("click");
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(wrapper.get('[role="alert"]').text()).toBe("Can't exceed the standard price of $20,000.");
+    });
+
+    it("has no dues field for approvers who cannot set dues", () => {
+      const { dues: _dues, ...withoutDues } = approveAction;
+      const wrapper = mount(MembershipRequestActionModal, { props: { action: withoutDues, csrfToken: "csrf-token" } });
+
+      expect(wrapper.find("#membership-request-action-dues").exists()).toBe(false);
+    });
+  });
 });

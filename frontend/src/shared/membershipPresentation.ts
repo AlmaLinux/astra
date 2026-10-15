@@ -51,13 +51,43 @@ function dateLabelFromParts(parts: Intl.DateTimeFormatPart[]): string {
   return `${month} ${day} ${year}`;
 }
 
+// One label per MembershipLog.Action.
+const MEMBERSHIP_LOG_ACTION_LABELS: Record<string, string> = {
+  requested: "Requested",
+  on_hold: "On Hold",
+  resubmitted: "Resubmitted",
+  approved: "Approved",
+  rejected: "Rejected",
+  ignored: "Ignored",
+  reopened: "Reopened",
+  rescinded: "Rescinded",
+  representative_changed: "Representative changed",
+  expiry_changed: "Expiry changed",
+  dues_changed: "Dues changed",
+  terminated: "Terminated",
+};
+
+export function membershipLogActionLabel(action: string): string {
+  const normalized = String(action || "").trim().toLowerCase();
+  return MEMBERSHIP_LOG_ACTION_LABELS[normalized] || normalized.replace(/_/g, " ");
+}
+
+export function formatUsd(amount: number): string {
+  return `$${amount.toLocaleString("en-US")}`;
+}
+
+// Committee-entered dues ("" for the standard price) may only discount, never surcharge.
+export function duesAmountError(amount: string, defaultUsd: number): string {
+  return amount !== "" && Number(amount) > defaultUsd ? `Can't exceed the standard price of ${formatUsd(defaultUsd)}.` : "";
+}
+
 export function membershipTypeDescription(membershipType: { description: string; annualDuesUsd: number }): string {
   const { description, annualDuesUsd } = membershipType;
   if (!(annualDuesUsd > 0)) {
     return description;
   }
 
-  const dues = `Annual dues: $${annualDuesUsd.toLocaleString("en-US")} USD`;
+  const dues = `Annual dues: ${formatUsd(annualDuesUsd)} USD`;
   return description ? `${description} (${dues})` : dues;
 }
 

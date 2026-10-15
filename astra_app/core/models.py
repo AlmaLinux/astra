@@ -7,7 +7,7 @@ import secrets
 import uuid
 import warnings
 from io import BytesIO
-from typing import override
+from typing import Literal, override
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -753,6 +753,9 @@ class Membership(models.Model):
     target_organization_name = models.CharField(max_length=255, blank=True, default="")
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
     expires_at = models.DateTimeField(blank=True, null=True)
+    # Committee-set dues for an in-kind sponsor, below the tier default; None charges
+    # the default. Only changed through MembershipLog (see core.membership_dues).
+    dues_usd = models.PositiveIntegerField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -854,6 +857,7 @@ class Membership(models.Model):
         new_membership_type: MembershipType,
         expires_at: datetime.datetime | None,
         created_at: datetime.datetime | None = None,
+        dues_usd: int | None = None,
     ) -> tuple[Membership, Membership | None]:
         """Atomically replace an org's membership within the same category (DD-02).
 
@@ -879,6 +883,7 @@ class Membership(models.Model):
                     target_organization_name=old.target_organization_name,
                     membership_type_id=old.membership_type_id,
                     expires_at=old.expires_at,
+                    dues_usd=old.dues_usd,
                 )
                 # Manually copy created_at since auto_now_add would overwrite on
                 # a new unsaved instance.
@@ -891,6 +896,7 @@ class Membership(models.Model):
                 target_organization=organization,
                 membership_type=new_membership_type,
                 expires_at=expires_at,
+                dues_usd=dues_usd,
             )
             new.save()
 
@@ -926,6 +932,7 @@ class MembershipLog(models.Model):
         rescinded = "rescinded", "Rescinded"
         representative_changed = "representative_changed", "Representative changed"
         expiry_changed = "expiry_changed", "Expiry changed"
+        dues_changed = "dues_changed", "Dues changed"
         terminated = "terminated", "Terminated"
 
     actor_username = models.CharField(max_length=255)
@@ -952,6 +959,9 @@ class MembershipLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     rejection_reason = models.TextField(blank=True, default="")
     expires_at = models.DateTimeField(blank=True, null=True)
+    # The term's committee-set dues after this action (None: tier default). Kept on
+    # every approval/expiry/dues log so replaying the log never loses a waiver.
+    dues_usd = models.PositiveIntegerField(blank=True, null=True)
     import_batch_id = models.UUIDField(blank=True, null=True, db_index=True)
 
     objects = MembershipLogQuerySet.as_manager()
@@ -1062,6 +1072,7 @@ class MembershipLog(models.Model):
         expires_at: datetime.datetime | None = None,
         rejection_reason: str = "",
         import_batch_id: uuid.UUID | None = None,
+        dues_usd: int | None = None,
     ) -> MembershipLog:
         """Internal factory: all public create_for_* methods delegate here."""
         kwargs: dict[str, object] = {
@@ -1071,6 +1082,7 @@ class MembershipLog(models.Model):
             "membership_request": membership_request,
             "requested_group_cn": membership_type.group_cn,
             "action": action,
+            "dues_usd": dues_usd,
         }
         if target_organization is not None:
             kwargs["target_organization"] = target_organization
@@ -1121,7 +1133,9 @@ class MembershipLog(models.Model):
         previous_expires_at: datetime.datetime | None = None,
         membership_request: MembershipRequest | None = None,
         import_batch_id: uuid.UUID | None = None,
+        dues_usd: int | None | Literal["carry"] = "carry",
     ) -> MembershipLog:
+        """Record an approval; *dues_usd* "carry" keeps a same-tier waiver (renewals, imports)."""
         log = cls._create_log(
             actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
@@ -1131,6 +1145,7 @@ class MembershipLog(models.Model):
                 approved_at=approved_at, previous_expires_at=previous_expires_at,
             ),
             import_batch_id=import_batch_id,
+            dues_usd=cls._current_dues_usd(membership_type, target_organization) if dues_usd == "carry" else dues_usd,
         )
         apply_membership_log_side_effects(log=log)
         return log
@@ -1171,9 +1186,44 @@ class MembershipLog(models.Model):
             membership_type=membership_type, membership_request=membership_request,
             action=cls.Action.expiry_changed, expires_at=expires_at,
             import_batch_id=import_batch_id,
+            dues_usd=cls._current_dues_usd(membership_type, target_organization),
         )
         apply_membership_log_side_effects(log=log)
         return log
+
+    @classmethod
+    def create_for_dues_change(
+        cls,
+        *,
+        actor_username: str,
+        membership_type: MembershipType,
+        target_organization: Organization,
+        membership_request: MembershipRequest,
+        expires_at: datetime.datetime | None,
+        dues_usd: int | None,
+    ) -> MembershipLog:
+        log = cls._create_log(
+            actor_username=actor_username,
+            target_organization=target_organization,
+            membership_type=membership_type,
+            membership_request=membership_request,
+            action=cls.Action.dues_changed,
+            expires_at=expires_at,
+            dues_usd=dues_usd,
+        )
+        apply_membership_log_side_effects(log=log)
+        return log
+
+    @staticmethod
+    def _current_dues_usd(membership_type: MembershipType, target_organization: Organization | None) -> int | None:
+        """The waiver on the target's current membership of this tier; individuals pay no dues."""
+        if target_organization is None:
+            return None
+        return (
+            Membership.objects.filter(target_organization=target_organization, membership_type=membership_type)
+            .values_list("dues_usd", flat=True)
+            .first()
+        )
 
     @classmethod
     def create_for_termination(

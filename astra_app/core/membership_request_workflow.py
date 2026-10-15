@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -28,6 +28,7 @@ from core.membership import (
     sync_organization_representative_membership_groups,
 )
 from core.membership_constants import MembershipCategoryCode
+from core.membership_dues import dues_waiver_review_message, record_dues_change, resolve_approval_dues
 from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.membership_notes import CUSTOS, add_note
 from core.membership_notifications import organization_sponsor_notification_recipient_email
@@ -205,10 +206,11 @@ def _try_add_note(
     username: str,
     action: dict[str, Any],
     log_prefix: str,
+    content: str | None = None,
 ) -> None:
     """Persist an action note, logging and swallowing failures."""
     try:
-        add_note(membership_request=membership_request, username=username, action=action)
+        add_note(membership_request=membership_request, username=username, content=content, action=action)
     except Exception:
         logger.exception(
             "%s: failed to record note request_id=%s",
@@ -481,6 +483,7 @@ def _execute_membership_grant(
     approved_at: datetime.datetime,
     previous_expires_at: datetime.datetime | None,
     log_prefix: str,
+    dues_usd: int | None | Literal["carry"] = "carry",
     target_username: str = "",
     target_organization: Organization | None = None,
     membership_request: MembershipRequest | None = None,
@@ -551,6 +554,7 @@ def _execute_membership_grant(
             membership_type=membership_type,
             approved_at=approved_at,
             previous_expires_at=previous_expires_at,
+            dues_usd=dues_usd,
             target_organization=target_organization,
             membership_request=membership_request,
         )
@@ -590,6 +594,7 @@ def _execute_membership_grant(
             membership_type=membership_type,
             approved_at=approved_at,
             previous_expires_at=previous_expires_at,
+            dues_usd=dues_usd,
             target_username=normalized_target_username,
             membership_request=membership_request,
         )
@@ -683,6 +688,36 @@ def _execute_membership_grant(
     return log
 
 
+def create_approved_membership_request(
+    *,
+    actor_username: str,
+    membership_type: MembershipType,
+    decided_at: datetime.datetime,
+    requested_at: datetime.datetime | None = None,
+    target_username: str = "",
+    target_organization: Organization | None = None,
+    responses: list[dict[str, str]] | None = None,
+) -> MembershipRequest:
+    """Record a membership granted outside the request workflow (admin grants, imports).
+
+    Every membership then has a request, which its committee notes and history belong to.
+    """
+    membership_request = MembershipRequest.objects.create(
+        requested_username=target_username,
+        requested_organization=target_organization,
+        membership_type=membership_type,
+        status=MembershipRequest.Status.approved,
+        decided_at=decided_at,
+        decided_by_username=actor_username,
+        responses=responses or [],
+    )
+    if requested_at is not None:
+        # requested_at is auto_now_add, so it can only be backdated after creation.
+        MembershipRequest.objects.filter(pk=membership_request.pk).update(requested_at=requested_at)
+        membership_request.requested_at = requested_at
+    return membership_request
+
+
 @transaction.atomic
 def grant_direct_membership(
     *,
@@ -694,6 +729,14 @@ def grant_direct_membership(
     target_organization: Organization | None = None,
     on_group_add_success: Callable[[], None] | None = None,
 ) -> Membership:
+    membership_request = create_approved_membership_request(
+        actor_username=actor_username,
+        membership_type=membership_type,
+        decided_at=starts_at,
+        requested_at=starts_at,
+        target_username=str(target_username or "").strip(),
+        target_organization=target_organization,
+    )
     approval_log = _execute_membership_grant(
         actor_username=actor_username,
         membership_type=membership_type,
@@ -702,6 +745,7 @@ def grant_direct_membership(
         log_prefix="grant_direct_membership",
         target_username=target_username,
         target_organization=target_organization,
+        membership_request=membership_request,
         on_group_add_success=on_group_add_success,
     )
 
@@ -779,6 +823,16 @@ def record_membership_request_created(
         action={"type": "request_created"},
         log_prefix=log_prefix,
     )
+    # Put any current or previous dues waiver in front of the committee reviewing this.
+    waiver_message = dues_waiver_review_message(membership_request)
+    if waiver_message is not None:
+        _try_add_note(
+            membership_request=membership_request,
+            username=CUSTOS,
+            content=waiver_message,
+            action={"type": "dues_waiver_review"},
+            log_prefix=log_prefix,
+        )
 
     if membership_request.target_kind == MembershipRequest.TargetKind.user:
         email_error: Exception | None = None
@@ -1002,11 +1056,15 @@ def approve_membership_request(
     approved_email_template_name: str | None = None,
     decided_at: datetime.datetime | None = None,
     on_group_add_success: Callable[[], None] | None = None,
+    dues_usd: int | None = None,
+    dues_reason: str = "",
 ) -> MembershipLog:
     """Approve a membership request using the same code path as the UI.
 
     This function applies FreeIPA side-effects and records the approval log.
     It updates the request status fields and optionally emails the requester.
+    *dues_usd* is the committee's decision on a sponsor's dues for the new term
+    (None: keep a same-tier waiver); changing them requires *dues_reason*.
     """
 
     membership_request = (
@@ -1036,6 +1094,12 @@ def approve_membership_request(
         membership_request=membership_request,
         membership_type=membership_type,
     )
+    # Validated before anything changes, so a missing reason rejects the approval.
+    log_dues_usd, dues_change = resolve_approval_dues(
+        membership_request=membership_request,
+        dues_usd=dues_usd,
+        reason=dues_reason,
+    )
 
     membership_request.status = MembershipRequest.Status.approved
     membership_request.on_hold_at = None
@@ -1053,7 +1117,18 @@ def approve_membership_request(
         target_organization=membership_request.requested_organization,
         membership_request=membership_request,
         on_group_add_success=on_group_add_success,
+        dues_usd=log_dues_usd,
     )
+    if dues_change is not None:
+        record_dues_change(
+            organization=membership_request.requested_organization,
+            membership_type=membership_type,
+            old_dues_usd=dues_change.old_dues_usd,
+            new_dues_usd=dues_change.new_dues_usd,
+            reason=dues_change.reason,
+            actor_username=actor_username,
+            membership_request=membership_request,
+        )
 
     sent_email = None
     if send_approved_email:

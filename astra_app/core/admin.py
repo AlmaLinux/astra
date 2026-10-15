@@ -2151,7 +2151,9 @@ class MembershipAdminForm(forms.ModelForm):
 @admin.register(Membership)
 class MembershipAdmin(admin.ModelAdmin):
     form = MembershipAdminForm
-    fields = ("target_kind", "target_username", "target_organization", "membership_type", "starts_on", "expires_on")
+    fields = ("target_kind", "target_username", "target_organization", "membership_type", "starts_on", "expires_on", "dues_usd")
+    # Dues changes need a reason and an audit note, so they go through the organization page.
+    readonly_fields = ("dues_usd",)
     list_display = ("membership_target", "membership_type", "start_on_display", "expires_at")
     list_filter = ("membership_type__category", "membership_type")
     ordering = ("target_username", "target_organization__name", "membership_type__code")

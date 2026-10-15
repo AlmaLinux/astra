@@ -19,6 +19,7 @@ from core.forms_membership import (
 )
 from core.freeipa.user import FreeIPAUser
 from core.membership_constants import MembershipCategoryCode
+from core.membership_dues import request_dues_payloads
 from core.membership_request_workflow import (
     record_membership_request_created,
     rescind_membership_request,
@@ -26,7 +27,7 @@ from core.membership_request_workflow import (
 )
 from core.membership_response_normalization import normalize_membership_request_responses
 from core.models import Membership, MembershipRequest, MembershipType, Organization
-from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
+from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 from core.templatetags.core_membership_responses import serialize_membership_response
 from core.views_utils import (
     _normalize_str,
@@ -722,9 +723,11 @@ def _committee_detail_payload(
             "show": membership_request.status == MembershipRequest.Status.ignored and request.user.has_perm(ASTRA_ADD_MEMBERSHIP),
         },
         "compliance_warning": compliance_warning,
+        "dues": request_dues_payloads([membership_request]).get(membership_request.pk),
         "actions": {
             "canRequestInfo": bool(context.get("membership_request_can_request_info", False)),
             "showOnHoldApprove": bool(context.get("show_on_hold_approve", False)),
+            "canSetDues": request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP),
         },
         "requested_by": {
             "show": bool(requested_by_username),

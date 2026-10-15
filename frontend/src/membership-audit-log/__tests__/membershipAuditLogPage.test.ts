@@ -102,6 +102,31 @@ describe("MembershipAuditLogPage", () => {
     expect(wrapper.find('a[href="/membership/request/7/"]').exists()).toBe(true);
   });
 
+  it("labels dues changes and links them to the request of the term they change", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      draw: 1,
+      recordsTotal: 1,
+      recordsFiltered: 1,
+      data: [{
+        log_id: 11,
+        created_at: "2026-10-15T19:08:00+00:00",
+        actor_username: "committee",
+        target: { kind: "organization", id: 3, label: "CERN", secondary_label: "", deleted: false },
+        membership_name: "Platinum Sponsor",
+        action: "dues_changed",
+        expires_at: "2027-01-12T23:59:59+00:00",
+        request: { request_id: 194, responses: [] },
+      }],
+    }))));
+
+    const wrapper = mount(MembershipAuditLogPage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Dues changed");
+    expect(wrapper.find('a[href="/membership/request/194/"]').exists()).toBe(true);
+  });
+
   it("renders canonical request-response link segments as anchors", async () => {
     vi.stubGlobal(
       "fetch",

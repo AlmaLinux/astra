@@ -42,6 +42,7 @@ from core.membership import (
     resolve_request_ids_by_membership_type,
     suggest_tier_change_membership_type_code,
 )
+from core.membership_dues import effective_dues_usd
 from core.membership_notes import add_note
 from core.membership_payloads import serialize_membership_entry, serialize_pending_membership_entry
 from core.membership_request_workflow import ignore_open_membership_requests_for_target
@@ -941,10 +942,12 @@ def _serialize_organization_detail_page_membership_entry(
     can_manage: bool,
 ) -> dict[str, object]:
     sponsorship = entry["sponsorship"]
+    dues_usd: int | None = None
     if isinstance(sponsorship, Membership):
         membership_type = sponsorship.membership_type
         created_at = sponsorship.created_at
         expires_at = sponsorship.expires_at
+        dues_usd = effective_dues_usd(sponsorship)
     else:
         sponsorship_data = cast(dict[str, object], sponsorship)
         membership_type = cast(MembershipType | dict[str, object], sponsorship_data["membership_type"])
@@ -965,6 +968,7 @@ def _serialize_organization_detail_page_membership_entry(
         can_view=can_view,
         can_manage=can_manage,
         invoice=entry["invoice"],
+        dues_usd=dues_usd,
     )
 
 
@@ -1233,6 +1237,10 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             ).replace(membership_type_code_sentinel, "__membership_type_code__"),
             "sponsorship_invoice_regenerate_url_template": reverse(
                 "organization-sponsorship-invoice-regenerate",
+                args=[organization.pk, membership_type_code_sentinel],
+            ).replace(membership_type_code_sentinel, "__membership_type_code__"),
+            "sponsorship_set_dues_url_template": reverse(
+                "organization-sponsorship-set-dues",
                 args=[organization.pk, membership_type_code_sentinel],
             ).replace(membership_type_code_sentinel, "__membership_type_code__"),
             "csrf_token": get_token(request),

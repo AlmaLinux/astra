@@ -220,14 +220,19 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
         self.assertIn("Account Number 000111222", html)
 
     def test_paired_labels_are_laid_out_on_the_same_line(self) -> None:
-        # A long membership name wraps, which is what pushed a bottom-aligned "Amount" down.
+        # A long membership name wraps, which is what pushed a bottom-aligned amount down.
         self.gold.name = "Gold Sponsor Membership with a deliberately long tier name"
         self.gold.save(update_fields=["name"])
         membership = self._membership(expires_at=datetime.datetime(2026, 11, 18, 23, 59, 59, tzinfo=datetime.UTC))
         line_tops = _invoice_line_tops(membership, InvoiceTerm.renewal)[0]
 
         self.assertEqual(line_tops["Bill to:"], line_tops["Invoice #"])
-        self.assertEqual(line_tops["Membership type"], line_tops["Amount"])
+        self.assertEqual(line_tops["Membership type"], line_tops["Amount due"])
+
+        # With an in-kind discount the amounts start with the list price instead.
+        membership.dues_usd = 5000
+        line_tops = _invoice_line_tops(membership, InvoiceTerm.renewal)[0]
+        self.assertEqual(line_tops["Membership type"], line_tops["List price"])
 
     def test_long_billing_notes_never_hide_the_amount_behind_the_footer(self) -> None:
         self.organization.billing_notes = ("PO 70001165892. Reference it on all correspondence. " * 30)[:500]

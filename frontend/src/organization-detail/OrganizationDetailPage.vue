@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
+import DuesAmountInput from "../shared/components/DuesAmountInput.vue";
 import MembershipCard from "../shared/components/MembershipCard.vue";
-import { formatDateInputValue, formatFullDate, membershipTierClass, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
+import { duesAmountError, formatDateInputValue, formatFullDate, formatUsd, membershipTierClass, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   OrganizationDetailBootstrap,
@@ -20,6 +21,9 @@ const error = ref("");
 const isLoading = ref(false);
 const activeContactKey = ref("representative");
 const terminationConfirmByLabel = ref<Record<string, string>>({});
+// Controlled inputs: typing the reason re-renders the form, which would reset uncontrolled ones.
+// An empty amount charges the standard price.
+const duesDraftByCode = ref<Record<string, { amount: string; reason: string }>>({});
 
 const CONTACT_LABELS: Record<string, string> = {
   business: "Business",
@@ -126,6 +130,42 @@ function terminateActionUrl(membership: OrganizationDetailResponse["organization
   return fillUrlTemplate(props.bootstrap.sponsorshipTerminateUrlTemplate, "__membership_type_code__", membershipTypeCode(membership));
 }
 
+function setDuesActionUrl(membership: OrganizationDetailMembership): string {
+  return fillUrlTemplate(props.bootstrap.sponsorshipSetDuesUrlTemplate, "__membership_type_code__", membershipTypeCode(membership));
+}
+
+function hasDues(membership: OrganizationDetailMembership): boolean {
+  return membership.membershipType.annualDuesUsd > 0;
+}
+
+// Why the dues form can't be saved yet, or "" when it can.
+function duesSaveBlocker(membership: OrganizationDetailMembership): string {
+  const draft = duesDraftByCode.value[membershipTypeCode(membership)];
+  if (!draft) {
+    return "";
+  }
+  if (duesAmountError(draft.amount, membership.membershipType.annualDuesUsd)) {
+    return "The annual dues can't exceed the standard price.";
+  }
+  if (!draft.reason.trim()) {
+    return "Enter a reason for the dues change first.";
+  }
+  return "";
+}
+
+// Only discounted sponsors get a line: the tier description already states the default dues.
+function duesDiscountLabel(membership: OrganizationDetailMembership): string {
+  const defaultDues = membership.membershipType.annualDuesUsd;
+  const dues = membership.duesUsd;
+  if (!hasDues(membership) || dues === null || dues >= defaultDues) {
+    return "";
+  }
+  if (dues === 0) {
+    return "In-kind sponsor: dues waived";
+  }
+  return `Annual dues: ${formatUsd(dues)} (discounted from ${formatUsd(defaultDues)})`;
+}
+
 function invoiceModalId(membership: OrganizationDetailMembership): string {
   return `sponsorship-invoice-modal-${membershipTypeCode(membership)}`;
 }
@@ -206,6 +246,15 @@ async function load(): Promise<void> {
       return;
     }
     payload.value = (await response.json()) as OrganizationDetailResponse;
+    duesDraftByCode.value = Object.fromEntries(
+      payload.value.organization.memberships.map((membership) => [
+        membershipTypeCode(membership),
+        {
+          amount: membership.duesUsd === null || membership.duesUsd === membership.membershipType.annualDuesUsd ? "" : String(membership.duesUsd),
+          reason: "",
+        },
+      ]),
+    );
   } catch {
     error.value = "Unable to load organization details right now.";
   } finally {
@@ -375,6 +424,9 @@ onMounted(async () => {
                   <i v-if="membership.isExpiringSoon" class="fas fa-exclamation-triangle mr-1" />
                   Expires {{ expiresLabel(membership) }}
                 </div>
+                <div v-if="duesDiscountLabel(membership)" class="small" :data-membership-dues="membershipTypeCode(membership)">
+                  <i class="fas fa-hand-holding-dollar mr-1" />{{ duesDiscountLabel(membership) }}
+                </div>
                 <div v-if="membership.invoice?.url" class="small">
                   <a
                     :href="membership.invoice.url"
@@ -506,6 +558,43 @@ onMounted(async () => {
                         <div class="d-flex justify-content-between">
                           <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without saving">Cancel</button>
                           <button type="submit" class="btn btn-primary" title="Save expiration date">Save expiration</button>
+                        </div>
+                      </form>
+
+                      <form v-if="hasDues(membership)" method="post" :action="setDuesActionUrl(membership)" class="mt-4 pt-3 border-top" novalidate>
+                        <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
+                        <input v-if="bootstrap.nextUrl" type="hidden" name="next" :value="bootstrap.nextUrl">
+
+                        <DuesAmountInput
+                          :id="`${managementModalId(membership)}-dues`"
+                          v-model="duesDraftByCode[membershipTypeCode(membership)].amount"
+                          name="dues_usd"
+                          :default-usd="membership.membershipType.annualDuesUsd"
+                        />
+
+                        <div class="form-group">
+                          <label :for="`${managementModalId(membership)}-dues-reason`">Reason</label>
+                          <textarea
+                            :id="`${managementModalId(membership)}-dues-reason`"
+                            v-model="duesDraftByCode[membershipTypeCode(membership)].reason"
+                            name="dues_reason"
+                            class="form-control"
+                            rows="2"
+                            placeholder="E.g. the in-kind agreement this reflects"
+                            required
+                          />
+                        </div>
+
+                        <div class="d-flex justify-content-end">
+                          <!-- The tooltip sits on a wrapper because disabled buttons get no hover events. -->
+                          <span class="d-inline-block" :title="duesSaveBlocker(membership) || 'Save annual dues'">
+                            <button
+                              type="submit"
+                              class="btn btn-primary"
+                              :disabled="Boolean(duesSaveBlocker(membership))"
+                              :style="duesSaveBlocker(membership) ? 'pointer-events: none;' : undefined"
+                            >Save dues</button>
+                          </span>
                         </div>
                       </form>
 

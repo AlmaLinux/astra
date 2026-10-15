@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from "vue";
 import { formatMembershipTimestamp } from "../shared/membershipPresentation";
 import MembershipNotesCard from "../membership-requests/components/MembershipNotesCard.vue";
 import MembershipRequestDetailActions from "../membership-requests/components/MembershipRequestDetailActions.vue";
+import { inKindDuesSummary, isInKindRenewal } from "../membership-requests/types";
 import type {
   MembershipRequestCompatibilityResponse,
   MembershipRequestDetailBootstrap,
@@ -285,7 +286,15 @@ onMounted(async () => {
             </template>
 
             <dt class="col-sm-3">Type</dt>
-            <dd class="col-sm-9">{{ payload.request.membership_type.name }}</dd>
+            <dd class="col-sm-9">
+              {{ payload.request.membership_type.name }}
+              <span
+                v-if="isInKindRenewal(payload.committee?.dues)"
+                class="badge badge-info ml-1"
+                data-membership-request-dues
+                :title="inKindDuesSummary(payload.committee.dues)"
+              >In-kind</span>
+            </dd>
           </dl>
 
           <template v-if="payload.request.responses.length">
@@ -444,6 +453,7 @@ onMounted(async () => {
               :rfi-custom-email-url="bootstrap.rfiCustomEmailUrl"
               :can-request-info="payload.committee.actions.canRequestInfo"
               :show-on-hold-approve="payload.committee.actions.showOnHoldApprove"
+              :dues="payload.committee.actions.canSetDues ? payload.committee.dues : null"
               :csrf-token="bootstrap.csrfToken"
               @action-success="onCommitteeActionSuccess"
             />

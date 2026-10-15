@@ -1,3 +1,5 @@
+import type { MembershipRequestDues } from "../membership-requests/types";
+
 export interface MembershipRequestDetailBootstrap {
   apiUrl: string;
   initialPayload?: MembershipRequestDetailPayload | null;
@@ -101,9 +103,11 @@ export interface MembershipRequestDetailPayload {
       country_label: string;
       message: string;
     } | null;
+    dues: MembershipRequestDues | null;
     actions: {
       canRequestInfo: boolean;
       showOnHoldApprove: boolean;
+      canSetDues: boolean;
     };
   };
   self_service?: {

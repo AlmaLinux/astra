@@ -1,4 +1,4 @@
-import { formatMembershipTimestamp } from "../shared/membershipPresentation";
+import { formatMembershipTimestamp, formatUsd } from "../shared/membershipPresentation";
 
 export interface MembershipRequestsBootstrap {
   clearFilterUrl: string;
@@ -26,6 +26,7 @@ export interface MembershipRequestsBootstrap {
   nextUrl?: string;
   csrfToken?: string;
   canRequestInfo: boolean;
+  canSetDues: boolean;
   notesCanView: boolean;
   notesCanWrite: boolean;
   notesCanVote: boolean;
@@ -68,7 +69,23 @@ export interface MembershipRequestRow {
   requested_by: MembershipRequestActor;
   membership_type: MembershipTypeSummary;
   is_renewal: boolean;
+  dues: MembershipRequestDues | null;
   responses: MembershipRequestResponseItem[];
+}
+
+// Present for organization requests on tiers with dues. current_usd is the in-kind
+// waiver a same-tier renewal keeps (null when the sponsor pays the default).
+export interface MembershipRequestDues {
+  default_usd: number;
+  current_usd: number | null;
+}
+
+export function isInKindRenewal(dues: MembershipRequestDues | null | undefined): dues is MembershipRequestDues {
+  return dues?.current_usd != null;
+}
+
+export function inKindDuesSummary(dues: MembershipRequestDues): string {
+  return `Pays ${formatUsd(dues.current_usd ?? dues.default_usd)} of ${formatUsd(dues.default_usd)}`;
 }
 
 export type MembershipActionKind = "approve" | "approve_on_hold" | "reject" | "rfi" | "ignore";
@@ -84,6 +101,8 @@ export interface MembershipRequestActionIntent {
   requestCount?: number;
   // Form route that performs the action without emailing and opens Send Mail instead.
   customEmailUrl?: string;
+  // Only for approvers who may set dues.
+  dues?: MembershipRequestDues;
 }
 
 export interface PendingFilterOption {
@@ -321,6 +340,7 @@ export function readMembershipRequestsBootstrap(root: HTMLElement): MembershipRe
     membershipRequestsNextUrl,
     membershipRequestsCsrfToken,
     membershipRequestsCanRequestInfo,
+    membershipRequestsCanSetDues,
     membershipRequestsNotesCanView,
     membershipRequestsNotesCanWrite,
     membershipRequestsNotesCanVote,
@@ -372,6 +392,7 @@ export function readMembershipRequestsBootstrap(root: HTMLElement): MembershipRe
     nextUrl: membershipRequestsNextUrl,
     csrfToken: membershipRequestsCsrfToken,
     canRequestInfo: readBoolean(membershipRequestsCanRequestInfo),
+    canSetDues: readBoolean(membershipRequestsCanSetDues),
     notesCanView: readBoolean(membershipRequestsNotesCanView),
     notesCanWrite: readBoolean(membershipRequestsNotesCanWrite),
     notesCanVote: readBoolean(membershipRequestsNotesCanVote),

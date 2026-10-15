@@ -4,6 +4,7 @@ import logging
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required, user_passes_test
+from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
@@ -21,6 +22,7 @@ from core.membership import (
     remove_user_from_group,
 )
 from core.membership_constants import MembershipCategoryCode
+from core.membership_dues import change_membership_dues, parse_dues_usd
 from core.models import Membership, MembershipLog, MembershipType, Organization
 from core.permissions import (
     ASTRA_CHANGE_MEMBERSHIP,
@@ -487,6 +489,36 @@ def membership_set_expiry(
     )
 
     messages.success(request, "Membership expiration updated.")
+    return redirect(redirect_to)
+
+
+@permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
+@post_only_404
+def organization_sponsorship_set_dues(request: HttpRequest, organization_id: int, membership_type_code: str) -> HttpResponse:
+    result = _load_organization_membership(request, organization_id, membership_type_code)
+    if isinstance(result, HttpResponse):
+        return result
+    organization, membership_type, active_membership = result
+    redirect_to = _resolve_post_redirect(
+        request,
+        default=reverse("organization-detail", kwargs={"organization_id": organization.pk}),
+        use_referer=True,
+    )
+
+    try:
+        # An empty amount charges the standard price.
+        dues_usd = parse_dues_usd(request.POST.get("dues_usd"))
+        change_membership_dues(
+            membership=active_membership,
+            dues_usd=membership_type.annual_dues_usd if dues_usd is None else dues_usd,
+            reason=str(request.POST.get("dues_reason") or ""),
+            actor_username=get_username(request),
+        )
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0])
+        return redirect(redirect_to)
+
+    messages.success(request, "Sponsorship dues updated.")
     return redirect(redirect_to)
 
 

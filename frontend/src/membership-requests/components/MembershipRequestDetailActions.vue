@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
-import type { MembershipRequestActionIntent } from "../types";
+import type { MembershipRequestActionIntent, MembershipRequestDues } from "../types";
 import MembershipRequestActionModal from "./MembershipRequestActionModal.vue";
 
 interface MembershipActionSuccessEventDetail {
@@ -27,6 +27,8 @@ const props = defineProps<{
   canRequestInfo: boolean;
   showOnHoldApprove: boolean;
   csrfToken: string;
+  // Only for approvers who may set dues.
+  dues?: MembershipRequestDues | null;
 }>();
 
 const emit = defineEmits<{
@@ -48,6 +50,7 @@ function openAction(
     requestTarget: props.requestTarget,
     membershipType: props.membershipTypeName,
     ...(customEmailUrl ? { customEmailUrl } : {}),
+    ...(actionKind === "approve" && props.dues ? { dues: props.dues } : {}),
   };
 }
 

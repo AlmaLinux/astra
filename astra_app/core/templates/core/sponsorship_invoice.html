@@ -94,8 +94,14 @@
           <div>from {{ term_start_date|date:"F jS Y" }} to {{ term_end_date|date:"F jS Y" }}</div>
         </td>
         <td class="right">
-          <div class="label">Amount</div>
-          <div>{{ amount_usd }}</div>
+          {% if discount_usd %}
+            <div class="label">List price</div>
+            <div>{{ list_price_usd }}</div>
+            <div class="label">In-kind discount ({{ discount_percent }}%)</div>
+            <div>{{ discount_usd }}</div>
+          {% endif %}
+          <div class="label">Amount due</div>
+          <div>{{ amount_due_usd }}</div>
         </td>
       </tr>
     </table>

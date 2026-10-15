@@ -75,6 +75,7 @@ class MembershipRequestRfiButtonTests(TestCase):
             {
                 "canRequestInfo": True,
                 "showOnHoldApprove": False,
+                "canSetDues": True,
             },
         )
 
@@ -194,6 +195,7 @@ class MembershipRequestRfiButtonTests(TestCase):
             {
                 "canRequestInfo": True,
                 "showOnHoldApprove": False,
+                "canSetDues": True,
             },
         )
 

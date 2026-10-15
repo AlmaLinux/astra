@@ -51,6 +51,7 @@ class OrganizationsResetCommandTests(TestCase):
                 "claim_rejection_actor",
                 "no_org_actor",
                 "renewal_representative",
+                "inkind_representative",
             },
         )
         self.assertEqual(
@@ -82,7 +83,7 @@ class OrganizationsResetCommandTests(TestCase):
         )
         self.assertEqual(
             {actor["username"] for actor in first_payload["actors"].values()},
-            {"regular11", "regular12", "regular13", "regular14", "regular26"},
+            {"regular11", "regular12", "regular13", "regular14", "regular26", "regular27"},
         )
         self.assertEqual(
             set(first_payload["claim_routes"].keys()),
@@ -292,6 +293,29 @@ class OrganizationsResetCommandTests(TestCase):
         self.assertEqual(membership["membershipType"]["code"], "gold")
         self.assertTrue(membership["isExpiringSoon"])
         self.assertTrue(membership["canRenew"])
+
+    @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
+    def test_command_seeds_a_discounted_renewal_for_the_committee_actor_to_review(self) -> None:
+        stdout = io.StringIO()
+
+        call_command("organizations_reset", stdout=stdout)
+        payload = json.loads(stdout.getvalue())
+
+        request_payload = payload["requests"]["inkind_renewal_request"]
+        organization_payload = payload["organizations"]["inkind_renewal_org"]
+        self.assertEqual(request_payload["organization_id"], organization_payload["organization_id"])
+        self.assertEqual(
+            Membership.objects.get(target_organization_id=organization_payload["organization_id"]).dues_usd,
+            5000,
+        )
+
+        self._login_as_freeipa_user(payload["actors"]["representative_observer"]["username"])
+        detail = self.client.get(reverse("api-membership-request-detail", args=[request_payload["request_id"]]))
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["request"]["status"], "pending")
+        self.assertEqual(detail.json()["committee"]["dues"], {"default_usd": 20000, "current_usd": 5000})
+        self.assertTrue(detail.json()["committee"]["actions"]["canSetDues"])
 
     @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
     def test_command_keeps_shell_and_search_aliases_visible_on_first_card_pages(self) -> None:

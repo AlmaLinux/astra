@@ -483,6 +483,46 @@ describe("MembershipRequestDetailPage", () => {
     expect(committeeCard.find('[data-test="actions-card"]').exists()).toBe(true);
   });
 
+  it("flags in-kind renewals and lets approvers who may set dues review them", async () => {
+    for (const canSetDues of [true, false]) {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+        viewer: { mode: "committee" },
+        request: {
+          id: 42,
+          status: "pending",
+          requested_at: "2026-04-26T10:00:00+00:00",
+          requested_by: { show: false, username: "", full_name: "", deleted: false },
+          requested_for: { show: true, kind: "organization", label: "Acme Org", username: "", organization_id: 3, deleted: false },
+          membership_type: { name: "Gold Sponsor Member" },
+          responses: [],
+        },
+        committee: {
+          reopen: { show: false },
+          compliance_warning: null,
+          dues: { default_usd: 20000, current_usd: 0 },
+          actions: { canRequestInfo: true, showOnHoldApprove: false, canSetDues },
+        },
+      }))));
+
+      const wrapper = mount(MembershipRequestDetailPage, {
+        props: { bootstrap },
+        global: {
+          stubs: {
+            MembershipNotesCard: { template: "<div />" },
+            MembershipRequestDetailActions: { props: ["dues"], template: '<div data-test="actions-card">{{ JSON.stringify(dues) }}</div>' },
+          },
+        },
+      });
+      await flushPromises();
+      await flushPromises();
+
+      const badge = wrapper.get('[data-test="request-card"] [data-membership-request-dues]');
+      expect(badge.text()).toBe("In-kind");
+      expect(badge.attributes("title")).toBe("Pays $0 of $20,000");
+      expect(wrapper.get('[data-test="actions-card"]').text()).toBe(JSON.stringify(canSetDues ? { default_usd: 20000, current_usd: 0 } : null));
+    }
+  });
+
   it("renders self-service organization copy parity for on-hold requests", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(

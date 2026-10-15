@@ -20,6 +20,7 @@ const bootstrap: OrganizationDetailBootstrap = {
   sponsorshipSetExpiryUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/expiry/",
   sponsorshipTerminateUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/terminate/",
   sponsorshipInvoiceRegenerateUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/invoice/regenerate/",
+  sponsorshipSetDuesUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/dues/",
   csrfToken: "csrf-token",
   nextUrl: "/organization/1/",
   expiryMinDate: "2026-04-01",
@@ -648,8 +649,116 @@ describe("OrganizationDetailPage", () => {
       tierChangeMembershipTypeCode: "",
       canManage: false,
       invoice,
+      duesUsd: 20000,
     };
   }
+
+  it("shows a sponsor's in-kind discount next to the membership", async () => {
+    for (const [duesUsd, expected] of [
+      [5000, "Annual dues: $5,000 (discounted from $20,000)"],
+      [0, "In-kind sponsor: dues waived"],
+    ] as const) {
+      const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), duesUsd }] });
+      await flushPromises();
+      await flushPromises();
+      expect(wrapper.find('[data-membership-dues="gold"]').text()).toBe(expected);
+    }
+
+    const undiscounted = mountWithOrganization({ memberships: [goldMembership(null)] });
+    await flushPromises();
+    await flushPromises();
+    expect(undiscounted.find('[data-membership-dues="gold"]').exists()).toBe(false);
+  });
+
+  it("lets the committee change a sponsor's dues with a reason in the manage dialog", async () => {
+    const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: true, duesUsd: 5000 }] });
+
+    await flushPromises();
+    await flushPromises();
+
+    const form = wrapper.find('#sponsorship-expiry-modal-gold form[action="/organization/1/sponsorship/gold/dues/"]');
+    expect(form.exists()).toBe(true);
+    expect(form.find('input[name="csrfmiddlewaretoken"]').attributes("value")).toBe("csrf-token");
+    const amount = form.find('input[name="dues_usd"]');
+    expect((amount.element as HTMLInputElement).value).toBe("5000");
+    expect(form.find('textarea[name="dues_reason"]').attributes("required")).toBeDefined();
+    expect(form.text()).toContain("Leave empty to charge the standard price of $20,000");
+  });
+
+  it("leaves the dues field empty for a sponsor paying the standard price", async () => {
+    const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: true }] });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect((wrapper.get('input[name="dues_usd"]').element as HTMLInputElement).value).toBe("");
+  });
+
+  it("keeps the dues form unsubmittable until the committee gives a reason", async () => {
+    const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: true }] });
+
+    await flushPromises();
+    await flushPromises();
+
+    const form = wrapper.get('form[action="/organization/1/sponsorship/gold/dues/"]');
+    const save = form.get("button[type=submit]");
+    const reason = form.get('textarea[name="dues_reason"]');
+    expect(save.attributes("disabled")).toBeDefined();
+    expect(save.element.parentElement?.getAttribute("title")).toBe("Enter a reason for the dues change first.");
+
+    await reason.setValue("   ");
+    expect(save.attributes("disabled")).toBeDefined();
+
+    await form.get('input[name="dues_usd"]').setValue("5000");
+    await reason.setValue("Hosts our CI runners");
+    expect(save.attributes("disabled")).toBeUndefined();
+    // Typing the reason re-renders the form; the amount entered must survive it.
+    expect((form.get('input[name="dues_usd"]').element as HTMLInputElement).value).toBe("5000");
+    expect(save.element.parentElement?.getAttribute("title")).toBe("Save annual dues");
+  });
+
+  it("keeps the dues form unsubmittable while the amount exceeds the standard price", async () => {
+    const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: true }] });
+
+    await flushPromises();
+    await flushPromises();
+
+    const form = wrapper.get('form[action="/organization/1/sponsorship/gold/dues/"]');
+    await form.get('input[name="dues_usd"]').setValue("25000");
+    await form.get('textarea[name="dues_reason"]').setValue("Typo");
+
+    const save = form.get("button[type=submit]");
+    expect(save.attributes("disabled")).toBeDefined();
+    expect(save.element.parentElement?.getAttribute("title")).toBe("The annual dues can't exceed the standard price.");
+  });
+
+  it("shows representatives their discount without any way to change it", async () => {
+    const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: false, duesUsd: 5000 }] });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('[data-membership-dues="gold"]').text()).toBe("Annual dues: $5,000 (discounted from $20,000)");
+    expect(wrapper.find('input[name="dues_usd"]').exists()).toBe(false);
+    expect(wrapper.find('form[action="/organization/1/sponsorship/gold/dues/"]').exists()).toBe(false);
+  });
+
+  it("has no dues form for tiers without dues", async () => {
+    const wrapper = mountWithOrganization({
+      memberships: [{
+        ...goldMembership(null),
+        canManage: true,
+        membershipType: { name: "Community", code: "community", description: "", annualDuesUsd: 0 },
+        duesUsd: 0,
+      }],
+    });
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.find('input[name="dues_usd"]').exists()).toBe(false);
+    expect(wrapper.find('[data-membership-dues="community"]').exists()).toBe(false);
+  });
 
   it("renders the invoice download link and a confirmed regenerate form", async () => {
     const wrapper = mountWithOrganization({

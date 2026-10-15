@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 import type { MembershipRequestActionIntent, MembershipRequestRow, MembershipRequestsBootstrap, PendingFilterOption } from "../types";
-import { buildMembershipRequestsRouteUrl, readMembershipRequestsRouteState } from "../types";
+import { buildMembershipRequestsRouteUrl, inKindDuesSummary, isInKindRenewal, readMembershipRequestsRouteState } from "../types";
 import RequestsTable from "./RequestsTable.vue";
 import MembershipRequestsFilterBar from "./MembershipRequestsFilterBar.vue";
 
@@ -105,8 +105,14 @@ function onPageChange(pageNumber: number): void {
     <template #row-extra-columns="{ row }">
       <td class="align-top">
         {{ row.membership_type.name }}
-        <div v-if="row.is_renewal" class="mt-1">
-          <span class="badge badge-primary">Renewal</span>
+        <div v-if="row.is_renewal || isInKindRenewal(row.dues)" class="mt-1 d-flex flex-wrap" style="gap: .25rem;">
+          <span v-if="row.is_renewal" class="badge badge-primary">Renewal</span>
+          <span
+            v-if="isInKindRenewal(row.dues)"
+            class="badge badge-info"
+            :data-membership-request-dues="row.request_id"
+            :title="inKindDuesSummary(row.dues)"
+          >In-kind</span>
         </div>
         <details v-if="row.responses.length" class="mt-2" open>
           <summary class="small text-muted">Request responses</summary>
