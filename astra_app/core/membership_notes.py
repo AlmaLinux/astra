@@ -1,7 +1,8 @@
+import datetime
 from collections.abc import Iterable
 from typing import Any
 
-from core.models import MembershipRequest, Note
+from core.models import MembershipRequest, MembershipTerminationFeedback, Note
 
 # Internal username used for system-authored membership-request notes.
 CUSTOS: str = "-"
@@ -109,6 +110,13 @@ _CONTACTED_LABELS: dict[str, str] = {
 }
 
 
+def _note_date(value: str | None) -> str:
+    """The UTC date of an ISO timestamp stored in a note action; expiries are end-of-day UTC."""
+    if not value:
+        return ""
+    return datetime.datetime.fromisoformat(value).astimezone(datetime.UTC).date().isoformat()
+
+
 def note_action_label(action: dict[str, Any]) -> str:
     """Human label for a Note.action payload.
 
@@ -138,6 +146,22 @@ def note_action_label(action: dict[str, Any]) -> str:
             return f"Representative changed from {old} to {new}"
         return "Representative changed"
 
+    if action_type == "expiry_changed":
+        new = _note_date(action.get("new_expires_at"))
+        old = _note_date(action.get("old_expires_at"))
+        if old:
+            return f"Expiration changed from {old} to {new}"
+        return f"Expiration set to {new}"
+
+    if action_type == "terminated":
+        reason_category = action.get("reason_category")
+        if reason_category:
+            return f"Membership terminated by member ({MembershipTerminationFeedback.ReasonCategory(reason_category).label})"
+        expires_on = _note_date(action.get("expires_at"))
+        if expires_on:
+            return f"Membership terminated (was due to expire {expires_on})"
+        return "Membership terminated"
+
     label, _ = _ACTION_DISPLAY.get(action_type, (None, None))
     return label or str(action_type or "Action")
 
@@ -155,6 +179,12 @@ def note_action_icon(action: dict[str, Any]) -> str:
 
     if action_type == "dues_changed":
         return "fa-hand-holding-dollar"
+
+    if action_type == "expiry_changed":
+        return "fa-calendar-pen"
+
+    if action_type == "terminated":
+        return "fa-user-slash"
 
     _, icon = _ACTION_DISPLAY.get(action_type, (None, None))
     return icon or "fa-bolt"

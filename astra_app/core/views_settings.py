@@ -2117,6 +2117,7 @@ def settings_membership_terminate(request: HttpRequest, *, membership_type_code:
                 actor_username=username,
                 membership_type=membership_type,
                 target_username=username,
+                reason_category=form.cleaned_data["reason_category"],
             )
             MembershipTerminationFeedback.objects.create(
                 membership_log=log,

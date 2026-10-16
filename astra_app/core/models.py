@@ -1076,6 +1076,9 @@ class MembershipLog(models.Model):
         dues_usd: int | None | Literal["carry"] = "carry",
     ) -> MembershipLog:
         """Record an approval; *dues_usd* "carry" keeps a same-tier waiver (renewals, imports)."""
+        if dues_usd == "carry":
+            current = cls._current_membership(membership_type, target_username, target_organization)
+            dues_usd = None if current is None else current.dues_usd
         log = cls._create_log(
             actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
@@ -1085,7 +1088,7 @@ class MembershipLog(models.Model):
                 approved_at=approved_at, previous_expires_at=previous_expires_at,
             ),
             import_batch_id=import_batch_id,
-            dues_usd=cls._current_dues_usd(membership_type, target_organization) if dues_usd == "carry" else dues_usd,
+            dues_usd=dues_usd,
         )
         apply_membership_log_side_effects(log=log)
         return log
@@ -1119,23 +1122,45 @@ class MembershipLog(models.Model):
         target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
         import_batch_id: uuid.UUID | None = None,
+        reason: str = "",
     ) -> MembershipLog:
+        """Record a new expiry and note it, with the optional *reason*, for the committee."""
         from core.membership import term_membership_request
+        from core.membership_notes import add_note
 
-        log = cls._create_log(
-            actor_username=actor_username, target_username=target_username,
-            target_organization=target_organization,
-            membership_type=membership_type,
-            membership_request=membership_request or term_membership_request(
-                membership_type=membership_type,
-                target_username=target_username,
+        current = cls._current_membership(membership_type, target_username, target_organization)
+        old_expires_at = None if current is None else current.expires_at
+        # A no-op would still log and note a "change", muddying the audit trail.
+        if old_expires_at == expires_at:
+            raise ValidationError(f"{membership_type.name} already expires on {expires_at:%Y-%m-%d}.")
+
+        with transaction.atomic():
+            log = cls._create_log(
+                actor_username=actor_username, target_username=target_username,
                 target_organization=target_organization,
-            ),
-            action=cls.Action.expiry_changed, expires_at=expires_at,
-            import_batch_id=import_batch_id,
-            dues_usd=cls._current_dues_usd(membership_type, target_organization),
-        )
-        apply_membership_log_side_effects(log=log)
+                membership_type=membership_type,
+                membership_request=membership_request or term_membership_request(
+                    membership_type=membership_type,
+                    target_username=target_username,
+                    target_organization=target_organization,
+                ),
+                action=cls.Action.expiry_changed, expires_at=expires_at,
+                import_batch_id=import_batch_id,
+                dues_usd=None if current is None else current.dues_usd,
+            )
+            apply_membership_log_side_effects(log=log)
+            if log.membership_request is not None:
+                add_note(
+                    membership_request=log.membership_request,
+                    username=actor_username,
+                    content=reason,
+                    action={
+                        "type": "expiry_changed",
+                        "membership_type": membership_type.code,
+                        "old_expires_at": None if old_expires_at is None else old_expires_at.isoformat(),
+                        "new_expires_at": expires_at.isoformat(),
+                    },
+                )
         return log
 
     @classmethod
@@ -1162,15 +1187,12 @@ class MembershipLog(models.Model):
         return log
 
     @staticmethod
-    def _current_dues_usd(membership_type: MembershipType, target_organization: Organization | None) -> int | None:
-        """The waiver on the target's current membership of this tier; individuals pay no dues."""
-        if target_organization is None:
-            return None
-        return (
-            Membership.objects.filter(target_organization=target_organization, membership_type=membership_type)
-            .values_list("dues_usd", flat=True)
-            .first()
-        )
+    def _current_membership(
+        membership_type: MembershipType, target_username: str, target_organization: Organization | None
+    ) -> Membership | None:
+        """The target's membership of this tier, read before a log's side effects replace it."""
+        target = MembershipTargetIdentity.from_target_fields(username=target_username, organization=target_organization)
+        return Membership.objects.filter(**target.for_membership_filter(), membership_type=membership_type).first()
 
     @classmethod
     def create_for_termination(
@@ -1181,21 +1203,40 @@ class MembershipLog(models.Model):
         target_username: str = "",
         target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
+        reason_category: str = "",
     ) -> MembershipLog:
-        from core.membership import term_membership_request
+        """Record a termination and note it for the committee.
 
-        log = cls._create_log(
-            actor_username=actor_username, target_username=target_username,
-            target_organization=target_organization,
-            membership_type=membership_type,
-            membership_request=membership_request or term_membership_request(
-                membership_type=membership_type,
-                target_username=target_username,
+        *reason_category* is the member's own choice when they leave; their free-text
+        reason stays out of the note because it must be wiped after the privacy window.
+        """
+        from core.membership import term_membership_request
+        from core.membership_notes import add_note
+
+        current = cls._current_membership(membership_type, target_username, target_organization)
+        note_action: dict[str, object] = {
+            "type": "terminated",
+            "membership_type": membership_type.code,
+            "expires_at": None if current is None or current.expires_at is None else current.expires_at.isoformat(),
+        }
+        if reason_category:
+            note_action["reason_category"] = reason_category
+
+        with transaction.atomic():
+            log = cls._create_log(
+                actor_username=actor_username, target_username=target_username,
                 target_organization=target_organization,
-            ),
-            action=cls.Action.terminated, expires_at=timezone.now(),
-        )
-        apply_membership_log_side_effects(log=log)
+                membership_type=membership_type,
+                membership_request=membership_request or term_membership_request(
+                    membership_type=membership_type,
+                    target_username=target_username,
+                    target_organization=target_organization,
+                ),
+                action=cls.Action.terminated, expires_at=timezone.now(),
+            )
+            apply_membership_log_side_effects(log=log)
+            if log.membership_request is not None:
+                add_note(membership_request=log.membership_request, username=actor_username, action=note_action)
         return log
 
     @classmethod

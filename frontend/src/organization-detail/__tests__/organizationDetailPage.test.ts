@@ -285,6 +285,8 @@ describe("OrganizationDetailPage", () => {
     expect(wrapper.text()).toContain("Change tier");
     expect(wrapper.text()).toContain("Edit expiration");
     expect(wrapper.find('form[action="/organization/1/sponsorship/gold/expiry/"]').exists()).toBe(true);
+    const expiryReason = wrapper.get('form[action="/organization/1/sponsorship/gold/expiry/"] textarea[name="reason"]');
+    expect(expiryReason.attributes("required")).toBeUndefined();
     expect(wrapper.find('form[action="/organization/1/sponsorship/gold/terminate/"]').exists()).toBe(true);
     const terminate = wrapper.get("#sponsorship-expiry-modal-gold-terminate-submit");
     expect(terminate.attributes("disabled")).toBeDefined();

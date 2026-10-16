@@ -328,7 +328,8 @@ def _parse_expiry_datetime_or_redirect(
     request: HttpRequest,
     *,
     redirect_to: str,
-) -> datetime.datetime | HttpResponse:
+) -> tuple[datetime.datetime, str] | HttpResponse:
+    """The new end-of-day UTC expiry and the committee's optional reason."""
     form = MembershipUpdateExpiryForm(request.POST)
     if not form.is_valid():
         if "expires_on" in form.errors:
@@ -341,7 +342,8 @@ def _parse_expiry_datetime_or_redirect(
     expires_on = form.cleaned_data["expires_on"]
     # The committee sets an expiration DATE. Interpret that as end-of-day UTC
     # (single source of truth), and rely on timezone conversion for display.
-    return datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+    expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+    return expires_at, form.cleaned_data["reason"]
 
 
 def _load_user_membership(
@@ -446,50 +448,46 @@ def membership_set_expiry(
     membership_type_code: str = "",
     organization_id: int | None = None,
 ) -> HttpResponse:
+    target: dict[str, object]
     if organization_id is not None:
         result = _load_organization_membership(request, organization_id, membership_type_code)
         if isinstance(result, HttpResponse):
             return result
         organization, membership_type, _active_membership = result
-
+        target = {"target_organization": organization}
+        success_message = "Sponsorship expiration updated."
         redirect_to = _resolve_post_redirect(
             request,
             default=reverse("organization-detail", kwargs={"organization_id": organization.pk}),
             use_referer=True,
         )
+    else:
+        result = _load_user_membership(request, username, membership_type_code)
+        if isinstance(result, HttpResponse):
+            return result
+        username, membership_type, _target = result
+        target = {"target_username": username}
+        success_message = "Membership expiration updated."
+        redirect_to = reverse("user-profile", kwargs={"username": username})
 
-        expires_at = _parse_expiry_datetime_or_redirect(request, redirect_to=redirect_to)
-        if isinstance(expires_at, HttpResponse):
-            return expires_at
+    parsed = _parse_expiry_datetime_or_redirect(request, redirect_to=redirect_to)
+    if isinstance(parsed, HttpResponse):
+        return parsed
+    expires_at, reason = parsed
 
+    try:
         MembershipLog.create_for_expiry_change(
             actor_username=get_username(request),
             membership_type=membership_type,
             expires_at=expires_at,
-            target_organization=organization,
+            reason=reason,
+            **target,
         )
-
-        messages.success(request, "Sponsorship expiration updated.")
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0])
         return redirect(redirect_to)
 
-    result = _load_user_membership(request, username, membership_type_code)
-    if isinstance(result, HttpResponse):
-        return result
-    username, membership_type, _target = result
-    redirect_to = reverse("user-profile", kwargs={"username": username})
-
-    expires_at = _parse_expiry_datetime_or_redirect(request, redirect_to=redirect_to)
-    if isinstance(expires_at, HttpResponse):
-        return expires_at
-
-    MembershipLog.create_for_expiry_change(
-        actor_username=get_username(request),
-        membership_type=membership_type,
-        expires_at=expires_at,
-        target_username=username,
-    )
-
-    messages.success(request, "Membership expiration updated.")
+    messages.success(request, success_message)
     return redirect(redirect_to)
 
 

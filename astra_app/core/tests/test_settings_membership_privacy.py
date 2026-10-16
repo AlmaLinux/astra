@@ -201,13 +201,20 @@ class SelfServiceMembershipPrivacyTests(TestCase):
         msgs = [message.message for message in get_messages(request)]
         self.assertIn("Unable to terminate this membership.", msgs)
 
-    def test_membership_termination_post_creates_feedback_and_log(self) -> None:
-        from core.models import MembershipTerminationFeedback  # noqa: PLC0415
+    def test_membership_termination_post_creates_feedback_log_and_note(self) -> None:
+        from core.membership_request_workflow import create_approved_membership_request  # noqa: PLC0415
+        from core.models import MembershipTerminationFeedback, Note  # noqa: PLC0415
 
         self._create_membership_type(
             code="individual",
             name="Individual",
             group_cn="almalinux-individual",
+        )
+        term_request = create_approved_membership_request(
+            actor_username="committee",
+            membership_type=MembershipType.objects.get(code="individual"),
+            decided_at=timezone.now(),
+            target_username="alice",
         )
         Membership.objects.create(
             target_username="alice",
@@ -258,6 +265,11 @@ class SelfServiceMembershipPrivacyTests(TestCase):
         self.assertLessEqual(retention_window, datetime.timedelta(days=30, minutes=1))
         self.assertFalse(Membership.objects.filter(target_username="alice", membership_type_id="individual").exists())
         signal_send.assert_called_once()
+        # The committee sees why the member left, but never the free text, which is wiped after 30 days.
+        note = Note.objects.get(membership_request=term_request)
+        self.assertEqual(note.username, "alice")
+        self.assertEqual(note.action["reason_category"], "privacy")
+        self.assertIsNone(note.content)
 
     def test_membership_termination_reauth_failure_logs_exception_object(self) -> None:
         self._create_membership_type(

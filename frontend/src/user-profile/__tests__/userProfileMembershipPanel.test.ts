@@ -269,6 +269,8 @@ describe("UserProfileMembershipPanel", () => {
 
     expect(wrapper.text()).toContain("Edit expiration");
     expect(wrapper.find('form[action="/membership/manage/alice/individual/expiry/"]').exists()).toBe(true);
+    const expiryReason = wrapper.get('form[action="/membership/manage/alice/individual/expiry/"] textarea[name="reason"]');
+    expect(expiryReason.attributes("required")).toBeUndefined();
     expect(wrapper.find('form[action="/membership/manage/alice/individual/terminate/"]').exists()).toBe(true);
     const terminate = wrapper.get('form[action="/membership/manage/alice/individual/terminate/"] button[type="submit"]');
     expect(terminate.attributes("disabled")).toBeDefined();

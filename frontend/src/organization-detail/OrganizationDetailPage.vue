@@ -561,6 +561,17 @@ onMounted(async () => {
 
                         <div class="text-muted small mb-3">Expiration is an end-of-day date in UTC.</div>
 
+                        <div class="form-group">
+                          <label :for="`${managementInputId(membership)}-reason`">Reason (optional)</label>
+                          <textarea
+                            :id="`${managementInputId(membership)}-reason`"
+                            name="reason"
+                            class="form-control"
+                            rows="2"
+                            placeholder="Recorded as a committee note"
+                          />
+                        </div>
+
                         <div class="d-flex justify-content-between">
                           <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without saving">Cancel</button>
                           <button type="submit" class="btn btn-primary" title="Save expiration date">Save expiration</button>

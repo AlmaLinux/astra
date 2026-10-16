@@ -332,6 +332,8 @@ class MembershipRequestUpdateResponsesForm(StyledForm):
 
 class MembershipUpdateExpiryForm(forms.Form):
     expires_on = forms.DateField(required=True, widget=forms.DateInput(attrs={"type": "date"}))
+    # Becomes the committee note recorded with the change.
+    reason = forms.CharField(required=False, widget=forms.Textarea)
 
     def clean_expires_on(self) -> datetime.date:
         expires_on = self.cleaned_data["expires_on"]
