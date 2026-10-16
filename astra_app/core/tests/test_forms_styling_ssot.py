@@ -18,7 +18,25 @@ class _ValidationProbeForm(StyledForm):
     required_value = forms.CharField(required=True)
 
 
+class _TextareaProbeForm(StyledForm):
+    notes = forms.CharField(max_length=5, widget=forms.Textarea)
+
+
 class FormsStylingSSOTTests(TestCase):
+    def test_textarea_crlf_counts_as_one_character_like_the_browser(self) -> None:
+        # Browsers submit textarea line breaks as CRLF but count them as one character
+        # for maxlength and the character counter.
+        form = _TextareaProbeForm(data={"notes": "ab\r\ncd"})
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["notes"], "ab\ncd")
+
+    def test_organization_billing_notes_limit_matches_browser_count(self) -> None:
+        notes = "\r\n".join(["x" * 99] * 5)  # 499 characters in the browser, 503 submitted
+        form = OrganizationEditForm(data={"billing_notes": notes})
+        self.assertNotIn("billing_notes", form.errors)
+        self.assertEqual(form.fields["billing_notes"].widget.attrs["maxlength"], "500")
+
+
     def test_membership_forms_use_shared_styled_form_base(self) -> None:
         self.assertTrue(issubclass(MembershipRequestForm, StyledForm))
         self.assertTrue(issubclass(MembershipRequestUpdateResponsesForm, StyledForm))

@@ -12,7 +12,7 @@ from post_office.models import Email, EmailTemplate
 
 from core.freeipa.user import FreeIPAUser
 from core.models import Membership, MembershipType, Organization
-from core.sponsorship_invoices import InvoiceTerm
+from core.sponsorship_invoices import BILLING_NOTES_MAX_LINES, InvoiceTerm
 from core.tests.utils_test_data import ensure_core_categories
 
 IN_MEMORY_STORAGES = {
@@ -21,6 +21,10 @@ IN_MEMORY_STORAGES = {
 }
 
 PAYMENT_DETAILS = "Pay by ACH, Wire\nBank Info: Example Bank\nAccount Number 000111222"
+# Realistic payment details (the ones the dev and E2E stacks print): they make a full-height
+# footer, which is what layout tests need to catch overflow.
+EXAMPLE_PAYMENT_DETAILS_FILE = Path(settings.BASE_DIR).parent / "docker" / "invoice-payment-details.example.txt"
+INCH = 96  # WeasyPrint lays out in CSS pixels.
 
 
 class SponsorshipInvoiceTestMixin:
@@ -234,16 +238,45 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
         line_tops = _invoice_line_tops(membership, InvoiceTerm.renewal)[0]
         self.assertEqual(line_tops["Membership type"], line_tops["List price"])
 
-    def test_long_billing_notes_never_hide_the_amount_behind_the_footer(self) -> None:
-        self.organization.billing_notes = ("PO 70001165892. Reference it on all correspondence. " * 30)[:500]
+    def test_the_longest_billing_notes_still_fit_one_page_with_the_amount_above_the_footer(self) -> None:
+        # Worst case: notes at their 500-character limit, a full address and the three-line discount block.
+        self.organization.billing_notes = (
+            "OSVC 111131. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur at augue sit amet nunc "
+            "gravida sollicitudin nec id quam. Donec et condimentum purus, sed consectetur eros. Vestibulum ante ipsum "
+            "primis in faucibus orci luctus et ultrices posuere cubilia curae; Aliquam egestas eget est nec imperdiet. "
+            "Nullam ultrices posuere urna a consectetur. Curabitur fringilla ligula lacus, vel hendrerit dui facilisis "
+            "pellentesque. Mauris dapibus molestie dolor suscipit sollicitudin. Ut non viverra."
+        )[:500]
         self.organization.save(update_fields=["billing_notes"])
         membership = self._membership(expires_at=datetime.datetime(2026, 11, 18, 23, 59, 59, tzinfo=datetime.UTC))
-        pages = _invoice_line_tops(membership, InvoiceTerm.renewal)
-        amount_page = next(index for index, lines in enumerate(pages) if "$20,000" in lines)
-        footer_page = next(index for index, lines in enumerate(pages) if "Please complete payment upon receipt." in lines)
-        self.assertLessEqual(amount_page, footer_page)
-        if amount_page == footer_page:
-            self.assertLess(pages[amount_page]["$20,000"], pages[footer_page]["Please complete payment upon receipt."])
+        membership.dues_usd = 2000
+
+        with self.settings(SPONSORSHIP_INVOICE_PAYMENT_DETAILS_FILE=str(EXAMPLE_PAYMENT_DETAILS_FILE)):
+            pages = _invoice_line_tops(membership, InvoiceTerm.renewal)
+
+        self.assertEqual(len(pages), 1)
+        [lines] = pages
+        footer_top = lines["Please complete payment upon receipt."]
+        # The footer ends at the bottom of the letter-size page (not past it, not above it)...
+        self.assertLess(11 * INCH - lines["for specific guidance."], 0.6 * INCH)
+        # ...and the amount due sits just above it, the white space being what gives way.
+        self.assertLess(footer_top - lines["$2,000"], 1 * INCH)
+
+    def test_billing_notes_beyond_the_line_limit_are_cut_off_without_moving_anything(self) -> None:
+        self.organization.billing_notes = "\n".join(f"Note line {number}" for number in range(1, 31))
+        self.organization.save(update_fields=["billing_notes"])
+        membership = self._membership(expires_at=datetime.datetime(2026, 11, 18, 23, 59, 59, tzinfo=datetime.UTC))
+
+        with self.settings(SPONSORSHIP_INVOICE_PAYMENT_DETAILS_FILE=str(EXAMPLE_PAYMENT_DETAILS_FILE)):
+            pages = _invoice_line_tops(membership, InvoiceTerm.renewal)
+
+        self.assertEqual(len(pages), 1)
+        [lines] = pages
+        self.assertIn(f"Note line {BILLING_NOTES_MAX_LINES}", lines)
+        self.assertNotIn(f"Note line {BILLING_NOTES_MAX_LINES + 1}", lines)
+        # The address after the notes is still printed, right below them.
+        self.assertIn("1 Example Way", lines)
+        self.assertLess(lines["Please complete payment upon receipt."] - lines["$20,000"], 1 * INCH)
 
     def test_render_invoice_pdf_produces_a_pdf(self) -> None:
         from core.sponsorship_invoices import render_invoice_pdf

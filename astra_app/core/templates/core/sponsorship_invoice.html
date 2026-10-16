@@ -6,21 +6,25 @@
   <style>
     @page { size: letter; margin: 0; }
     html, body { margin: 0; }
-    /* Header, content and footer stack in a page-high column: the footer sits at the
-       bottom of the page, and long content pushes it onward instead of hiding under it. */
+    /* One flex column exactly one page high (nested flex boxes don't distribute space
+       reliably in WeasyPrint): header, summary, spacer, amounts, footer. The footer takes
+       its natural height at the bottom and the amounts sit just above it, so long billing
+       notes only use up the spacer's white space. */
     body {
       display: flex;
       flex-direction: column;
-      min-height: 11in;
+      height: 11in;
       font-family: Montserrat, sans-serif;
       font-size: 11pt;
       line-height: 1.3;
       color: #00245d;
     }
-    .content { flex: 1 0 auto; padding-bottom: 0.3in; }
+    .header, .summary, .amounts, .footer { flex: none; }
+    /* The only part that gives way: white space between "Bill to" and the amounts. */
+    .spacer { flex: 1 1 0.15in; min-height: 0.15in; }
+    .amounts { padding-bottom: 0.25in; }
     .header {
       position: relative;
-      flex: none;
       height: 2.2in;
       overflow: hidden;
       background: #00245d;
@@ -35,20 +39,19 @@
     td { padding: 0; vertical-align: top; }
     td.right { text-align: right; }
     .label { font-weight: 700; padding-top: 0.1in; }
-    .membership { margin-top: 1.1in; }
-    .membership .description { width: 3.6in; }
+    /* Wide enough to keep the term ("from September 30th 2026 to ...") on one line. */
+    .membership .description { width: 4.6in; }
     .footer {
-      flex: none;
       break-inside: avoid;
-      height: 3.92in;
       box-sizing: border-box;
-      padding: 0.25in 0.3in;
+      padding: 0.2in 0.3in;
       background: #00245d;
       color: #fff;
       font-family: "Liberation Sans", Arial, sans-serif;
       font-size: 9.5pt;
     }
-    .footer p { margin: 0 0 0.16in; }
+    .footer p { margin: 0 0 0.12in; }
+    .footer p:last-child { margin-bottom: 0; }
     .payment-details { white-space: pre-line; }
     .disclaimer { width: 3.3in; font-size: 7pt; }
   </style>
@@ -66,7 +69,7 @@
     </div>
   </div>
 
-  <div class="content">
+  <div class="summary">
     <h1>Sponsor member invoice</h1>
 
     <table>
@@ -74,7 +77,8 @@
         <td>
           <div class="label">Bill to:</div>
           <div>{{ organization.name }}</div>
-          {% if organization.billing_notes %}<div>{{ organization.billing_notes|linebreaksbr }}</div>{% endif %}
+          {# Clipped, not spilled: lines beyond the limit (including wrapped ones) are cut off, keeping the page single. #}
+          {% if organization.billing_notes %}<div style="line-clamp: {{ billing_notes_max_lines }};">{{ organization.billing_notes|linebreaksbr }}</div>{% endif %}
           {% for line in address_lines %}<div>{{ line }}</div>{% endfor %}
         </td>
         <td class="right">
@@ -85,7 +89,11 @@
         </td>
       </tr>
     </table>
+  </div>
 
+  <div class="spacer"></div>
+
+  <div class="amounts">
     <table class="membership">
       <tr>
         <td class="description">

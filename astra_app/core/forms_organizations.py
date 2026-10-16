@@ -93,6 +93,10 @@ class OrganizationEditForm(StyledModelForm):
             "billing_notes": "Printed on your sponsorship invoices, e.g. a purchase order (PO) number.",
         }
 
+        widgets = {
+            "billing_notes": forms.Textarea(attrs={"rows": 3}),
+        }
+
     @override
     def __init__(self, *args, **kwargs) -> None:
         self.can_select_representatives: bool = bool(kwargs.pop("can_select_representatives", False))
@@ -123,7 +127,6 @@ class OrganizationEditForm(StyledModelForm):
         self.fields["city"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "address-level2"})
         self.fields["state"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "address-level1"})
         self.fields["postal_code"].widget = forms.TextInput(attrs={"class": "form-control", "autocomplete": "postal-code"})
-        self.fields["billing_notes"].widget = forms.Textarea(attrs={"class": "form-control", "rows": 3, "maxlength": "500"})
         self.fields["country_code"].widget = forms.TextInput(
             attrs={
                 "class": "form-control",

@@ -31,6 +31,10 @@ from core.models import Membership
 
 logger = logging.getLogger(__name__)
 
+# The invoice is a single page, so billing notes longer than this are cut off rather
+# than pushing the rest of it onto a second page.
+BILLING_NOTES_MAX_LINES = 8
+
 INVOICE_ASSETS_DIR = Path(__file__).resolve().parent / "static" / "core" / "invoices"
 
 
@@ -143,6 +147,7 @@ def render_invoice_html(membership: Membership, term: InvoiceTerm) -> str:
             "term_start_date": term_start,
             "term_end_date": term_start + datetime.timedelta(days=settings.MEMBERSHIP_VALIDITY_DAYS),
             "payment_details": read_payment_details(),
+            "billing_notes_max_lines": BILLING_NOTES_MAX_LINES,
         },
     )
 

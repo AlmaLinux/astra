@@ -32,6 +32,22 @@ class _StyledFormMixin:
             if field.required and not isinstance(field.widget, forms.HiddenInput):
                 field.widget.attrs.setdefault("required", "required")
 
+    def _normalize_textarea_newlines(self) -> None:
+        """Convert submitted CRLF line breaks in textareas to LF.
+
+        Browsers submit textarea line breaks as CRLF but count them as one character
+        for maxlength (and our character counter), so without this a value the browser
+        accepts can fail Django's max_length check.
+        """
+        if not self.is_bound:
+            return
+        data = self.data.copy()
+        for name, field in self.fields.items():
+            key = self.add_prefix(name)
+            if isinstance(field.widget, forms.Textarea) and key in data:
+                data[key] = data[key].replace("\r\n", "\n")
+        self.data = data
+
     def _append_css_class(self, class_name: str) -> None:
         for field in self.fields.values():
             current = str(field.widget.attrs.get("class", "")).strip()
@@ -64,6 +80,7 @@ class StyledForm(_StyledFormMixin, forms.Form):
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._apply_css_classes()
+        self._normalize_textarea_newlines()
 
     @override
     def full_clean(self) -> None:
@@ -78,6 +95,7 @@ class StyledModelForm(_StyledFormMixin, forms.ModelForm):
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._apply_css_classes()
+        self._normalize_textarea_newlines()
 
     @override
     def full_clean(self) -> None:
