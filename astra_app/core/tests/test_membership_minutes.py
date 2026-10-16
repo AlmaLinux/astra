@@ -11,6 +11,7 @@ from core.models import (
     MembershipType,
     MembershipTypeCategory,
 )
+from core.tests.utils_test_data import FAR_FUTURE
 from core.views_membership_admin import (
     MEMBERSHIP_MINUTES_MAX_RANGE_DAYS,
     _parse_membership_minutes_range,
@@ -93,6 +94,8 @@ class MembershipMinutesTestBase(TestCase):
             membership_type=membership_request.membership_type,
             membership_request=membership_request,
             action=action,
+            # Term actions require an expiry; the minutes never show it.
+            expires_at=FAR_FUTURE,
             rejection_reason=rejection_reason,
         )
         MembershipLog.objects.filter(pk=log.pk).update(created_at=created_at)

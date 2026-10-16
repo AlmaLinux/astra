@@ -16,7 +16,7 @@ from core.organization_representative_transition import (
     OrganizationRepresentativeTransitionResult,
     apply_organization_representative_transition,
 )
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class OrganizationRepresentativeTransitionTests(TestCase):
@@ -35,7 +35,7 @@ class OrganizationRepresentativeTransitionTests(TestCase):
             },
         )
         organization = Organization.objects.create(name="Sync Org", representative="bob")
-        Membership.objects.create(target_organization=organization, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type_id="gold")
         journal = FreeIPARepresentativeSyncJournal(
             targeted_group_cns=("almalinux-gold",),
             skipped_group_cns=(),
@@ -89,7 +89,7 @@ class OrganizationRepresentativeTransitionTests(TestCase):
             },
         )
         organization = Organization.objects.create(name="Failure Org", representative="bob")
-        Membership.objects.create(target_organization=organization, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type_id="gold")
         callback_calls: list[int] = []
         failure = FreeIPARepresentativeSyncError(
             FreeIPARepresentativeSyncResult(
@@ -136,7 +136,7 @@ class OrganizationRepresentativeTransitionTests(TestCase):
             },
         )
         organization = Organization.objects.create(name="Rollback Org", representative="bob")
-        Membership.objects.create(target_organization=organization, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type_id="gold")
         journal = FreeIPARepresentativeSyncJournal(
             targeted_group_cns=("almalinux-gold",),
             skipped_group_cns=(),
@@ -186,7 +186,7 @@ class OrganizationRepresentativeTransitionTests(TestCase):
         )
         Organization.objects.create(name="Existing Rep Org", representative="alice")
         organization = Organization.objects.create(name="Rollback Probe Org", representative="bob")
-        Membership.objects.create(target_organization=organization, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type_id="gold")
         journal = FreeIPARepresentativeSyncJournal(
             targeted_group_cns=("almalinux-gold",),
             skipped_group_cns=(),
@@ -269,7 +269,7 @@ class OrganizationRepresentativeTransitionTests(TestCase):
             representative="bob",
             business_contact_name="Before",
         )
-        Membership.objects.create(target_organization=organization, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type_id="gold")
         callback_calls: list[int] = []
 
         def persist_changes(locked_organization: Organization) -> None:

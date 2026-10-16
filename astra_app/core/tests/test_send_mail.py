@@ -1659,8 +1659,6 @@ class SendMailTests(TestCase):
         self.assertEqual(invitation.organization_id, organization.pk)
         self.assertEqual(invitation.email_template_name, settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
         self.assertEqual(invitation.invited_by_username, "reviewer")
-        self.assertEqual(invitation.send_count, 1)
-        self.assertIsNotNone(invitation.last_sent_at)
 
         send_record = AccountInvitationSend.objects.get(invitation=invitation)
         self.assertEqual(send_record.result, AccountInvitationSend.Result.queued)
@@ -1784,7 +1782,7 @@ class SendMailTests(TestCase):
 
         invitation.refresh_from_db()
         self.assertEqual(invitation.organization_id, other_organization.pk)
-        self.assertEqual(invitation.send_count, 0)
+        self.assertFalse(invitation.sends.filter(result=AccountInvitationSend.Result.queued).exists())
 
     def test_send_mail_org_claim_action_rejects_invalid_manual_email(self) -> None:
         self._login_as_freeipa_user("reviewer")

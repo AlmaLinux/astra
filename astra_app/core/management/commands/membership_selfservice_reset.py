@@ -628,7 +628,6 @@ class Command(BaseCommand):
                     target_username="regular33",
                     membership_type=membership_type,
                     membership_request=membership_request,
-                    requested_group_cn=membership_type.group_cn,
                     action=spec["action"],
                     expires_at=spec["expires_at"],
                 )

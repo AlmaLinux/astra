@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
-from core.models import AccountInvitation, FreeIPAPermissionGrant, Organization
+from core.models import AccountInvitation, AccountInvitationSend, FreeIPAPermissionGrant, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.tests.utils_test_data import ensure_core_categories
 
@@ -224,7 +224,7 @@ class AccountInvitationsApiTests(TestCase):
             self.assertEqual(row["organization_id"], organization.pk)
             self.assertEqual(row["organization_name"], "Test Org")
 
-    def test_pending_invitations_detail_endpoint_returns_raw_datetime_contract(self) -> None:
+    def test_pending_invitations_detail_endpoint_derives_send_stats_from_queued_sends(self) -> None:
         self._login_as_freeipa_user("committee")
         invited_at = timezone.now()
         last_sent_at = invited_at + datetime.timedelta(hours=2)
@@ -234,9 +234,20 @@ class AccountInvitationsApiTests(TestCase):
             note="Test note",
             invited_by_username="committee",
             invited_at=invited_at,
-            last_sent_at=last_sent_at,
         )
         invitation.refresh_from_db()
+        for sent_at, result in (
+            (invited_at + datetime.timedelta(hours=1), AccountInvitationSend.Result.queued),
+            (last_sent_at, AccountInvitationSend.Result.queued),
+            (last_sent_at + datetime.timedelta(hours=1), AccountInvitationSend.Result.failed),
+        ):
+            AccountInvitationSend.objects.create(
+                invitation=invitation,
+                sent_by_username="committee",
+                sent_at=sent_at,
+                template_name="account-invite",
+                result=result,
+            )
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
             response = self.client.get(
@@ -249,7 +260,8 @@ class AccountInvitationsApiTests(TestCase):
         row = response.json()["data"][0]
         self.assertEqual(row["invitation_id"], invitation.pk)
         self.assertEqual(row["invited_at"], invitation.invited_at.isoformat())
-        self.assertEqual(row["last_sent_at"], invitation.last_sent_at.isoformat())
+        self.assertEqual(row["send_count"], 2)
+        self.assertEqual(row["last_sent_at"], last_sent_at.isoformat())
 
     def test_pending_invitations_detail_endpoint_scopes_records_total_before_search(self) -> None:
         self._login_as_freeipa_user("committee")
@@ -683,7 +695,7 @@ class AccountInvitationsApiTests(TestCase):
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
         self.assertEqual(invitation.freeipa_matched_usernames, ["pendingclaim"])
-        self.assertEqual(invitation.send_count, 1)
+        self.assertEqual(invitation.sends.filter(result=AccountInvitationSend.Result.queued).count(), 1)
         self.assertEqual(api_queue_mock.call_count + shared_queue_mock.call_count, 1)
 
     def test_resend_endpoint_email_match_emits_signal_only_for_first_transition(self) -> None:
@@ -867,7 +879,7 @@ class AccountInvitationsApiTests(TestCase):
         self.assertEqual(payload["mail_progress"]["failures"], 0)
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
-        self.assertEqual(invitation.send_count, 1)
+        self.assertEqual(invitation.sends.filter(result=AccountInvitationSend.Result.queued).count(), 1)
         self.assertEqual(api_queue_mock.call_count + shared_queue_mock.call_count, 1)
 
     def test_bulk_endpoint_accepts_json_payload(self) -> None:
@@ -939,7 +951,7 @@ class AccountInvitationsApiTests(TestCase):
         self.assertEqual(payload["mail_progress"]["failures"], 0)
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
-        self.assertEqual(invitation.send_count, 1)
+        self.assertEqual(invitation.sends.filter(result=AccountInvitationSend.Result.queued).count(), 1)
         self.assertEqual(api_queue_mock.call_count + shared_queue_mock.call_count, 1)
 
     def test_bulk_endpoint_accepts_accepted_dismiss_json_payload(self) -> None:

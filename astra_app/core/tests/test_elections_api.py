@@ -27,7 +27,7 @@ from core.models import (
 )
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.ballot_chain import compute_chain_hash
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 from core.tokens import election_genesis_chain_hash
 from core.views_elections.vote import _parse_vote_payload
 
@@ -218,7 +218,7 @@ class ElectionsApiTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="viewer", membership_type=voter_type, expires_at=None)
+        membership = Membership.objects.create(target_username="viewer", membership_type=voter_type, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=1))
 
         issued_at = now - datetime.timedelta(hours=1)
@@ -566,8 +566,8 @@ class ElectionsApiTests(TestCase):
         )
         voter_type = MembershipType.objects.get(code="voter")
 
-        alice = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=None)
-        bob = Membership.objects.create(target_username="bob", membership_type=voter_type, expires_at=None)
+        alice = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
+        bob = Membership.objects.create(target_username="bob", membership_type=voter_type, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk__in=[alice.pk, bob.pk]).update(created_at=election.start_datetime - datetime.timedelta(days=10))
 
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
@@ -631,7 +631,7 @@ class ElectionsApiTests(TestCase):
         membership = Membership.objects.create(
             target_username="alice",
             membership_type_id="voter",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=10))
 
@@ -782,7 +782,7 @@ class ElectionsApiTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="viewer", membership_type=voter_type, expires_at=None)
+        Membership.objects.create(target_username="viewer", membership_type=voter_type, expires_at=FAR_FUTURE)
 
         viewer = FreeIPAUser(
             "viewer",
@@ -872,7 +872,6 @@ class ElectionsApiTests(TestCase):
                 previous_chain_hash=election_genesis_chain_hash(election.id),
                 ballot_hash=ballot_hash,
             ),
-            is_counted=True,
         )
 
         response = self.client.get(

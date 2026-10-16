@@ -19,6 +19,7 @@ from core.models import (
     MembershipType,
     VotingCredential,
 )
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 class OperationsFailureIsolationTests(TestCase):
@@ -225,7 +226,7 @@ class OperationsHourlyCommandTests(TestCase):
             membership = Membership.objects.create(
                 target_username=username,
                 membership_type=membership_type,
-                expires_at=None,
+                expires_at=FAR_FUTURE,
             )
             Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=200))
 

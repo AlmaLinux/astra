@@ -21,7 +21,7 @@ def resolve_term_start_at(
     """Compute the start of the current uninterrupted term from membership logs."""
     from core.models import MembershipLog
 
-    if existing is not None and existing.expires_at is not None and existing.expires_at > log.created_at:
+    if existing is not None and existing.expires_at > log.created_at:
         return existing.created_at
 
     start_at = log.created_at
@@ -37,7 +37,7 @@ def resolve_term_start_at(
         .first()
     )
 
-    if last_approved is not None and last_approved.expires_at is not None and last_approved.expires_at > log.created_at:
+    if last_approved is not None and last_approved.expires_at > log.created_at:
         last_terminated = (
             MembershipLog.objects.filter(
                 **log_filter,

@@ -4,6 +4,7 @@ from django.apps import apps as django_apps
 from django.test import TestCase
 
 from core.models import Membership, MembershipType, MembershipTypeCategory, Organization
+from core.tests.utils_test_data import FAR_FUTURE
 
 MIGRATION_MODULE = "core.migrations.0084_repair_validate_membership_category_denorm"
 
@@ -47,8 +48,8 @@ class MembershipCategoryDenormMigrationTests(TestCase):
         )
 
         org = Organization.objects.create(name="Acme", representative="bob")
-        Membership.objects.create(target_organization=org, membership_type_id="gold")
-        Membership.objects.create(target_organization=org, membership_type_id="mirror-org")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="mirror-org")
 
         migration = import_module(MIGRATION_MODULE)
         migration.validate_no_effective_category_duplicates(django_apps, None)
@@ -76,8 +77,8 @@ class MembershipCategoryDenormMigrationTests(TestCase):
         )
 
         org = Organization.objects.create(name="Duplicate Org", representative="bob")
-        Membership.objects.create(target_organization=org, membership_type_id="gold")
-        Membership.objects.create(target_organization=org, membership_type_id="mirror-org")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="mirror-org")
 
         MembershipType.objects.filter(code="mirror-org").update(category_id="sponsorship")
 
@@ -108,8 +109,8 @@ class MembershipCategoryDenormMigrationTests(TestCase):
         )
 
         org = Organization.objects.create(name="Idempotent Org", representative="bob")
-        Membership.objects.create(target_organization=org, membership_type_id="gold")
-        Membership.objects.create(target_organization=org, membership_type_id="mirror-org")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="mirror-org")
 
         migration = import_module(MIGRATION_MODULE)
         migration.validate_no_effective_category_duplicates(django_apps, None)

@@ -11,6 +11,7 @@ from django.utils import timezone
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.models import Membership, MembershipRequest, MembershipType, Organization
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 class FreeIPAMembershipReconcileCommandTests(TestCase):
@@ -34,7 +35,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="alice", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="alice", membership_type=membership_type)
 
         admin_group = self._group(settings.FREEIPA_ADMIN_GROUP, ["admin"])
         target_group = self._group("almalinux-individual", [])
@@ -90,7 +91,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="alice", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="alice", membership_type=membership_type)
 
         admin_group = self._group(settings.FREEIPA_ADMIN_GROUP, ["admin"])
         target_group = self._group("almalinux-individual", ["bob"])
@@ -142,9 +143,9 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="alice", membership_type=individual_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="alice", membership_type=individual_type)
         organization = Organization.objects.create(name="Example Org", representative="bob")
-        Membership.objects.create(target_organization=organization, membership_type=sponsorship_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type=sponsorship_type)
 
         admin_group = self._group(settings.FREEIPA_ADMIN_GROUP, ["admin"])
         individual_group = self._group("almalinux-individual", ["alice"])
@@ -218,7 +219,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="alice", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="alice", membership_type=membership_type)
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type=membership_type,
@@ -274,8 +275,8 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="alice", membership_type=membership_type)
-        Membership.objects.create(target_username="charlie", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="alice", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="charlie", membership_type=membership_type)
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type=membership_type,
@@ -409,7 +410,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="alice", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="alice", membership_type=membership_type)
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type=membership_type,
@@ -474,7 +475,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="alice", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="alice", membership_type=membership_type)
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type=membership_type,
@@ -540,7 +541,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": False,
             },
         )
-        Membership.objects.create(target_username="alice", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="alice", membership_type=membership_type)
         membership_request = MembershipRequest.objects.create(
             requested_username="alice",
             membership_type=membership_type,
@@ -604,7 +605,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
             },
         )
         org = Organization.objects.create(name="Acme", representative="repuser")
-        Membership.objects.create(target_organization=org, membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type=membership_type)
         membership_request = MembershipRequest.objects.create(
             requested_organization=org,
             membership_type=membership_type,
@@ -722,7 +723,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="alice", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="alice", membership_type=membership_type)
 
         admin_group = self._group(settings.FREEIPA_ADMIN_GROUP, ["admin"])
         target_group = self._group("almalinux-individual", [])
@@ -773,7 +774,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="ghost", membership_type=membership_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="ghost", membership_type=membership_type)
 
         admin_group = self._group(settings.FREEIPA_ADMIN_GROUP, ["admin"])
         target_group = self._group("almalinux-individual", [])

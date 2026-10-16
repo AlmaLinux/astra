@@ -122,7 +122,7 @@ class OrganizationAuditLogTests(TestCase):
             {
                 "old": "carol",
                 "new": "bob",
-                "actor": "reviewer",
+                "actor_username": "reviewer",
             },
         )
         self.assertFalse(entry.is_public)

@@ -192,7 +192,7 @@ class Command(BaseCommand):
         )
 
         for org_membership in org_memberships:
-            if org_membership.expires_at is not None and org_membership.expires_at <= now:
+            if org_membership.expires_at <= now:
                 logger.warning(
                     "sponsorship_divergence org_id=%s org_name=%s sponsorship_level=%s reason=expired_sponsorship",
                     org_membership.target_organization_id,

@@ -111,7 +111,6 @@ class Command(BaseCommand):
             Membership.objects.select_related("membership_type")
             .filter(
                 target_organization__isnull=True,
-                expires_at__isnull=False,
                 expires_at__lte=now,
             )
             .exclude(target_username="")
@@ -121,7 +120,6 @@ class Command(BaseCommand):
             Membership.objects.select_related("target_organization", "membership_type")
             .filter(
                 target_organization__isnull=False,
-                expires_at__isnull=False,
                 expires_at__lte=now,
             )
             .order_by("target_organization_id", "membership_type_id")

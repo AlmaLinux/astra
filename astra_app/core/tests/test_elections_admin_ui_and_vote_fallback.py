@@ -16,7 +16,7 @@ from core.freeipa.user import FreeIPAUser
 from core.mail_progress import MailRunKind
 from core.models import Candidate, Election, FreeIPAPermissionGrant, Membership, MembershipType, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 def _run_inline(target: Callable[[], None], *, name: str) -> None:
@@ -61,7 +61,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="viewer", membership_type=voter_type, expires_at=None)
+        membership = Membership.objects.create(target_username="viewer", membership_type=voter_type, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=1))
 
         VotingCredential.objects.create(
@@ -120,7 +120,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             votes=1,
             category_id="individual",
         )
-        membership = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=None)
+        membership = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
 
         viewer = FreeIPAUser(
@@ -640,7 +640,7 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=None)
+        membership = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
 
         VotingCredential.objects.create(
@@ -745,7 +745,7 @@ class ElectionVoteNoJsFallbackTests(_CoreCategoriesTestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=None)
+        membership = Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=1))
 
         session = self.client.session

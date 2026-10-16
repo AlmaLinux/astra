@@ -20,7 +20,7 @@ from core.models import (
     Note,
     Organization,
 )
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class MembershipSelfServiceResetCommandTests(TestCase):
@@ -200,6 +200,7 @@ class MembershipSelfServiceResetCommandTests(TestCase):
         committee_renewal_membership = Membership.objects.create(
             target_username="regular04",
             membership_type_id="mirror",
+            expires_at=FAR_FUTURE,
         )
 
         call_command("membership_selfservice_reset")

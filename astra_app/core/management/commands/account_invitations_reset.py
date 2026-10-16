@@ -373,7 +373,6 @@ class Command(BaseCommand):
             organization=organization,
             invited_by_username=INVITATION_OPERATOR_USERNAME,
             email_template_name=template_name,
-            send_count=0,
             accepted_username=accepted_username,
             accepted_at=event_time if is_accepted else None,
             freeipa_matched_usernames=list(definition.get("freeipa_matched_usernames", [])),

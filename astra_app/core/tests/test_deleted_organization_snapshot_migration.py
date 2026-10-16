@@ -4,7 +4,7 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
-from core.tests.utils_test_data import migrate_to_latest
+from core.tests.utils_test_data import FAR_FUTURE, migrate_to_latest
 
 DELETED_ORG_ID = 424242
 
@@ -48,12 +48,14 @@ class DeletedOrganizationSnapshotMigrationTests(TransactionTestCase):
             membership_type=membership_type,
             requested_group_cn="",
             action="approved",
+            expires_at=FAR_FUTURE,
         )
         self.live_membership = old_apps.get_model("core", "Membership").objects.create(
             target_organization=self.live,
             target_organization_code=live_snapshot["code"],
             target_organization_name=live_snapshot["name"],
             membership_type=membership_type,
+            expires_at=FAR_FUTURE,
         )
 
         self.deleted_request = request_model.objects.create(

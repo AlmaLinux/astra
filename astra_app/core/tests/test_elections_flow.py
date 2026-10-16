@@ -35,7 +35,7 @@ from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
 from core.tests.ballot_chain import compute_chain_hash
-from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories, ensure_email_templates
 from core.tokens import election_genesis_chain_hash
 
 
@@ -599,7 +599,7 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
+        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
 
         issued = elections_services.issue_credentials_at_start_transition(election=election)
@@ -627,8 +627,8 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
             enabled=True,
         )
         eligible_created_at = election.start_datetime - datetime.timedelta(days=200)
-        alice_membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
-        bob_membership = Membership.objects.create(target_username="bob", membership_type=voter, expires_at=None)
+        alice_membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=FAR_FUTURE)
+        bob_membership = Membership.objects.create(target_username="bob", membership_type=voter, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=alice_membership.pk).update(created_at=eligible_created_at)
         Membership.objects.filter(pk=bob_membership.pk).update(created_at=eligible_created_at)
 
@@ -666,7 +666,7 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
+        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
 
         self.assertFalse(hasattr(elections_services, "issue_voting_credentials_from_memberships"))
@@ -739,7 +739,7 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
+        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
 
         election.status = Election.Status.open
@@ -785,13 +785,13 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
         eligible_created_at = election.start_datetime - datetime.timedelta(days=100)
         too_recent_created_at = election.start_datetime - datetime.timedelta(days=10)
 
-        m1 = Membership.objects.create(target_username="alice", membership_type=voter1, expires_at=None)
+        m1 = Membership.objects.create(target_username="alice", membership_type=voter1, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=m1.pk).update(created_at=eligible_created_at)
 
-        m2 = Membership.objects.create(target_username="alice", membership_type=voter2, expires_at=None)
+        m2 = Membership.objects.create(target_username="alice", membership_type=voter2, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=m2.pk).update(created_at=eligible_created_at)
 
-        m3 = Membership.objects.create(target_username="bob", membership_type=voter1, expires_at=None)
+        m3 = Membership.objects.create(target_username="bob", membership_type=voter1, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=m3.pk).update(created_at=too_recent_created_at)
 
         m4 = Membership.objects.create(
@@ -801,7 +801,7 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
         )
         Membership.objects.filter(pk=m4.pk).update(created_at=eligible_created_at)
 
-        m5 = Membership.objects.create(target_username="dave", membership_type=nonvoter, expires_at=None)
+        m5 = Membership.objects.create(target_username="dave", membership_type=nonvoter, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=m5.pk).update(created_at=eligible_created_at)
 
         election.status = Election.Status.open
@@ -837,7 +837,7 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
             category_id="individual",
         )
         eligible_created_at = election.start_datetime - datetime.timedelta(days=100)
-        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=None)
+        membership = Membership.objects.create(target_username="alice", membership_type=voter, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=membership.pk).update(created_at=eligible_created_at)
 
         affected1 = len(
@@ -1815,7 +1815,7 @@ class ElectionVoteEndpointTests(TestCase):
         Membership.objects.create(
             target_username="voter1",
             membership_type=voter,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         eligible_created_at = self.election.start_datetime - datetime.timedelta(days=2)
         Membership.objects.filter(target_username="voter1").update(created_at=eligible_created_at)
@@ -1826,7 +1826,7 @@ class ElectionVoteEndpointTests(TestCase):
         Membership.objects.create(
             target_username="voter2",
             membership_type=MembershipType.objects.get(code="voter"),
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         VotingCredential.objects.create(
             election=self.election,
@@ -1882,7 +1882,7 @@ class ElectionVoteEndpointTests(TestCase):
         Membership.objects.create(
             target_username="voter2",
             membership_type=MembershipType.objects.get(code="voter"),
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         VotingCredential.objects.create(
             election=self.election,

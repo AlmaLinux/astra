@@ -6,7 +6,7 @@ import secrets
 import uuid
 import warnings
 from io import BytesIO
-from typing import Literal, override
+from typing import Literal, Self, override
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -288,15 +288,23 @@ class MembershipType(models.Model):
             )
 
 
+def _exactly_one_q(*present: Q) -> Q:
+    """Check-constraint condition: exactly one of the `present` conditions holds."""
+    condition = Q()
+    for index, chosen in enumerate(present):
+        only_chosen = chosen
+        for other in present[:index] + present[index + 1:]:
+            only_chosen &= ~other
+        condition |= only_chosen
+    return condition
+
+
 def _exactly_one_target_q(*, username_field: str, organization_field: str) -> Q:
-    """A user, a live organization, or a deleted organization's snapshot: exactly one."""
-    no_user = Q(**{username_field: ""})
-    no_organization = Q(**{f"{organization_field}__isnull": True})
-    no_deleted_organization = Q(deleted_organization_id__isnull=True)
-    return (
-        (~no_user & no_organization & no_deleted_organization)
-        | (no_user & ~no_organization & no_deleted_organization)
-        | (no_user & no_organization & ~no_deleted_organization)
+    """A user, a live organization, or a deleted organization's snapshot."""
+    return _exactly_one_q(
+        ~Q(**{username_field: ""}),
+        Q(**{f"{organization_field}__isnull": False}),
+        Q(deleted_organization_id__isnull=False),
     )
 
 
@@ -341,7 +349,6 @@ class Organization(models.Model):
     )
 
     representative = models.CharField(max_length=255, blank=True, default="")
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.unclaimed, db_index=True)
     claim_secret = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
@@ -353,20 +360,17 @@ class Organization(models.Model):
                 name="core_organization_unique_representative",
             ),
             models.CheckConstraint(
-                condition=(
-                    (models.Q(status="unclaimed") & models.Q(representative=""))
-                    | (models.Q(status="active") & ~models.Q(representative=""))
-                ),
-                name="core_organization_status_matches_representative",
-            ),
-            models.CheckConstraint(
-                condition=~(models.Q(status="unclaimed") & models.Q(claim_secret="")),
+                condition=~(models.Q(representative="") & models.Q(claim_secret="")),
                 name="core_organization_unclaimed_requires_claim_secret",
             ),
         ]
 
     def __str__(self) -> str:
         return f"{self.name}"
+
+    @property
+    def status(self) -> Status:
+        return self.Status.active if self.representative else self.Status.unclaimed
 
     def primary_contact_email(self) -> str:
         return (
@@ -381,14 +385,10 @@ class Organization(models.Model):
         self.representative = str(self.representative or "").strip()
         self.claim_secret = str(self.claim_secret or "").strip()
 
-        if self.representative:
-            self.status = self.Status.active
-        else:
-            self.status = self.Status.unclaimed
-            if not self.claim_secret:
-                # Unclaimed organizations need a stable server-side secret so
-                # claim links can be invalidated by rotating this value.
-                self.claim_secret = secrets.token_urlsafe(32)
+        if not self.representative and not self.claim_secret:
+            # Unclaimed organizations need a stable server-side secret so
+            # claim links can be invalidated by rotating this value.
+            self.claim_secret = secrets.token_urlsafe(32)
 
         if self.pk is None and self.logo:
             # The storage path is based on the autoincrement PK; ensure we have
@@ -573,7 +573,7 @@ class MembershipQuerySet(models.QuerySet["Membership"]):
         at: datetime.datetime | None = None,
     ) -> MembershipQuerySet:
         reference = timezone.now() if at is None else at
-        return self.filter(Q(expires_at__isnull=True) | Q(expires_at__gt=reference))
+        return self.filter(expires_at__gt=reference)
 
 class AccountInvitation(models.Model):
     email = models.EmailField(unique=True)
@@ -590,8 +590,6 @@ class AccountInvitation(models.Model):
     invited_by_username = models.CharField(max_length=255)
     invited_at = models.DateTimeField(auto_now_add=True)
     email_template_name = models.CharField(max_length=255, blank=True, default="")
-    last_sent_at = models.DateTimeField(blank=True, null=True)
-    send_count = models.PositiveIntegerField(default=0)
     dismissed_at = models.DateTimeField(blank=True, null=True)
     dismissed_by_username = models.CharField(max_length=255, blank=True, default="")
     accepted_at = models.DateTimeField(blank=True, null=True)
@@ -736,7 +734,7 @@ class Membership(models.Model):
         related_name="memberships",
     )
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
-    expires_at = models.DateTimeField(blank=True, null=True)
+    expires_at = models.DateTimeField()
     # Committee-set dues for an in-kind sponsor, below the tier default; None charges
     # the default. Only changed through MembershipLog (see core.membership_dues).
     dues_usd = models.PositiveIntegerField(blank=True, null=True)
@@ -757,18 +755,8 @@ class Membership(models.Model):
                 condition=models.Q(target_organization__isnull=False),
                 name="uniq_membership_org_type",
             ),
-            # Exactly one target must be set, never both, never neither.
             models.CheckConstraint(
-                condition=(
-                    (
-                        ~models.Q(target_username="")
-                        & models.Q(target_organization__isnull=True)
-                    )
-                    | (
-                        models.Q(target_username="")
-                        & models.Q(target_organization__isnull=False)
-                    )
-                ),
+                condition=_exactly_one_q(~Q(target_username=""), Q(target_organization__isnull=False)),
                 name="chk_membership_exactly_one_target",
             ),
         ]
@@ -826,7 +814,7 @@ class Membership(models.Model):
         *,
         organization: Organization,
         new_membership_type: MembershipType,
-        expires_at: datetime.datetime | None,
+        expires_at: datetime.datetime,
         created_at: datetime.datetime | None = None,
         dues_usd: int | None = None,
     ) -> tuple[Membership, Membership | None]:
@@ -921,10 +909,10 @@ class MembershipLog(models.Model):
         null=True,
         related_name="logs",
     )
-    requested_group_cn = models.CharField(max_length=255, blank=True, default="")
     action = models.CharField(max_length=32, choices=Action.choices)
     created_at = models.DateTimeField(auto_now_add=True)
     rejection_reason = models.TextField(blank=True, default="")
+    # Required on approved/expiry_changed, which set a Membership's term (see Meta constraints).
     expires_at = models.DateTimeField(blank=True, null=True)
     # The term's committee-set dues after this action (None: tier default). Kept on
     # every approval/expiry/dues log so replaying the log never loses a waiver.
@@ -941,7 +929,12 @@ class MembershipLog(models.Model):
                     organization_field="target_organization",
                 ),
                 name="chk_membershiplog_exactly_one_target",
-            )
+            ),
+            # Side effects copy these actions' expiry into Membership.expires_at, which is required.
+            models.CheckConstraint(
+                condition=~Q(action__in=["approved", "expiry_changed"]) | Q(expires_at__isnull=False),
+                name="chk_membershiplog_term_action_has_expiry",
+            ),
         ]
         indexes = [
             models.Index(fields=["target_username", "created_at"], name="ml_tgt_at"),
@@ -1028,7 +1021,6 @@ class MembershipLog(models.Model):
             "deleted_organization_name": deleted_organization_name,
             "membership_type": membership_type,
             "membership_request": membership_request,
-            "requested_group_cn": membership_type.group_cn,
             "action": action,
             "dues_usd": dues_usd,
         }
@@ -1171,7 +1163,7 @@ class MembershipLog(models.Model):
         membership_type: MembershipType,
         target_organization: Organization,
         membership_request: MembershipRequest,
-        expires_at: datetime.datetime | None,
+        expires_at: datetime.datetime,
         dues_usd: int | None,
     ) -> MembershipLog:
         log = cls._create_log(
@@ -1217,7 +1209,7 @@ class MembershipLog(models.Model):
         note_action: dict[str, object] = {
             "type": "terminated",
             "membership_type": membership_type.code,
-            "expires_at": None if current is None or current.expires_at is None else current.expires_at.isoformat(),
+            "expires_at": None if current is None else current.expires_at.isoformat(),
         }
         if reason_category:
             note_action["reason_category"] = reason_category
@@ -1275,7 +1267,28 @@ class MembershipLog(models.Model):
         )
 
 
-class MembershipTerminationFeedback(models.Model):
+class PrivacyReasonTextQuerySet(models.QuerySet):
+    def due_for_reason_cleanup(self, *, now: datetime.datetime) -> Self:
+        return self.filter(~Q(reason_text=""), reason_cleanup_due_at__lte=now, reason_text_cleared_at__isnull=True)
+
+    def clear_reason_text(self, *, now: datetime.datetime) -> int:
+        return self.update(reason_text="", reason_text_cleared_at=now)
+
+
+class PrivacyReasonText(models.Model):
+    """A member's free-text reason, wiped by selfservice_lifecycle_cleanup once it is due."""
+
+    reason_text = models.TextField(blank=True, default="")
+    reason_cleanup_due_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    reason_text_cleared_at = models.DateTimeField(blank=True, null=True)
+
+    objects = PrivacyReasonTextQuerySet.as_manager()
+
+    class Meta:
+        abstract = True
+
+
+class MembershipTerminationFeedback(PrivacyReasonText):
     class TriggerSource(models.TextChoices):
         settings_membership_tab = "settings_membership_tab", "Settings membership tab"
 
@@ -1290,36 +1303,27 @@ class MembershipTerminationFeedback(models.Model):
         on_delete=models.CASCADE,
         related_name="termination_feedback",
     )
-    username = models.CharField(max_length=255, db_index=True)
-    membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT, related_name="+")
     trigger_source = models.CharField(
         max_length=64,
         choices=TriggerSource.choices,
         default=TriggerSource.settings_membership_tab,
     )
     reason_category = models.CharField(max_length=64, choices=ReasonCategory.choices)
-    reason_text = models.TextField(blank=True, default="")
-    reason_cleanup_due_at = models.DateTimeField(blank=True, null=True, db_index=True)
-    reason_text_cleared_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ("-created_at", "-pk")
-        indexes = [
-            models.Index(fields=["username", "created_at"], name="mtf_user_created"),
-            models.Index(fields=["membership_type", "created_at"], name="mtf_type_created"),
-        ]
 
     def __str__(self) -> str:
-        return f"Termination feedback {self.username} ({self.membership_type_id})"
+        return f"Termination feedback {self.membership_log.target_username} ({self.membership_log.membership_type_id})"
 
 
-class AccountDeletionRequestQuerySet(models.QuerySet["AccountDeletionRequest"]):
+class AccountDeletionRequestQuerySet(PrivacyReasonTextQuerySet):
     def active(self) -> AccountDeletionRequestQuerySet:
         return self.filter(status__in=AccountDeletionRequest.ACTIVE_STATUSES)
 
 
-class AccountDeletionRequest(models.Model):
+class AccountDeletionRequest(PrivacyReasonText):
     class RequestSource(models.TextChoices):
         user_settings = "user_settings", "User settings"
         admin_created = "admin_created", "Admin created"
@@ -1357,13 +1361,10 @@ class AccountDeletionRequest(models.Model):
     )
     status = models.CharField(max_length=32, choices=Status.choices, default=Status.pending_review, db_index=True)
     reason_category = models.CharField(max_length=64, choices=ReasonCategory.choices)
-    reason_text = models.TextField(blank=True, default="")
     manual_review_required = models.BooleanField(default=False)
     blocker_codes = models.JSONField(default=list, blank=True)
     fresh_auth_at = models.DateTimeField(blank=True, null=True)
     admin_outcome_notes = models.TextField(blank=True, default="")
-    reason_cleanup_due_at = models.DateTimeField(blank=True, null=True, db_index=True)
-    reason_text_cleared_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1745,7 +1746,6 @@ class Ballot(models.Model):
         on_delete=models.SET_NULL,
         related_name="supersedes",
     )
-    is_counted = models.BooleanField(default=True)
 
     ballot_hash = models.CharField(max_length=64, db_index=True)
 
@@ -1762,15 +1762,15 @@ class Ballot(models.Model):
                 name="uniq_ballot_final_election_credential",
                 condition=Q(superseded_by__isnull=True),
             ),
-            models.UniqueConstraint(
-                fields=["election", "credential_public_id"],
-                name="uniq_ballot_counted_election_credential",
-                condition=Q(is_counted=True),
-            ),
         ]
         indexes = [
             models.Index(fields=["election", "created_at"], name="ballot_el_at"),
         ]
+
+    @property
+    def is_counted(self) -> bool:
+        """Only a credential's latest ballot counts."""
+        return self.superseded_by_id is None
 
     def __str__(self) -> str:
         return f"ballot:{self.election_id}:{self.ballot_hash[:12]}"
@@ -1801,11 +1801,14 @@ class AuditLogEntry(models.Model):
     election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="audit_log", null=True, blank=True)
     organization = models.ForeignKey(
         "Organization",
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name="audit_log",
         null=True,
         blank=True,
     )
+    # Filled by snapshot_deleted_organization() as the FK is nulled; empty while the org exists.
+    deleted_organization_id = models.PositiveBigIntegerField(blank=True, null=True)
+    deleted_organization_name = models.CharField(max_length=255, blank=True, default="")
     timestamp = models.DateTimeField(auto_now_add=True)
     event_type = models.CharField(max_length=64)
     payload = models.JSONField(blank=True, default=dict)
@@ -1820,6 +1823,16 @@ class AuditLogEntry(models.Model):
     class Meta:
         verbose_name_plural = "Audit log entries"
         ordering = ("timestamp", "id")
+        constraints = [
+            models.CheckConstraint(
+                condition=_exactly_one_q(
+                    Q(election__isnull=False),
+                    Q(organization__isnull=False),
+                    Q(deleted_organization_id__isnull=False),
+                ),
+                name="chk_auditlogentry_exactly_one_target",
+            ),
+        ]
         indexes = [
             models.Index(fields=["election", "timestamp"], name="audit_el_ts"),
             models.Index(fields=["election", "is_public"], name="audit_el_pub"),
@@ -1828,8 +1841,8 @@ class AuditLogEntry(models.Model):
         ]
 
     def __str__(self) -> str:
-        if self.organization_id is not None:
-            return f"org:{self.organization_id}:{self.event_type}"
+        if self.election_id is None:
+            return f"org:{self.organization_id or self.deleted_organization_id}:{self.event_type}"
         return f"{self.election_id}:{self.event_type}"
 
 
@@ -2018,19 +2031,19 @@ def snapshot_deleted_organization(
     instance: Organization,
     **kwargs: object,
 ) -> None:
-    """Record which org requests and logs belonged to before SET_NULL drops the FK.
+    """Record which org requests, logs and audit entries belonged to before SET_NULL drops the FK.
 
-    The FK is nulled in the same UPDATE because the target check constraint rejects
+    The FK is nulled in the same UPDATE because the target check constraints reject
     rows carrying both the FK and the snapshot. Collector applies SET_NULL after
     pre_delete, so it then finds nothing left to update.
     """
-    MembershipRequest.objects.filter(requested_organization=instance).update(
-        requested_organization=None,
-        deleted_organization_id=instance.pk,
-        deleted_organization_name=instance.name,
-    )
-    MembershipLog.objects.filter(target_organization=instance).update(
-        target_organization=None,
-        deleted_organization_id=instance.pk,
-        deleted_organization_name=instance.name,
-    )
+    for model, fk_name in (
+        (MembershipRequest, "requested_organization"),
+        (MembershipLog, "target_organization"),
+        (AuditLogEntry, "organization"),
+    ):
+        model.objects.filter(**{fk_name: instance}).update(
+            **{fk_name: None},
+            deleted_organization_id=instance.pk,
+            deleted_organization_name=instance.name,
+        )

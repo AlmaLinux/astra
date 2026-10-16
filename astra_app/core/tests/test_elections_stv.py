@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.test import TestCase
 from django.utils import timezone
 
-from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories, ensure_email_templates
 
 
 class STVTallyTests(TestCase):
@@ -496,7 +496,7 @@ class ElectionPrivacyFlowTests(TestCase):
             target_username="reviewer",
             membership_type=mt,
             created_at=now - datetime.timedelta(days=200),
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         # This test will be expanded once vote submission view exists.

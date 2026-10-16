@@ -1115,7 +1115,7 @@ def _serialize_settings_membership_tab(context: dict[str, object]) -> dict[str, 
                 "membership_type_code": row["membership"].membership_type.code,
                 "membership_type_name": row["membership"].membership_type.name,
                 "created_at": row["membership"].created_at.isoformat(),
-                "expires_at": None if row["membership"].expires_at is None else row["membership"].expires_at.isoformat(),
+                "expires_at": row["membership"].expires_at.isoformat(),
                 "termination_form": _serialize_settings_form(form=row["termination_form"]),
             }
             for row in context["membership_rows"]
@@ -2121,8 +2121,6 @@ def settings_membership_terminate(request: HttpRequest, *, membership_type_code:
             )
             feedback = MembershipTerminationFeedback.objects.create(
                 membership_log=log,
-                username=username,
-                membership_type=membership_type,
                 reason_category=form.cleaned_data["reason_category"],
                 reason_text=reason_text,
                 reason_cleanup_due_at=privacy_reason_cleanup_due_at() if reason_text else None,

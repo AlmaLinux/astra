@@ -78,7 +78,7 @@ export interface UserProfileMembershipEntry {
   requestId: number | null;
   membershipType: UserProfileMembershipType;
   createdAt: string | null;
-  expiresAt: string | null;
+  expiresAt: string;
   isExpiringSoon: boolean;
   canRenew: boolean;
   renewalMembershipTypeCode: string;

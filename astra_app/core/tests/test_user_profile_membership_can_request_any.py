@@ -7,6 +7,7 @@ from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
 from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 class UserProfileMembershipCanRequestAnyTests(TestCase):
@@ -168,6 +169,7 @@ class UserProfileMembershipCanRequestAnyTests(TestCase):
         Membership.objects.create(
             target_username="alex",
             membership_type_id="individual",
+            expires_at=FAR_FUTURE,
         )
 
         alex = FreeIPAUser(

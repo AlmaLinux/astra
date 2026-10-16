@@ -23,7 +23,7 @@ from core.models import (
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 VOTER_USERNAMES = ["voter1", "voter2", "voter3", "alice", "nominator"]
 
@@ -68,7 +68,7 @@ class ElectionStartProgressApiTests(TestCase):
             membership = Membership.objects.create(
                 target_username=username,
                 membership_type=membership_type,
-                expires_at=None,
+                expires_at=FAR_FUTURE,
             )
             Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=200))
 

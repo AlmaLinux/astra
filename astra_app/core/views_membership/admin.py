@@ -127,15 +127,10 @@ def _build_membership_sponsor_rows(*, q: str) -> list[dict[str, object]]:
         rep_username = str(organization.representative or "").strip()
         rep_fullname = representative_full_names.get(rep_username, "")
 
-        days_left: int | None = None
-        is_expiring_soon = False
-        expires_display = "-"
-        expires_at_order = "9999-12-31"
-        if membership.expires_at is not None:
-            days_left = (membership.expires_at - now).days
-            is_expiring_soon = days_left <= warning_days
-            expires_display = f"{membership.expires_at:%Y-%m-%d} ({days_left} days left)"
-            expires_at_order = membership.expires_at.strftime("%Y-%m-%d %H:%M:%S")
+        days_left = (membership.expires_at - now).days
+        is_expiring_soon = days_left <= warning_days
+        expires_display = f"{membership.expires_at:%Y-%m-%d} ({days_left} days left)"
+        expires_at_order = membership.expires_at.strftime("%Y-%m-%d %H:%M:%S")
 
         representative_label = rep_fullname and f"{rep_fullname} ({rep_username})" or rep_username
 

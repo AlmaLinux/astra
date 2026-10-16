@@ -2060,8 +2060,7 @@ class MembershipAdminForm(forms.ModelForm):
                 self.fields["target_username"].initial = instance.target_username
 
             self.fields["starts_on"].initial = instance.created_at.astimezone(datetime.UTC).date()
-            if instance.expires_at is not None:
-                self.fields["expires_on"].initial = instance.expires_at.astimezone(datetime.UTC).date()
+            self.fields["expires_on"].initial = instance.expires_at.astimezone(datetime.UTC).date()
 
             for field_name in ("target_kind", "target_username", "target_organization", "membership_type"):
                 self.fields[field_name].disabled = True
@@ -2479,24 +2478,38 @@ class ExclusionGroupAdmin(admin.ModelAdmin):
 
 @admin.register(AuditLogEntry)
 class AuditLogEntryAdmin(ReadOnlyModelAdmin):
-    list_display = ("election", "organization", "timestamp", "event_type", "is_public")
+    list_display = ("election", "organization", "deleted_organization_name", "timestamp", "event_type", "is_public")
     list_filter = ("election", "organization", "is_public", "event_type")
-    search_fields = ("event_type",)
+    search_fields = ("event_type", "deleted_organization_name")
     ordering = ("-timestamp", "id")
-    readonly_fields = ("election", "organization", "timestamp", "event_type", "payload", "is_public")
+    readonly_fields = (
+        "election",
+        "organization",
+        "deleted_organization_id",
+        "deleted_organization_name",
+        "timestamp",
+        "event_type",
+        "payload",
+        "is_public",
+    )
 
 
 @admin.register(MembershipTerminationFeedback)
 class MembershipTerminationFeedbackAdmin(ReadOnlyModelAdmin):
     """Why members left; the free text is cleared by selfservice_lifecycle_cleanup after 30 days."""
 
-    list_display = ("username", "membership_type", "reason_category", "created_at")
-    list_filter = ("reason_category", "membership_type")
-    search_fields = ("username",)
+    list_display = (
+        "membership_log__target_username",
+        "membership_log__membership_type",
+        "reason_category",
+        "created_at",
+    )
+    list_filter = ("reason_category", "membership_log__membership_type")
+    list_select_related = ("membership_log",)
+    search_fields = ("membership_log__target_username",)
     ordering = ("-created_at", "-pk")
     fields = (
-        "username",
-        "membership_type",
+        "membership_log",
         "reason_category",
         "reason_text",
         "reason_cleanup_due_at",
@@ -3821,7 +3834,6 @@ class OrganizationAdmin(admin.ModelAdmin):
                 "Please provide the exact URL that you would like the logo to link to - this can be a dedicated page or just your primary URL"
             )
             self.fields["logo"].label = "Logo upload for AlmaLinux Accounts"
-            self.fields["status"].required = False
 
             usernames, users_by_username = _freeipa_user_data()
 
@@ -3850,13 +3862,9 @@ class OrganizationAdmin(admin.ModelAdmin):
 
         def clean_representative(self) -> str:
             username = str(self.cleaned_data.get("representative") or "").strip()
-            status = str(self.cleaned_data.get("status") or "").strip() or Organization.Status.unclaimed
-
-            if status == Organization.Status.unclaimed and not username:
-                return ""
-
+            # No representative means the organization stays unclaimed.
             if not username:
-                raise forms.ValidationError("A representative is required.", code="required")
+                return ""
 
             if FreeIPAUser.get(username) is None:
                 raise forms.ValidationError(
@@ -3899,7 +3907,8 @@ class OrganizationAdmin(admin.ModelAdmin):
                     "membership_type"
                 )
             }
-            expires_at_field = forms.DateTimeField(required=False)
+            # Matches the inline's AdminSplitDateTime widget, which posts expires_at_0/expires_at_1.
+            expires_at_field = forms.SplitDateTimeField(required=False)
 
             # Admin form clean does not get parsed inline formsets, so inspect
             # the submitted inline payload directly and only flag rows that can
@@ -3909,7 +3918,9 @@ class OrganizationAdmin(admin.ModelAdmin):
                 membership_id = str(self.data.get(f"{prefix}id") or "").strip()
                 membership_type_id = str(self.data.get(f"{prefix}membership_type") or "").strip()
                 delete_requested = bool(self.data.get(f"{prefix}DELETE"))
-                raw_expires_at = str(self.data.get(f"{prefix}expires_at") or "").strip()
+                raw_expires_at = [
+                    str(self.data.get(f"{prefix}expires_at_{part}") or "").strip() for part in (0, 1)
+                ]
 
                 if membership_id:
                     current_membership = current_memberships.get(membership_id)
@@ -3933,7 +3944,7 @@ class OrganizationAdmin(admin.ModelAdmin):
                         )
 
                     try:
-                        cleaned_expires_at = expires_at_field.clean(raw_expires_at) if raw_expires_at else None
+                        cleaned_expires_at = expires_at_field.clean(raw_expires_at)
                     except forms.ValidationError:
                         raise forms.ValidationError(
                             "Change the representative and sponsorship memberships in separate saves."
@@ -4011,6 +4022,7 @@ class OrganizationAdmin(admin.ModelAdmin):
     actions = ("generate_claim_url",)
 
     list_display = ("id", "name", "business_contact_email", "website")
+    readonly_fields = ("id", "status")
     search_fields = (
         "name",
         "business_contact_email",
@@ -4038,13 +4050,6 @@ class OrganizationAdmin(admin.ModelAdmin):
                 level=messages.ERROR,
             )
             return HttpResponseRedirect(request.path)
-
-    @override
-    def get_readonly_fields(self, request, obj=None):
-        readonly = list(super().get_readonly_fields(request, obj=obj))
-        if "id" not in readonly:
-            readonly.append("id")
-        return tuple(readonly)
 
     @override
     def save_model(self, request, obj, form, change) -> None:
@@ -4083,7 +4088,7 @@ class OrganizationAdmin(admin.ModelAdmin):
 
     @admin.action(description="Generate claim URL")
     def generate_claim_url(self, request: HttpRequest, queryset) -> None:
-        unclaimed_orgs = list(queryset.filter(status=Organization.Status.unclaimed).order_by("name", "id"))
+        unclaimed_orgs = list(queryset.filter(representative="").order_by("name", "id"))
         claimed_count = queryset.count() - len(unclaimed_orgs)
 
         if claimed_count:

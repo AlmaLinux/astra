@@ -66,7 +66,6 @@ class MembershipRequestDetailApiTests(TestCase):
             target_organization=None,
             membership_type=membership_type,
             membership_request=membership_request,
-            requested_group_cn=membership_type.group_cn,
             action=MembershipLog.Action.requested,
         )
 
@@ -347,7 +346,6 @@ class MembershipRequestDetailApiTests(TestCase):
             target_organization=None,
             membership_type_id="mirror",
             membership_request=membership_request,
-            requested_group_cn="almalinux-mirror",
             action=MembershipLog.Action.requested,
         )
 

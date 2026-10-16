@@ -467,8 +467,7 @@ class AccountInvitationViewsTests(TestCase):
 
         self.assertEqual(send_resp.status_code, 302)
         invitation = AccountInvitation.objects.get(email="alice@example.com")
-        self.assertEqual(invitation.send_count, 1)
-        self.assertTrue(AccountInvitationSend.objects.filter(invitation=invitation).exists())
+        self.assertEqual(invitation.sends.filter(result=AccountInvitationSend.Result.queued).count(), 1)
         _, kwargs = queue_mock.call_args
         self.assertNotIn("note", kwargs["context"])
         self.assertIn("invitation_token", kwargs["context"])
@@ -747,7 +746,7 @@ class AccountInvitationViewsTests(TestCase):
         self.assertEqual(invitation.note, "Original note")
         self.assertEqual(invitation.invited_by_username, "committee")
         self.assertEqual(invitation.email_template_name, settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
-        self.assertEqual(invitation.send_count, 0)
+        self.assertFalse(invitation.sends.filter(result=AccountInvitationSend.Result.queued).exists())
 
     @override_settings(PUBLIC_BASE_URL="")
     def test_account_invitations_send_surfaces_public_base_url_configuration_error(self) -> None:
@@ -976,8 +975,7 @@ class AccountInvitationViewsTests(TestCase):
 
         invitation.refresh_from_db()
         self.assertIsNotNone(invitation.dismissed_at)
-        self.assertEqual(invitation.send_count, 1)
-        self.assertTrue(AccountInvitationSend.objects.filter(invitation=invitation).exists())
+        self.assertEqual(invitation.sends.filter(result=AccountInvitationSend.Result.queued).count(), 1)
         _args, kwargs = queue_mock.call_args
         self.assertEqual(kwargs["context"].get("membership_committee_email"), settings.MEMBERSHIP_COMMITTEE_EMAIL)
         self.assertEqual(kwargs.get("reply_to"), [settings.MEMBERSHIP_COMMITTEE_EMAIL])
@@ -1045,9 +1043,8 @@ class AccountInvitationViewsTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         first.refresh_from_db()
         second.refresh_from_db()
-        self.assertEqual(first.send_count, 1)
-        self.assertEqual(second.send_count, 1)
-        self.assertEqual(AccountInvitationSend.objects.filter(invitation__in=[first, second]).count(), 2)
+        for invitation in (first, second):
+            self.assertEqual(invitation.sends.filter(result=AccountInvitationSend.Result.queued).count(), 1)
 
     def test_account_invitations_bulk_dismiss_accepted(self) -> None:
         self._login_as_freeipa_user("committee")

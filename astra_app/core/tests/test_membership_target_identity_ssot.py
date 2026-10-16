@@ -13,6 +13,7 @@ from core.models import (
     MembershipTypeCategory,
     Organization,
 )
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 class MembershipTargetIdentitySSOTTests(TestCase):
@@ -109,6 +110,7 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         membership = Membership.objects.create(
             target_organization=organization,
             membership_type=membership_type,
+            expires_at=FAR_FUTURE,
         )
         membership_identity = membership.target_identity
         self.assertEqual(membership_identity.kind, MembershipTargetKind.organization)
@@ -118,6 +120,7 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         log = MembershipLog.objects.create(
             actor_username="reviewer",
             action=MembershipLog.Action.approved,
+            expires_at=FAR_FUTURE,
             membership_type=membership_type,
             target_organization=organization,
         )
@@ -134,6 +137,7 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         fk_match = MembershipLog.objects.create(
             actor_username="reviewer",
             action=MembershipLog.Action.approved,
+            expires_at=FAR_FUTURE,
             membership_type=membership_type,
             target_organization=primary_org,
         )
@@ -147,6 +151,7 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         MembershipLog.objects.create(
             actor_username="reviewer",
             action=MembershipLog.Action.approved,
+            expires_at=FAR_FUTURE,
             membership_type=membership_type,
             target_organization=secondary_org,
         )
@@ -162,12 +167,13 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         Membership.objects.create(
             target_organization=organization,
             membership_type_id="gold",
+            expires_at=FAR_FUTURE,
         )
 
         new, old_copy = Membership.replace_within_category(
             organization=organization,
             new_membership_type=MembershipType.objects.get(code="platinum"),
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         self.assertIsNotNone(old_copy)
@@ -180,6 +186,7 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         membership = Membership.objects.create(
             target_username="alice",
             membership_type_id="individual",
+            expires_at=FAR_FUTURE,
         )
 
         log = MembershipLog.objects.create(

@@ -50,7 +50,6 @@ class MembershipRequestDetailRequestedForRowTests(TestCase):
             target_organization=None,
             membership_type=mt,
             membership_request=req,
-            requested_group_cn=mt.group_cn,
             action=MembershipLog.Action.requested,
         )
 
@@ -102,7 +101,6 @@ class MembershipRequestDetailRequestedForRowTests(TestCase):
             target_organization=None,
             membership_type=mt,
             membership_request=req,
-            requested_group_cn=mt.group_cn,
             action=MembershipLog.Action.requested,
         )
 

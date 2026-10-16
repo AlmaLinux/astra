@@ -23,7 +23,7 @@ from core.models import (
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 ADMIN_USER = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
@@ -85,7 +85,7 @@ class ElectionStartLifecycleTests(TestCase):
         membership = Membership.objects.create(
             target_username=username,
             membership_type=membership_type or self.individual_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.filter(pk=membership.pk).update(created_at=self.now - datetime.timedelta(days=200))
 
@@ -275,7 +275,7 @@ class ElectionStartLifecycleTests(TestCase):
     def _organization_nominated_election(
         self,
         *,
-        organization_expires_at: datetime.datetime | None,
+        organization_expires_at: datetime.datetime,
     ) -> tuple[Election, str]:
         election = self._draft_election()
         organization = Organization.objects.create(name="Infra Foundation", representative="")
@@ -305,7 +305,7 @@ class ElectionStartLifecycleTests(TestCase):
         return election, organization_nominator_id
 
     def test_start_accepts_a_valid_organization_nominator(self) -> None:
-        election, _ = self._organization_nominated_election(organization_expires_at=None)
+        election, _ = self._organization_nominated_election(organization_expires_at=FAR_FUTURE)
 
         with (
             self._committee_group_patch(member_usernames=[]),

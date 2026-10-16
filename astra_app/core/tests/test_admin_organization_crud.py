@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class AdminOrganizationCRUDTests(TestCase):
@@ -225,6 +225,7 @@ class AdminOrganizationCRUDTests(TestCase):
         membership = Membership.objects.create(
             target_organization=organization,
             membership_type_id="gold",
+            expires_at=FAR_FUTURE,
         )
 
         self._login_as_freeipa_admin("alice")
@@ -250,7 +251,9 @@ class AdminOrganizationCRUDTests(TestCase):
                     "id": str(membership.pk),
                     "target_organization": str(organization.pk),
                     "membership_type": "gold",
-                    "expires_at": "",
+                    # AdminSplitDateTime posts the date and time separately; this is FAR_FUTURE.
+                    "expires_at_0": "2099-01-01",
+                    "expires_at_1": "00:00:00",
                 }
             ],
         )
@@ -317,6 +320,7 @@ class AdminOrganizationCRUDTests(TestCase):
         membership = Membership.objects.create(
             target_organization=organization,
             membership_type_id="gold",
+            expires_at=FAR_FUTURE,
         )
 
         self._login_as_freeipa_admin("alice")
@@ -342,7 +346,9 @@ class AdminOrganizationCRUDTests(TestCase):
                     "id": str(membership.pk),
                     "target_organization": str(organization.pk),
                     "membership_type": "silver",
-                    "expires_at": "",
+                    # AdminSplitDateTime posts the date and time separately; this is FAR_FUTURE.
+                    "expires_at_0": "2099-01-01",
+                    "expires_at_1": "00:00:00",
                 }
             ],
         )
@@ -418,10 +424,12 @@ class AdminOrganizationCRUDTests(TestCase):
         sponsorship_membership = Membership.objects.create(
             target_organization=organization,
             membership_type_id="gold",
+            expires_at=FAR_FUTURE,
         )
         contributor_membership = Membership.objects.create(
             target_organization=organization,
             membership_type_id="contributor-basic",
+            expires_at=FAR_FUTURE,
         )
 
         self._login_as_freeipa_admin("alice")
@@ -447,19 +455,25 @@ class AdminOrganizationCRUDTests(TestCase):
                     "id": str(sponsorship_membership.pk),
                     "target_organization": str(organization.pk),
                     "membership_type": "gold",
-                    "expires_at": "",
+                    # AdminSplitDateTime posts the date and time separately; this is FAR_FUTURE.
+                    "expires_at_0": "2099-01-01",
+                    "expires_at_1": "00:00:00",
                 },
                 {
                     "id": str(contributor_membership.pk),
                     "target_organization": str(organization.pk),
                     "membership_type": "contributor-basic",
-                    "expires_at": "",
+                    # AdminSplitDateTime posts the date and time separately; this is FAR_FUTURE.
+                    "expires_at_0": "2099-01-01",
+                    "expires_at_1": "00:00:00",
                 },
                 {
                     "id": "",
                     "target_organization": str(organization.pk),
                     "membership_type": "contributor-plus",
-                    "expires_at": "",
+                    # AdminSplitDateTime posts the date and time separately; this is FAR_FUTURE.
+                    "expires_at_0": "2099-01-01",
+                    "expires_at_1": "00:00:00",
                 },
             ],
         )

@@ -219,7 +219,6 @@ def build_public_ballots_export(*, election: Election) -> dict[str, object]:
             "ranking",
             "weight",
             "ballot_hash",
-            "is_counted",
             "chain_hash",
             "previous_chain_hash",
             "superseded_by__ballot_hash",
@@ -677,7 +676,6 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
             ballot_hash=ballot_hash,
             previous_chain_hash=previous_chain_hash,
             chain_hash=chain_hash,
-            is_counted=True,
         )
     else:
         supersedes_ballot_hash = str(current.ballot_hash or "").strip()
@@ -694,18 +692,11 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
             previous_chain_hash=previous_chain_hash,
             chain_hash=chain_hash,
             superseded_by=current,
-            is_counted=False,
         )
 
-        Ballot.objects.filter(pk=current.pk).update(
-            superseded_by=ballot,
-            is_counted=False,
-        )
-        Ballot.objects.filter(pk=ballot.pk).update(
-            superseded_by=None,
-            is_counted=True,
-        )
-        ballot.refresh_from_db(fields=["superseded_by", "is_counted"])
+        Ballot.objects.filter(pk=current.pk).update(superseded_by=ballot)
+        Ballot.objects.filter(pk=ballot.pk).update(superseded_by=None)
+        ballot.refresh_from_db(fields=["superseded_by"])
 
     payload: dict[str, object] = {"ballot_hash": ballot_hash}
     if supersedes_ballot_hash:

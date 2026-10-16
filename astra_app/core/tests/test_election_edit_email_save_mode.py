@@ -9,7 +9,7 @@ from post_office.models import EmailTemplate
 
 from core.models import Candidate, Election, FreeIPAPermissionGrant, Membership, MembershipType
 from core.permissions import ASTRA_ADD_ELECTION
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class ElectionEditEmailSaveModeTests(TestCase):
@@ -39,7 +39,7 @@ class ElectionEditEmailSaveModeTests(TestCase):
             enabled=True,
             votes=1,
         )
-        m = Membership.objects.create(target_username=username, membership_type=mt, expires_at=None)
+        m = Membership.objects.create(target_username=username, membership_type=mt, expires_at=FAR_FUTURE)
         created_at = election.start_datetime - datetime.timedelta(days=200)
         Membership.objects.filter(pk=m.pk).update(created_at=created_at)
 

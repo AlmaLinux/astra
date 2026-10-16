@@ -20,7 +20,7 @@ export interface OrganizationDetailMembership {
   requestId: number | null;
   membershipType: OrganizationDetailMembershipType;
   createdAt: string | null;
-  expiresAt: string | null;
+  expiresAt: string;
   isExpiringSoon: boolean;
   canRenew: boolean;
   renewalMembershipTypeCode: string;

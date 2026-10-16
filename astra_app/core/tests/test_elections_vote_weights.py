@@ -30,6 +30,7 @@ from core.models import (
     Organization,
     VotingCredential,
 )
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=1)
@@ -417,7 +418,7 @@ class ElectionVoteWeightsTests(TestCase):
         membership = Membership.objects.create(
             target_organization=org,
             membership_type=misclassified_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.filter(pk=membership.pk).update(
             created_at=election.start_datetime - datetime.timedelta(days=10)

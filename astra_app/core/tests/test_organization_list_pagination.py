@@ -26,6 +26,7 @@ from core.permissions import (
     ASTRA_VIEW_MEMBERSHIP,
     ASTRA_VIEW_USER_DIRECTORY,
 )
+from core.tests.utils_test_data import FAR_FUTURE
 from core.views_organizations import _filter_organization_queryset_by_search
 
 
@@ -200,7 +201,7 @@ class OrganizationListPaginationTests(TestCase):
                 name=f"Org {index:02d}",
                 representative=f"rep-{index}",
             )
-            Membership.objects.create(target_organization=organization, membership_type=sponsor_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type=sponsor_type)
 
         reviewer = FreeIPAUser(
             "reviewer",
@@ -245,13 +246,13 @@ class OrganizationListPaginationTests(TestCase):
                 name=f"Match Org {index:02d}",
                 representative=f"rep-match-{index}",
             )
-            Membership.objects.create(target_organization=match_org, membership_type=sponsor_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=match_org, membership_type=sponsor_type)
         for index in range(3):
             other_org = Organization.objects.create(
                 name=f"Other Org {index:02d}",
                 representative=f"rep-other-{index}",
             )
-            Membership.objects.create(target_organization=other_org, membership_type=sponsor_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=other_org, membership_type=sponsor_type)
 
         reviewer = FreeIPAUser(
             "reviewer",
@@ -294,9 +295,9 @@ class OrganizationListPaginationTests(TestCase):
         Organization.objects.create(name="Claimed No Membership", representative="carol")
         unclaimed_mirror = Organization.objects.create(name="Unclaimed Mirror", representative="")
 
-        Membership.objects.create(target_organization=claimed_mirror, membership_type=mirror_type)
-        Membership.objects.create(target_organization=claimed_sponsor, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=unclaimed_mirror, membership_type=mirror_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=claimed_mirror, membership_type=mirror_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=claimed_sponsor, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=unclaimed_mirror, membership_type=mirror_type)
 
         representative = FreeIPAUser(
             "alice",
@@ -329,7 +330,7 @@ class OrganizationListPaginationTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         organization = Organization.objects.create(name="Sponsor Org", representative="rep")
-        Membership.objects.create(target_organization=organization, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type=sponsor_type)
 
         reviewer = FreeIPAUser(
             "reviewer",
@@ -364,7 +365,7 @@ class OrganizationListPaginationTests(TestCase):
             representative="bravo-rep",
         )
         for organization in (acme_claimed, acme_unclaimed, bravo_claimed):
-            Membership.objects.create(target_organization=organization, membership_type=sponsor_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type=sponsor_type)
 
         manager = FreeIPAUser(
             "manager",
@@ -405,7 +406,7 @@ class OrganizationListPaginationTests(TestCase):
             representative="",
         )
         for organization in (acme_claimed, acme_unclaimed, bravo_unclaimed):
-            Membership.objects.create(target_organization=organization, membership_type=sponsor_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type=sponsor_type)
 
         manager = FreeIPAUser(
             "manager",
@@ -444,7 +445,7 @@ class OrganizationListPaginationTests(TestCase):
             representative="bravo-rep",
         )
         for organization in (acme_claimed, acme_unclaimed, bravo_claimed):
-            Membership.objects.create(target_organization=organization, membership_type=sponsor_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type=sponsor_type)
 
         reviewer = FreeIPAUser(
             "reviewer",
@@ -479,7 +480,7 @@ class OrganizationListPaginationTests(TestCase):
             representative="",
         )
         for organization in (acme_claimed, acme_unclaimed):
-            Membership.objects.create(target_organization=organization, membership_type=sponsor_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type=sponsor_type)
 
         reviewer = FreeIPAUser(
             "reviewer",
@@ -509,7 +510,7 @@ class OrganizationListPaginationTests(TestCase):
             name="Acme Claimed",
             representative="acme-rep",
         )
-        Membership.objects.create(target_organization=organization, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type=sponsor_type)
 
         manager = FreeIPAUser(
             "manager",
@@ -588,9 +589,9 @@ class OrganizationListPaginationTests(TestCase):
         gold_org = Organization.objects.create(name="Acme Gold", representative="rep-gold")
         expired_org = Organization.objects.create(name="Acme Mirror Expired", representative="rep-expired")
 
-        Membership.objects.create(target_organization=mirror_org, membership_type_id="mirror")
-        Membership.objects.create(target_organization=sponsor_org, membership_type_id="sponsor")
-        Membership.objects.create(target_organization=gold_org, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=mirror_org, membership_type_id="mirror")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_org, membership_type_id="sponsor")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=gold_org, membership_type_id="gold")
         Membership.objects.create(
             target_organization=expired_org,
             membership_type_id="mirror",
@@ -641,8 +642,8 @@ class OrganizationListPaginationTests(TestCase):
         for index in range(26):
             sponsor_org = Organization.objects.create(name=f"Sponsor Org {index:02d}", representative=f"s-{index}")
             mirror_org = Organization.objects.create(name=f"Mirror Org {index:02d}", representative=f"m-{index}")
-            Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
-            Membership.objects.create(target_organization=mirror_org, membership_type=mirror_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_org, membership_type=sponsor_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=mirror_org, membership_type=mirror_type)
 
         reviewer = FreeIPAUser(
             "reviewer",
@@ -691,10 +692,10 @@ class OrganizationListPaginationTests(TestCase):
         mirror_match = Organization.objects.create(name="Mirror Match", representative="m-match")
         mirror_other = Organization.objects.create(name="Mirror Other", representative="m-other")
 
-        Membership.objects.create(target_organization=sponsor_alpha, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=sponsor_beta, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=mirror_match, membership_type=mirror_type)
-        Membership.objects.create(target_organization=mirror_other, membership_type=mirror_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_alpha, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_beta, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=mirror_match, membership_type=mirror_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=mirror_other, membership_type=mirror_type)
 
         reviewer = FreeIPAUser(
             "reviewer",
@@ -721,8 +722,8 @@ class OrganizationListPaginationTests(TestCase):
 
         matched_org = Organization.objects.create(name="Infra Services", representative="alice")
         other_org = Organization.objects.create(name="Other Services", representative="bob")
-        Membership.objects.create(target_organization=matched_org, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=other_org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=matched_org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=other_org, membership_type=sponsor_type)
 
         viewer = FreeIPAUser(
             "alice",
@@ -756,7 +757,7 @@ class OrganizationListPaginationTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         matched_org = Organization.objects.create(name="Infra Services", representative="alice")
-        Membership.objects.create(target_organization=matched_org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=matched_org, membership_type=sponsor_type)
 
         viewer = FreeIPAUser(
             "alice",
@@ -829,8 +830,8 @@ class OrganizationListPaginationTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         org = Organization.objects.create(name="Badge Order Org", representative="org-rep")
-        Membership.objects.create(target_organization=org, membership_type=mirror_priority)
-        Membership.objects.create(target_organization=org, membership_type=sponsor_priority)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type=mirror_priority)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type=sponsor_priority)
 
         reviewer = FreeIPAUser(
             "reviewer",
@@ -893,8 +894,8 @@ class OrganizationListPaginationTests(TestCase):
                     name=f"Mirror {index:02d}",
                     representative=f"m-{index:02d}",
                 )
-                Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
-                Membership.objects.create(target_organization=mirror_org, membership_type=mirror_type)
+                Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_org, membership_type=sponsor_type)
+                Membership.objects.create(expires_at=FAR_FUTURE, target_organization=mirror_org, membership_type=mirror_type)
 
             reviewer = FreeIPAUser(
                 "reviewer",

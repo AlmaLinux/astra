@@ -325,9 +325,7 @@ def _send_membership_request_notification(
 def _active_expires_at(queryset: QuerySet) -> datetime.datetime | None:
     """Return expires_at if the first matching record is still valid, else None."""
     current = queryset.first()
-    if current is None or current.expires_at is None:
-        return None
-    if current.expires_at <= timezone.now():
+    if current is None or current.expires_at <= timezone.now():
         return None
     return current.expires_at
 

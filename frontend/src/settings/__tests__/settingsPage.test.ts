@@ -100,7 +100,7 @@ describe("SettingsPage", () => {
                   membershipTypeCode: "packager",
                   membershipTypeName: "Packager",
                   createdAt: "2026-04-01T00:00:00Z",
-                  expiresAt: null,
+                  expiresAt: "2027-01-15T12:00:00Z",
                   terminationForm: {
                     isBound: true,
                     nonFieldErrors: [],

@@ -9,6 +9,7 @@ from core.models import (
     MembershipTypeCategory,
     Organization,
 )
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 class DeletedOrganizationSnapshotTests(TestCase):
@@ -38,6 +39,7 @@ class DeletedOrganizationSnapshotTests(TestCase):
         log = MembershipLog.objects.create(
             actor_username="reviewer",
             action=MembershipLog.Action.approved,
+            expires_at=FAR_FUTURE,
             membership_type=self.membership_type,
             target_organization=self.organization,
             membership_request=request,
@@ -49,6 +51,7 @@ class DeletedOrganizationSnapshotTests(TestCase):
         membership = Membership.objects.create(
             target_organization=self.organization,
             membership_type=self.membership_type,
+            expires_at=FAR_FUTURE,
         )
 
         Organization.objects.filter(pk=self.organization.pk).update(name="Acme Renamed")
@@ -85,12 +88,14 @@ class DeletedOrganizationSnapshotTests(TestCase):
         acme_log = MembershipLog.objects.create(
             actor_username="reviewer",
             action=MembershipLog.Action.approved,
+            expires_at=FAR_FUTURE,
             membership_type=self.membership_type,
             target_organization=self.organization,
         )
         other_log = MembershipLog.objects.create(
             actor_username="reviewer",
             action=MembershipLog.Action.approved,
+            expires_at=FAR_FUTURE,
             membership_type=self.membership_type,
             target_organization=other,
         )

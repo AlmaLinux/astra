@@ -1166,7 +1166,6 @@ class MembershipCSVImportResource(resources.ModelResource):
         )
         if (
             existing_membership is None
-            or existing_membership.expires_at is None
             or existing_membership.expires_at <= approved_at
         ):
             return None

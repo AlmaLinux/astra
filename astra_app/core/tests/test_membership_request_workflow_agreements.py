@@ -655,7 +655,6 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type=membership_type,
-            requested_group_cn=membership_type.group_cn,
             action=MembershipLog.Action.approved,
             expires_at=timezone.now() + datetime.timedelta(days=30),
         )
@@ -692,7 +691,6 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type=membership_type,
-            requested_group_cn=membership_type.group_cn,
             action=MembershipLog.Action.approved,
             expires_at=timezone.now() + datetime.timedelta(days=30),
         )

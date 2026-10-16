@@ -41,15 +41,9 @@ class MembershipActiveBoundaryTests(TestCase):
             membership_type=membership_type,
             expires_at=now + datetime.timedelta(seconds=1),
         )
-        no_expiry = Membership.objects.create(
-            target_username="no-expiry",
-            membership_type=membership_type,
-            expires_at=None,
-        )
 
         active_ids = set(Membership.objects.active(at=now).values_list("id", flat=True))
 
         self.assertNotIn(expires_now.id, active_ids)
         self.assertNotIn(expired.id, active_ids)
         self.assertIn(active.id, active_ids)
-        self.assertIn(no_expiry.id, active_ids)

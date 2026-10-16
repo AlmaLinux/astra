@@ -98,7 +98,6 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
-                requested_group_cn="almalinux-individual",
                 action=MembershipLog.Action.approved,
                 expires_at=expires_at_utc,
             )
@@ -162,7 +161,6 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
-                requested_group_cn="almalinux-individual",
                 action=MembershipLog.Action.approved,
                 expires_at=expires_at_utc,
             )
@@ -218,7 +216,6 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
-                requested_group_cn="almalinux-individual",
                 action=MembershipLog.Action.approved,
                 expires_at=expires_at_utc,
             )
@@ -280,7 +277,6 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
-                requested_group_cn="almalinux-individual",
                 action=MembershipLog.Action.approved,
                 expires_at=expires_at_utc,
             )
@@ -351,7 +347,6 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
-                requested_group_cn="almalinux-individual",
                 action=MembershipLog.Action.approved,
                 expires_at=expires_at_utc,
             )
@@ -430,7 +425,6 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
-                requested_group_cn="almalinux-individual",
                 action=MembershipLog.Action.approved,
                 expires_at=expires_at_utc,
             )
@@ -489,7 +483,6 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
-                requested_group_cn="almalinux-individual",
                 action=MembershipLog.Action.approved,
                 expires_at=expires_at_utc,
             )
@@ -546,7 +539,6 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
-                requested_group_cn="almalinux-individual",
                 action=MembershipLog.Action.approved,
                 expires_at=expires_at_utc,
             )
@@ -597,7 +589,6 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id="individual",
-                requested_group_cn="almalinux-individual",
                 action=MembershipLog.Action.approved,
                 expires_at=expires_at_utc,
             )

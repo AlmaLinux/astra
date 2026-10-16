@@ -42,7 +42,6 @@ class BallotQuerySSOTTests(TestCase):
             ballot_hash=ballot_hash_1,
             previous_chain_hash=genesis_hash,
             chain_hash=chain_hash_1,
-            is_counted=False,
         )
 
         final_ballot_hashes = set(Ballot.objects.for_election(election=election).final().values_list("ballot_hash", flat=True))

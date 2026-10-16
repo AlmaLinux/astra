@@ -68,8 +68,6 @@ class AdminMenuBadgeTests(TestCase):
                     membership_type=individual,
                     action=MembershipLog.Action.terminated,
                 ),
-                username=username,
-                membership_type=individual,
                 reason_category=MembershipTerminationFeedback.ReasonCategory.other,
                 reason_text=reason_text,
                 reason_text_cleared_at=cleared_at,

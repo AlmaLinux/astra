@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from core.models import Membership, MembershipType, MembershipTypeCategory, Organization
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class MembershipTypeCategoryIntegrityAdminTests(TestCase):
@@ -25,7 +25,7 @@ class MembershipTypeCategoryIntegrityAdminTests(TestCase):
         Membership.objects.create(
             target_organization=org,
             membership_type=org_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         sponsorship_category.is_organization = False
@@ -46,7 +46,7 @@ class MembershipTypeCategoryIntegrityAdminTests(TestCase):
         Membership.objects.create(
             target_username="alice",
             membership_type=user_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         individual_category.is_individual = False
@@ -74,7 +74,7 @@ class MembershipTypeIntegrityAdminTests(TestCase):
         Membership.objects.create(
             target_organization=org,
             membership_type=org_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         org_type.category = individual_category
@@ -95,7 +95,7 @@ class MembershipTypeIntegrityAdminTests(TestCase):
         Membership.objects.create(
             target_username="alice",
             membership_type=user_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         user_type.category = sponsorship_category

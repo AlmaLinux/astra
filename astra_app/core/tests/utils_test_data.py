@@ -1,9 +1,14 @@
+import datetime
+
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from post_office.models import EmailTemplate
 
 from core.models import MembershipTypeCategory
 from core.templated_email import configured_email_template_names
+
+# Expiry for fixtures that only need an active membership that never nears renewal.
+FAR_FUTURE = datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
 
 
 def migrate_to_latest() -> None:

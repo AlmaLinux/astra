@@ -21,7 +21,7 @@ from core.models import (
 )
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.ballot_chain import compute_chain_hash
-from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories, ensure_email_templates
 from core.tokens import election_genesis_chain_hash
 
 
@@ -82,8 +82,8 @@ class ElectionQuorumAuditTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        m1 = Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=None)
-        m2 = Membership.objects.create(target_username="voter2", membership_type=voter_type, expires_at=None)
+        m1 = Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=FAR_FUTURE)
+        m2 = Membership.objects.create(target_username="voter2", membership_type=voter_type, expires_at=FAR_FUTURE)
         eligible_created_at = election.start_datetime - datetime.timedelta(days=2)
         Membership.objects.filter(pk=m1.pk).update(created_at=eligible_created_at)
         Membership.objects.filter(pk=m2.pk).update(created_at=eligible_created_at)

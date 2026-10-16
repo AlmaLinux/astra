@@ -958,7 +958,7 @@ def get_extendable_membership_type_codes(
     return {
         membership.membership_type_id
         for membership in get_valid_memberships(username=username, organization=organization)
-        if membership.expires_at and membership.expires_at <= expiring_soon_by
+        if membership.expires_at <= expiring_soon_by
     }
 
 
@@ -975,7 +975,7 @@ def get_membership_request_eligibility(
     extendable_membership_type_codes = {
         membership.membership_type_id
         for membership in memberships
-        if membership.expires_at is not None and membership.expires_at <= expiring_soon_by
+        if membership.expires_at <= expiring_soon_by
     }
     blocked_membership_type_codes = valid_membership_type_codes - extendable_membership_type_codes
 

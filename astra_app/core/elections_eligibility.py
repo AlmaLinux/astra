@@ -74,14 +74,6 @@ def _election_reference_datetime(*, election: Election) -> datetime.datetime:
     return reference_datetime
 
 
-def _membership_is_active_at_reference(
-    *,
-    expires_at: datetime.datetime | None,
-    reference_datetime: datetime.datetime,
-) -> bool:
-    return expires_at is None or expires_at > reference_datetime
-
-
 def _membership_age_cutoff(*, reference_datetime: datetime.datetime) -> datetime.datetime:
     """Return midnight UTC on the last eligible membership-start date."""
     reference_utc = reference_datetime.astimezone(datetime.UTC)
@@ -141,13 +133,7 @@ def _compute_eligibility_facts_by_username(*, election: Election) -> dict[str, E
             if username not in term_start_by_username or start_at < term_start_by_username[username]:
                 term_start_by_username[username] = start_at
 
-        expires_at = row.get("expires_at")
-        is_active_at_reference = False
-        if expires_at is None or isinstance(expires_at, datetime.datetime):
-            is_active_at_reference = _membership_is_active_at_reference(
-                expires_at=expires_at,
-                reference_datetime=reference_datetime,
-            )
+        is_active_at_reference = row["expires_at"] > reference_datetime
         if is_active_at_reference:
             has_active_vote_eligible_at_reference.add(username)
 
@@ -186,10 +172,7 @@ def _compute_eligibility_facts_by_username(*, election: Election) -> dict[str, E
             if username not in term_start_by_username or start_at < term_start_by_username[username]:
                 term_start_by_username[username] = start_at
 
-        is_active_at_reference = _membership_is_active_at_reference(
-            expires_at=membership.expires_at,
-            reference_datetime=reference_datetime,
-        )
+        is_active_at_reference = membership.expires_at > reference_datetime
         if is_active_at_reference:
             has_active_vote_eligible_at_reference.add(username)
 
@@ -417,11 +400,7 @@ def vote_weight_breakdown_for_username(*, election: Election, username: str) -> 
         if votes <= 0:
             continue
 
-        is_active = _membership_is_active_at_reference(
-            expires_at=membership.expires_at,
-            reference_datetime=reference_datetime,
-        )
-        if not is_active:
+        if membership.expires_at <= reference_datetime:
             continue
 
         if not _membership_is_old_enough(created_at=membership.created_at, cutoff=cutoff):
@@ -460,11 +439,7 @@ def vote_weight_breakdown_for_username(*, election: Election, username: str) -> 
         if votes <= 0:
             continue
 
-        is_active = _membership_is_active_at_reference(
-            expires_at=membership.expires_at,
-            reference_datetime=reference_datetime,
-        )
-        if not is_active:
+        if membership.expires_at <= reference_datetime:
             continue
 
         if not _membership_is_old_enough(created_at=membership.created_at, cutoff=cutoff):
@@ -582,11 +557,7 @@ def eligible_nominator_organization_ids(*, election: Election, require_fresh: bo
         if not isinstance(organization_id_raw, int) or organization_id_raw <= 0:
             continue
 
-        is_active = _membership_is_active_at_reference(
-            expires_at=membership.get("expires_at"),
-            reference_datetime=reference_datetime,
-        )
-        if not is_active:
+        if membership["expires_at"] <= reference_datetime:
             continue
 
         created_at = membership.get("created_at")

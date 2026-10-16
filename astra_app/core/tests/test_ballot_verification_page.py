@@ -23,7 +23,6 @@ class BallotVerificationPageTests(TestCase):
         previous_chain_hash: str,
         created_at: datetime.datetime,
         nonce: str = "0" * 32,
-        is_counted: bool = True,
         superseded_by: Ballot | None = None,
     ) -> Ballot:
         ballot_hash = Ballot.compute_hash(
@@ -46,7 +45,6 @@ class BallotVerificationPageTests(TestCase):
                 ballot_hash=ballot_hash,
                 previous_chain_hash=previous_chain_hash,
                 chain_hash=chain_hash,
-                is_counted=is_counted,
                 superseded_by=superseded_by,
             )
 
@@ -187,8 +185,7 @@ class BallotVerificationPageTests(TestCase):
         created_at2 = timezone.make_aware(datetime.datetime(2026, 1, 2, 12, 40, 0))
 
         # Mirror the election submission logic:
-        # - Only one ballot may be "final" (superseded_by IS NULL)
-        # - Only one ballot may be counted (is_counted=True)
+        # - Only one ballot may be "final" (superseded_by IS NULL), and only that one counts
         # - superseded_by must point forward (higher ballot id)
         ballot1 = self._create_ballot(
             election=election,
@@ -197,10 +194,7 @@ class BallotVerificationPageTests(TestCase):
             weight=1,
             previous_chain_hash=election_genesis_chain_hash(election.id),
             created_at=created_at1,
-            is_counted=True,
         )
-        ballot1.is_counted = False
-        ballot1.save(update_fields=["is_counted"])
 
         ballot2 = self._create_ballot(
             election=election,
@@ -209,7 +203,6 @@ class BallotVerificationPageTests(TestCase):
             weight=1,
             previous_chain_hash=election_genesis_chain_hash(election.id),
             created_at=created_at2,
-            is_counted=True,
             superseded_by=ballot1,
         )
         ballot1.superseded_by = ballot2

@@ -423,7 +423,7 @@ def _profile_context_for_user(
     for membership in valid_memberships:
         membership_category_id = membership.membership_type.category_id
         expires_at = membership.expires_at
-        is_expiring_soon = bool(expires_at and expires_at <= expiring_soon_by)
+        is_expiring_soon = expires_at <= expiring_soon_by
         has_pending_request_in_category = membership_category_id in pending_request_category_ids
         memberships.append(
             {

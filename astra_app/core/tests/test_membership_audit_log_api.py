@@ -9,7 +9,7 @@ from django.utils import timezone
 from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, MembershipLog, MembershipRequest, MembershipType, Organization
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class MembershipAuditLogApiTests(TestCase):
@@ -95,7 +95,6 @@ class MembershipAuditLogApiTests(TestCase):
             target_username="alice",
             membership_type_id="individual",
             membership_request=req,
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.requested,
             created_at=timezone.now(),
         )
@@ -140,15 +139,14 @@ class MembershipAuditLogApiTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
+            expires_at=FAR_FUTURE,
             created_at=timezone.now(),
         )
         MembershipLog.objects.create(
             actor_username="reviewer",
             target_organization=org,
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.terminated,
             created_at=timezone.now() + datetime.timedelta(seconds=1),
         )
@@ -220,7 +218,6 @@ class MembershipAuditLogApiTests(TestCase):
             target_username="alice",
             membership_type_id="individual",
             membership_request=req,
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.requested,
             created_at=created_at,
             expires_at=expires_at,

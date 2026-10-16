@@ -6,6 +6,7 @@ from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
 from core.models import Membership, MembershipRequest, MembershipType, MembershipTypeCategory, Organization
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 class MembershipRequestFormApiTests(TestCase):
@@ -118,7 +119,7 @@ class MembershipRequestFormApiTests(TestCase):
 
     def test_organization_membership_request_bootstrap_uses_org_detail_endpoint_and_prefills_membership_type(self) -> None:
         organization = Organization.objects.create(name="Acme Org", representative="bob")
-        Membership.objects.create(target_organization=organization, membership_type_id="silver")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type_id="silver")
 
         bob = FreeIPAUser(
             "bob",
@@ -186,8 +187,8 @@ class MembershipRequestFormApiTests(TestCase):
 
     def test_organization_membership_request_form_detail_api_reports_no_types_when_all_org_types_are_unavailable(self) -> None:
         organization = Organization.objects.create(name="Acme Org", representative="bob")
-        Membership.objects.create(target_organization=organization, membership_type_id="silver")
-        Membership.objects.create(target_organization=organization, membership_type_id="mirror")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type_id="silver")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=organization, membership_type_id="mirror")
         MembershipRequest.objects.create(
             requested_username="",
             requested_organization=organization,

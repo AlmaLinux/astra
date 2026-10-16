@@ -600,9 +600,9 @@ def stats_membership_summary_api(request: HttpRequest) -> HttpResponse:
                     live_users_by_username=users_by_username,
                 )
             ),
-            "expiring_soon_90_days": active_memberships.filter(expires_at__lte=now + datetime.timedelta(days=90))
-            .exclude(expires_at__isnull=True)
-            .count(),
+            "expiring_soon_90_days": active_memberships.filter(
+                expires_at__lte=now + datetime.timedelta(days=90)
+            ).count(),
             "active_org_sponsorships": len(active_org_ids),
         }
 
@@ -817,7 +817,6 @@ def _build_membership_stats_trends_payloads(
 
     exp_rows = (
         Membership.objects.filter(
-            expires_at__isnull=False,
             expires_at__gt=now,
             expires_at__lte=now + datetime.timedelta(days=365),
         )

@@ -314,48 +314,6 @@ class SelfServiceMembershipPrivacyTests(TestCase):
         messages_list = [message.message for message in get_messages(request)]
         self.assertIn("Unable to verify your current password.", messages_list)
 
-    def test_membership_termination_accepts_active_membership_without_expiry(self) -> None:
-        from core.models import MembershipTerminationFeedback  # noqa: PLC0415
-
-        self._create_membership_type(
-            code="individual",
-            name="Individual",
-            group_cn="almalinux-individual",
-        )
-        Membership.objects.create(
-            target_username="alice",
-            membership_type_id="individual",
-            expires_at=None,
-        )
-
-        request = self.factory.post(
-            reverse("settings-membership-terminate", kwargs={"membership_type_code": "individual"}),
-            data={
-                "reason_category": "privacy",
-                "reason_text": "No end date should still count as active.",
-                "current_password": "correct horse battery staple",
-            },
-            REMOTE_ADDR="198.51.100.10",
-        )
-        self._add_session_and_messages(request)
-        self._add_csrf(request)
-        request.user = self._auth_user("alice")
-
-        with (
-            patch("core.views_settings._reauthenticate_destructive_action", autospec=True, return_value=True),
-            patch("core.views_settings.remove_user_from_group", autospec=True, return_value=True),
-            patch("core.views_settings.transaction.on_commit", autospec=True, side_effect=lambda callback: callback()),
-            patch("core.views_settings.membership_self_terminated.send", autospec=True) as signal_send,
-        ):
-            response = views_settings.settings_membership_terminate(request, membership_type_code="individual")
-
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("settings") + "?tab=membership&status=terminated")
-        feedback = MembershipTerminationFeedback.objects.get(username="alice", membership_type_id="individual")
-        self.assertEqual(feedback.reason_text, "No end date should still count as active.")
-        self.assertFalse(Membership.objects.filter(target_username="alice", membership_type_id="individual").exists())
-        signal_send.assert_called_once()
-
     def test_membership_termination_reports_partial_failure_after_ipa_removal(self) -> None:
         self._create_membership_type(
             code="individual",
@@ -691,14 +649,11 @@ class SelfServiceMembershipPrivacyTests(TestCase):
             actor_username="alice",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.terminated,
             expires_at=timezone.now(),
         )
         feedback = MembershipTerminationFeedback.objects.create(
             membership_log=log,
-            username="alice",
-            membership_type_id="individual",
             reason_category=MembershipTerminationFeedback.ReasonCategory.privacy,
             reason_text="Remove the free text after the cleanup window.",
             reason_cleanup_due_at=timezone.now() - datetime.timedelta(hours=1),

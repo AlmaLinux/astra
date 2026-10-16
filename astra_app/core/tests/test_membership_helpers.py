@@ -32,6 +32,7 @@ from core.models import (
     MembershipTypeCategory,
     Organization,
 )
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 class MembershipHelperTests(TestCase):
@@ -203,6 +204,7 @@ class MembershipHelperTests(TestCase):
         Membership.objects.create(
             target_organization=org,
             membership_type_id="silver",
+            expires_at=FAR_FUTURE,
         )
 
         context = compute_membership_requestability_context(
@@ -429,7 +431,7 @@ class MembershipHelperTests(TestCase):
         Membership.objects.create(
             target_username="alice",
             membership_type_id="basic",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.create(
             target_username="bob",
@@ -475,7 +477,7 @@ class MembershipHelperTests(TestCase):
         Membership.objects.create(
             target_username="alice",
             membership_type_id="basic",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.create(
             target_username="bob",
@@ -577,7 +579,7 @@ class MembershipHelperTests(TestCase):
         Membership.objects.create(
             target_organization=org,
             membership_type_id="gold",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.create(
             target_organization=org,
@@ -619,7 +621,7 @@ class MembershipHelperTests(TestCase):
         Membership.objects.create(
             target_username="alice",
             membership_type_id="basic",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.create(
             target_username="alice",
@@ -688,6 +690,7 @@ class MembershipHelperTests(TestCase):
             membership_type_id="individual",
             membership_request=req_individual,
             action=MembershipLog.Action.approved,
+            expires_at=FAR_FUTURE,
         )
 
         req_mirror = MembershipRequest.objects.create(
@@ -736,6 +739,7 @@ class MembershipHelperTests(TestCase):
             membership_type_id="gold",
             membership_request=req,
             action=MembershipLog.Action.approved,
+            expires_at=FAR_FUTURE,
         )
 
         mapping = resolve_request_ids_by_membership_type(

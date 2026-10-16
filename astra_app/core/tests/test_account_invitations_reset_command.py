@@ -271,13 +271,9 @@ class AccountInvitationsResetCommandTests(TestCase):
             post_office_email_id=queued_email.pk,
             result=AccountInvitationSend.Result.queued,
         )
-        resend_invitation.last_sent_at = timezone.now()
-        resend_invitation.send_count = 2
         resend_invitation.dismissed_at = timezone.now()
         resend_invitation.dismissed_by_username = "regular01"
-        resend_invitation.save(
-            update_fields=["last_sent_at", "send_count", "dismissed_at", "dismissed_by_username"]
-        )
+        resend_invitation.save(update_fields=["dismissed_at", "dismissed_by_username"])
 
         row_limit = settings.ACCOUNT_INVITATION_RESEND_LIMIT
         while allow_request(
@@ -305,8 +301,7 @@ class AccountInvitationsResetCommandTests(TestCase):
         call_command("account_invitations_reset")
 
         resend_invitation = AccountInvitation.objects.get(email=resend_invitation.email)
-        self.assertEqual(resend_invitation.send_count, 0)
-        self.assertIsNone(resend_invitation.last_sent_at)
+        self.assertFalse(resend_invitation.sends.exists())
         self.assertIsNone(resend_invitation.dismissed_at)
         self.assertEqual(resend_invitation.dismissed_by_username, "")
         self.assertEqual(resend_invitation.email_template_name, settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME)

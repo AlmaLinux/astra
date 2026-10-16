@@ -18,6 +18,7 @@ from core.models import (
     MembershipTypeCategory,
     VotingCredential,
 )
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 class ElectionBallotValidationTests(TestCase):
@@ -62,7 +63,7 @@ class ElectionBallotValidationTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=None)
+        Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=FAR_FUTURE)
 
         self._login_as_freeipa_user("voter1")
         with (
@@ -138,7 +139,7 @@ class ElectionBallotValidationTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=None)
+        Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=FAR_FUTURE)
 
         self._login_as_freeipa_user("voter1")
         with (

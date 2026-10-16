@@ -664,7 +664,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             .only("expires_at")
             .first()
         )
-        if existing is None or existing.expires_at is None or existing.expires_at <= approved_at:
+        if existing is None or existing.expires_at <= approved_at:
             return None
         return existing.expires_at
 

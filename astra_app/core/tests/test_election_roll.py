@@ -18,7 +18,7 @@ from core.models import (
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class _CoreCategoriesTestCase(TestCase):
@@ -51,7 +51,7 @@ class ElectionRollPopulationTests(_CoreCategoriesTestCase):
             m = Membership.objects.create(
                 target_username=username,
                 membership_type=voter_type,
-                expires_at=None,
+                expires_at=FAR_FUTURE,
             )
             Membership.objects.filter(pk=m.pk).update(
                 created_at=election.start_datetime - datetime.timedelta(days=200),
@@ -180,7 +180,7 @@ class ElectionRollEligibleVotersApiTests(_CoreCategoriesTestCase):
         m = Membership.objects.create(
             target_username="carol",
             membership_type=voter_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.filter(pk=m.pk).update(
             created_at=election.start_datetime - datetime.timedelta(days=200),

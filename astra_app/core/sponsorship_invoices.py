@@ -50,7 +50,6 @@ class InvoiceTerm(StrEnum):
 def invoice_eligible(membership: Membership) -> bool:
     return (
         membership.target_organization_id is not None
-        and membership.expires_at is not None
         # In-kind sponsors whose dues are fully waived are never invoiced.
         and effective_dues_usd(membership) > 0
     )

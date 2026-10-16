@@ -4,6 +4,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.models import Membership, MembershipType, MembershipTypeCategory, Organization
+from core.tests.utils_test_data import FAR_FUTURE
 from core.views_membership import _load_active_membership
 
 
@@ -32,7 +33,7 @@ class MembershipLoaderHelperTests(TestCase):
         membership = Membership.objects.create(
             target_username="alice",
             membership_type_id="individual",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         membership_type = MembershipType.objects.get(code="individual")

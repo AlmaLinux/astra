@@ -11,7 +11,7 @@ from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.e2e_registry import get_e2e_service_client
 from core.membership_notes import CUSTOS
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class MembershipCommitteeResetCommandTests(TestCase):
@@ -167,7 +167,7 @@ class MembershipCommitteeResetCommandTests(TestCase):
                 "enabled": True,
             },
         )
-        Membership.objects.create(target_username="regular03", membership_type_id="mirror")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_username="regular03", membership_type_id="mirror")
 
         call_command("membership_committee_reset")
 

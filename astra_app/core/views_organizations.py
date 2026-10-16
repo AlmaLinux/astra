@@ -292,7 +292,6 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
             accepted_invitation_ids: list[int] = []
 
             def persist_claimed_organization(transition_organization: Organization) -> None:
-                transition_organization.status = Organization.Status.active
                 transition_organization.claim_secret = rotated_claim_secret
                 transition_organization.save()
 
@@ -454,11 +453,11 @@ def _filter_organization_queryset_by_search(
     name_query = q
     if can_manage_memberships:
         status_tokens = {
-            "is:claimed": Organization.Status.active,
-            "is:unclaimed": Organization.Status.unclaimed,
+            "is:claimed": ~Q(representative=""),
+            "is:unclaimed": Q(representative=""),
         }
         q_terms = q.split()
-        matched_statuses = {status_tokens[term.lower()] for term in q_terms if term.lower() in status_tokens}
+        matched_statuses = {term.lower() for term in q_terms if term.lower() in status_tokens}
         membership_type_tokens = {
             term.lower().removeprefix("is:")
             for term in q_terms
@@ -476,14 +475,8 @@ def _filter_organization_queryset_by_search(
             now = timezone.now()
             for membership_type_code in sorted(matched_membership_type_codes):
                 orgs = orgs.filter(
-                    Q(
-                        memberships__membership_type_id=membership_type_code,
-                        memberships__expires_at__isnull=True,
-                    )
-                    | Q(
-                        memberships__membership_type_id=membership_type_code,
-                        memberships__expires_at__gt=now,
-                    )
+                    memberships__membership_type_id=membership_type_code,
+                    memberships__expires_at__gt=now,
                 )
             orgs = orgs.distinct()
 
@@ -494,7 +487,7 @@ def _filter_organization_queryset_by_search(
 
         name_query = " ".join(term for term in q_terms if term.lower() not in recognized_tokens)
         if len(matched_statuses) == 1:
-            orgs = orgs.filter(status=matched_statuses.pop())
+            orgs = orgs.filter(status_tokens[matched_statuses.pop()])
         elif len(matched_statuses) > 1:
             orgs = orgs.none()
 
@@ -588,10 +581,7 @@ def _build_organizations_page_context(request: HttpRequest) -> dict[str, object]
         lower_section_link_to_detail = True
         mirror_empty_label = "No mirror sponsor members or organizations without memberships found."
     else:
-        orgs = orgs.filter(
-            status=Organization.Status.active,
-            has_active_memberships=True,
-        )
+        orgs = orgs.filter(has_active_memberships=True).exclude(representative="")
         lower_section_link_to_detail = False
         mirror_empty_label = "No mirror sponsor members found."
 
@@ -890,7 +880,7 @@ def _build_organization_detail_page_context(
         sponsorship_entries.append({
             "sponsorship": sponsorship,
             "badge_text": str(sponsorship.membership_type_id).replace("_", " ").title(),
-            "is_expiring_soon": bool(sponsorship.expires_at and sponsorship.expires_at <= expiring_soon_by),
+            "is_expiring_soon": sponsorship.expires_at <= expiring_soon_by,
             "pending_request": pending_request_context.by_category.get(sponsorship_category_id),
             "can_request_tier_change": (
                 any(
@@ -1537,7 +1527,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                     payload={
                         "old": old_representative,
                         "new": new_representative,
-                        "actor": actor_username,
+                        "actor_username": actor_username,
                     },
                     is_public=False,
                 )

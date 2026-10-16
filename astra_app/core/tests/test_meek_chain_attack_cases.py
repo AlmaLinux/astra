@@ -24,7 +24,6 @@ def _export_ballots_for_audit(*, election: Election) -> list[dict[str, object]]:
             "ranking",
             "weight",
             "ballot_hash",
-            "is_counted",
             "chain_hash",
             "previous_chain_hash",
             "superseded_by__ballot_hash",
@@ -32,6 +31,7 @@ def _export_ballots_for_audit(*, election: Election) -> list[dict[str, object]]:
     )
     for row in rows:
         row["superseded_by"] = row.pop("superseded_by__ballot_hash")
+        row["is_counted"] = row["superseded_by"] is None
     return rows
 
 
@@ -290,8 +290,8 @@ class MeekVotingAttackTests(TestCase):
 
         b1 = Ballot.objects.get(pk=receipt1.ballot.pk)
         b2 = Ballot.objects.get(pk=receipt2.ballot.pk)
-        b1.refresh_from_db(fields=["superseded_by_id", "is_counted"])
-        b2.refresh_from_db(fields=["superseded_by_id", "is_counted"])
+        b1.refresh_from_db(fields=["superseded_by_id"])
+        b2.refresh_from_db(fields=["superseded_by_id"])
 
         self.assertEqual(b1.superseded_by_id, b2.id)
         self.assertFalse(b1.is_counted)

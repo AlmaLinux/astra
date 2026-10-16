@@ -122,18 +122,8 @@ def _send_account_invitation_email(
 
     invitation.dismissed_at = None
     invitation.dismissed_by_username = ""
-    invitation.last_sent_at = now
-    invitation.send_count += 1
     invitation.email_template_name = template_name
-    invitation.save(
-        update_fields=[
-            "dismissed_at",
-            "dismissed_by_username",
-            "last_sent_at",
-            "send_count",
-            "email_template_name",
-        ]
-    )
+    invitation.save(update_fields=["dismissed_at", "dismissed_by_username", "email_template_name"])
 
     AccountInvitationSend.objects.create(
         invitation=invitation,

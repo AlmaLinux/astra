@@ -189,7 +189,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=timezone.now() + datetime.timedelta(days=200),
         )
@@ -283,7 +282,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=now + datetime.timedelta(days=200),
         )
@@ -291,7 +289,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.terminated,
             expires_at=now,
         )
@@ -321,7 +318,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=timezone.now() + datetime.timedelta(days=200),
         )
@@ -740,7 +736,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=timezone.now() + datetime.timedelta(days=200),
         )
@@ -786,7 +781,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_EXPIRING_SOON_DAYS - 1),
         )
@@ -960,7 +954,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 actor_username="reviewer",
                 target_username=f"user{i}",
                 membership_type=mt,
-                requested_group_cn=mt.group_cn,
                 action=MembershipLog.Action.requested,
                 created_at=base_time + datetime.timedelta(seconds=i),
             )
@@ -1013,7 +1006,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=timezone.now() + datetime.timedelta(days=settings.MEMBERSHIP_VALIDITY_DAYS),
         )
@@ -1074,7 +1066,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.requested,
             membership_request=req,
         )
@@ -1169,7 +1160,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=now + datetime.timedelta(days=50),
         )
@@ -1215,7 +1205,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=now + datetime.timedelta(days=50),
         )
@@ -1270,7 +1259,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=now + datetime.timedelta(days=50),
         )
@@ -1317,7 +1305,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=expires_at_utc,
         )
@@ -1388,7 +1375,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type_id=mt_code,
-                requested_group_cn=group_cn,
                 action=MembershipLog.Action.approved,
                 expires_at=timezone.now() + datetime.timedelta(days=365),
             )
@@ -1488,7 +1474,6 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
             actor_username="reviewer",
             target_username="alice",
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=MembershipLog.Action.approved,
             expires_at=timezone.now() + datetime.timedelta(days=365),
         )

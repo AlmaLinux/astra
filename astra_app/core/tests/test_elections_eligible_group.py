@@ -9,6 +9,7 @@ from django.utils import timezone
 from core.elections_eligibility import eligible_voters_from_memberships
 from core.freeipa.exceptions import FreeIPAMisconfiguredError
 from core.models import Election, Membership, MembershipType
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=90)
@@ -33,8 +34,8 @@ class ElectionEligibleGroupTests(TestCase):
             enabled=True,
         )
 
-        m1 = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=None)
-        m2 = Membership.objects.create(target_username="bob", membership_type=voter_type, expires_at=None)
+        m1 = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
+        m2 = Membership.objects.create(target_username="bob", membership_type=voter_type, expires_at=FAR_FUTURE)
 
         eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
         Membership.objects.filter(pk=m1.pk).update(created_at=eligible_created_at)
@@ -79,8 +80,8 @@ class ElectionEligibleGroupTests(TestCase):
             enabled=True,
         )
 
-        m1 = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=None)
-        m2 = Membership.objects.create(target_username="bob", membership_type=voter_type, expires_at=None)
+        m1 = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
+        m2 = Membership.objects.create(target_username="bob", membership_type=voter_type, expires_at=FAR_FUTURE)
 
         eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
         Membership.objects.filter(pk=m1.pk).update(created_at=eligible_created_at)

@@ -8,7 +8,7 @@ from functools import wraps
 from typing import Any
 
 from django.conf import settings
-from django.db.models import Q, QuerySet
+from django.db.models import Count, Max, Q, QuerySet
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.utils.formats import date_format
@@ -26,7 +26,7 @@ from core.account_invitations import (
 from core.logging_extras import current_exception_log_fields
 from core.mail_delivery import MailDeliveryError, deliver_in_batches
 from core.mail_progress import MailRunKind, MailRunProgress
-from core.models import AccountInvitation
+from core.models import AccountInvitation, AccountInvitationSend
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.rate_limit import allow_request
 from core.views_utils import get_username
@@ -151,9 +151,13 @@ def _build_datatables_response(
 
     records_filtered = queryset.count()
 
-    # Apply pagination
+    # Apply pagination; _format_invitation_row reads the send stats annotated on the page.
     end = start + length
-    paginated_queryset = queryset[start:end]
+    queued = Q(sends__result=AccountInvitationSend.Result.queued)
+    paginated_queryset = queryset.annotate(
+        send_count=Count("sends", filter=queued),
+        last_sent_at=Max("sends__sent_at", filter=queued),
+    )[start:end]
 
     # Format rows
     data = [_format_invitation_row(inv, data_only=data_only) for inv in paginated_queryset]

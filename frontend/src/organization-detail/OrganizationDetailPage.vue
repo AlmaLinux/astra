@@ -111,7 +111,7 @@ function tierChangeUrl(membership: OrganizationDetailResponse["organization"]["m
 }
 
 function canManageExpiration(membership: OrganizationDetailResponse["organization"]["memberships"][number]): boolean {
-  return Boolean(membership.canManage && membershipTypeCode(membership) && membership.expiresAt);
+  return Boolean(membership.canManage && membershipTypeCode(membership));
 }
 
 function managementModalId(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {

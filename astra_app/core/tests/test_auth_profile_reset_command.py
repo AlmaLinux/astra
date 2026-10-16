@@ -29,6 +29,7 @@ from core.rate_limit import (
     allow_request,
     clear_subject_rate_limit,
 )
+from core.tests.utils_test_data import FAR_FUTURE
 from core.tokens import (
     read_password_reset_token,
     read_registration_activation_token,
@@ -358,7 +359,7 @@ class AuthProfileResetCommandTests(TestCase):
 
     @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
     def test_command_seeds_private_profile_and_membership_settings_state_for_auth_playwright(self) -> None:
-        Membership.objects.create(target_username="regular01", membership_type_id="individual")
+        Membership.objects.create(target_username="regular01", membership_type_id="individual", expires_at=FAR_FUTURE)
         MembershipRequest.objects.create(
             requested_username="regular01",
             membership_type_id="individual",

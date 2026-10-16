@@ -2,7 +2,6 @@ import logging
 from typing import override
 
 from django.core.management.base import BaseCommand
-from django.db.models import Q
 from django.utils import timezone
 
 from core.models import AccountDeletionRequest, MembershipTerminationFeedback
@@ -26,18 +25,8 @@ class Command(BaseCommand):
         dry_run: bool = bool(options.get("dry_run"))
         now = timezone.now()
 
-        feedback_qs = MembershipTerminationFeedback.objects.filter(
-            ~Q(reason_text=""),
-            reason_cleanup_due_at__isnull=False,
-            reason_cleanup_due_at__lte=now,
-            reason_text_cleared_at__isnull=True,
-        )
-        deletion_qs = AccountDeletionRequest.objects.filter(
-            ~Q(reason_text=""),
-            reason_cleanup_due_at__isnull=False,
-            reason_cleanup_due_at__lte=now,
-            reason_text_cleared_at__isnull=True,
-        )
+        feedback_qs = MembershipTerminationFeedback.objects.due_for_reason_cleanup(now=now)
+        deletion_qs = AccountDeletionRequest.objects.due_for_reason_cleanup(now=now)
 
         feedback_count = feedback_qs.count()
         deletion_count = deletion_qs.count()
@@ -50,8 +39,8 @@ class Command(BaseCommand):
         )
 
         if not dry_run:
-            feedback_qs.update(reason_text="", reason_text_cleared_at=now)
-            deletion_qs.update(reason_text="", reason_text_cleared_at=now)
+            feedback_qs.clear_reason_text(now=now)
+            deletion_qs.clear_reason_text(now=now)
 
         logger.info(
             "selfservice_lifecycle_cleanup: %s %s membership termination reason(s) and %s account deletion reason(s).",

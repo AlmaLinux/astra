@@ -11,7 +11,7 @@ from core.freeipa.user import FreeIPAUser
 from core.membership import FreeIPARepresentativeSyncJournal
 from core.models import AccountInvitation, Membership, MembershipType, Organization
 from core.organization_claim import make_organization_claim_token
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class OrganizationClaimFlowTests(TestCase):
@@ -96,6 +96,7 @@ class OrganizationClaimFlowTests(TestCase):
         Membership.objects.create(
             target_organization=organization,
             membership_type_id="gold",
+            expires_at=FAR_FUTURE,
         )
         token = make_organization_claim_token(organization)
 
@@ -134,6 +135,7 @@ class OrganizationClaimFlowTests(TestCase):
         Membership.objects.create(
             target_organization=organization,
             membership_type_id="gold",
+            expires_at=FAR_FUTURE,
         )
         invitation = AccountInvitation.objects.create(
             email="claim-rollover@example.org",
@@ -188,7 +190,6 @@ class OrganizationClaimFlowTests(TestCase):
         Organization.objects.create(
             name="Existing Rep Org",
             representative="alice",
-            status=Organization.Status.active,
         )
         organization = Organization.objects.create(
             name="Duplicate Claim Org",
@@ -197,6 +198,7 @@ class OrganizationClaimFlowTests(TestCase):
         Membership.objects.create(
             target_organization=organization,
             membership_type_id="gold",
+            expires_at=FAR_FUTURE,
         )
         token = make_organization_claim_token(organization)
         journal = FreeIPARepresentativeSyncJournal(
@@ -243,7 +245,6 @@ class OrganizationClaimFlowTests(TestCase):
         organization = Organization.objects.create(
             name="Already Claimed Org",
             representative="carol",
-            status=Organization.Status.active,
             claim_secret="already-claimed-secret",
         )
         token = make_organization_claim_token(organization)

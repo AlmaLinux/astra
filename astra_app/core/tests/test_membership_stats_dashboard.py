@@ -19,6 +19,7 @@ from core.models import (
     Organization,
 )
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 def _epoch_ms(value: datetime.datetime) -> int:
@@ -130,7 +131,6 @@ class MembershipStatsDashboardTests(TestCase):
             actor_username="committee",
             target_username=username,
             membership_type_id="individual",
-            requested_group_cn="almalinux-individual",
             action=action,
             expires_at=expires_at,
         )
@@ -244,7 +244,7 @@ class MembershipStatsDashboardTests(TestCase):
         Membership.objects.create(
             target_organization=fallback_org,
             membership_type_id="sponsor-standard",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.create(
             target_username="alice",
@@ -1759,7 +1759,6 @@ class MembershipStatsSplitApiTests(TestCase):
             target_username=username,
             target_organization=organization,
             membership_type_id=membership_type_id,
-            requested_group_cn=f"almalinux-{membership_type_id}",
             action=action,
             expires_at=expires_at,
         )

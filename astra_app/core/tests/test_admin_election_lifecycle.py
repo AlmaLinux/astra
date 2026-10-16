@@ -10,7 +10,7 @@ from core import elections_services
 from core.freeipa.user import FreeIPAUser
 from core.models import AuditLogEntry, Ballot, Candidate, Election, Membership, MembershipType, VotingCredential
 from core.tests.ballot_chain import compute_chain_hash
-from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories, ensure_email_templates
 from core.tokens import election_genesis_chain_hash
 
 
@@ -290,7 +290,7 @@ class AdminElectionLifecycleActionTests(TestCase):
             enabled=True,
             votes=1,
         )
-        m = Membership.objects.create(target_username="voter1", membership_type=mt, expires_at=None)
+        m = Membership.objects.create(target_username="voter1", membership_type=mt, expires_at=FAR_FUTURE)
         Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=120))
 
         self._login_as_freeipa_admin("alice")

@@ -92,7 +92,7 @@ export interface SettingsPayload {
       membershipTypeCode: string;
       membershipTypeName: string;
       createdAt: string;
-      expiresAt: string | null;
+      expiresAt: string;
       terminationForm: SettingsForm;
     }>;
     history: Array<{

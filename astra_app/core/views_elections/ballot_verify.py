@@ -56,7 +56,6 @@ def _ballot_verify_context(request) -> tuple[dict[str, Any], int]:
                 "ballot_hash",
                 "credential_public_id",
                 "created_at",
-                "is_counted",
                 "superseded_by_id",
                 "election__id",
                 "election__name",

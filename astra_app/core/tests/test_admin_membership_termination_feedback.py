@@ -26,8 +26,6 @@ class AdminMembershipTerminationFeedbackTests(TestCase):
         )
         self.feedback = MembershipTerminationFeedback.objects.create(
             membership_log=log,
-            username="bob",
-            membership_type=individual,
             reason_category=MembershipTerminationFeedback.ReasonCategory.no_longer_needed,
             reason_text="Moving to another distribution",
         )

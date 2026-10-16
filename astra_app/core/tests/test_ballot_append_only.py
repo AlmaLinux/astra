@@ -50,7 +50,7 @@ class BallotAppendOnlyTests(TestCase):
             with transaction.atomic():
                 ballot.delete()
 
-    def test_ballot_rows_cannot_be_updated_except_superseded_by_and_is_counted(self) -> None:
+    def test_ballot_rows_cannot_be_updated_except_superseded_by(self) -> None:
         receipt = submit_ballot(
             election=self.election,
             credential_public_id=self.cred.public_id,
@@ -62,7 +62,7 @@ class BallotAppendOnlyTests(TestCase):
             with transaction.atomic():
                 Ballot.objects.filter(pk=ballot.pk).update(ranking=[self.c2.id, self.c1.id])
 
-        Ballot.objects.filter(pk=ballot.pk).update(is_counted=False)
+        Ballot.objects.filter(pk=ballot.pk).update(superseded_by=None)
 
     def test_superseded_by_must_point_forward(self) -> None:
         receipt1 = submit_ballot(

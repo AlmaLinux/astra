@@ -5,7 +5,7 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
-from core.tests.utils_test_data import migrate_to_latest
+from core.tests.utils_test_data import FAR_FUTURE, migrate_to_latest
 
 GRANTED_AT = datetime.datetime(2025, 3, 1, tzinfo=datetime.UTC)
 
@@ -34,7 +34,7 @@ class MembershipRequestBackfillMigrationTests(TransactionTestCase):
 
         # Granted in the Django admin, before grants recorded a request.
         self.granted = organization_model.objects.create(name="Granted Org", status="active", representative="rep1")
-        membership = membership_model.objects.create(target_organization=self.granted, membership_type=membership_type)
+        membership = membership_model.objects.create(expires_at=FAR_FUTURE, target_organization=self.granted, membership_type=membership_type)
         membership_model.objects.filter(pk=membership.pk).update(created_at=GRANTED_AT)
         old_apps.get_model("core", "MembershipLog").objects.create(
             actor_username="admin-alice",
@@ -44,12 +44,13 @@ class MembershipRequestBackfillMigrationTests(TransactionTestCase):
             membership_type=membership_type,
             requested_group_cn="",
             action="approved",
+            expires_at=FAR_FUTURE,
         )
-        membership_model.objects.create(target_username="bob", membership_type=membership_type)
+        membership_model.objects.create(expires_at=FAR_FUTURE, target_username="bob", membership_type=membership_type)
 
         # Applied for through the normal flow.
         self.requested = organization_model.objects.create(name="Requested Org", status="active", representative="rep2")
-        membership_model.objects.create(target_organization=self.requested, membership_type=membership_type)
+        membership_model.objects.create(expires_at=FAR_FUTURE, target_organization=self.requested, membership_type=membership_type)
         request_model.objects.create(
             requested_organization=self.requested,
             requested_organization_code=str(self.requested.pk),

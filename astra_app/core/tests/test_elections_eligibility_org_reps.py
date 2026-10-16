@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from core.elections_eligibility import eligible_voters_from_memberships
 from core.models import Election, Membership, MembershipType, Organization
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 @override_settings(ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS=90)
@@ -42,7 +42,7 @@ class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
         sponsorship = Membership.objects.create(
             target_organization=org,
             membership_type=org_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
@@ -81,7 +81,7 @@ class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
         sponsorship = Membership.objects.create(
             target_organization=org,
             membership_type=org_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
@@ -121,7 +121,7 @@ class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
         membership = Membership.objects.create(
             target_organization=org,
             membership_type=misclassified_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.filter(pk=membership.pk).update(
             created_at=election.start_datetime - datetime.timedelta(days=120)

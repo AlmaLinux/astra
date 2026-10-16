@@ -32,7 +32,7 @@ from core.permissions import (
     ASTRA_VIEW_MEMBERSHIP,
 )
 from core.templated_email import configured_email_template_names
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class OrganizationUserViewsTests(TestCase):
@@ -714,7 +714,7 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        Membership.objects.create(target_organization=org, membership_type_id="silver")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="silver")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -805,6 +805,7 @@ class OrganizationUserViewsTests(TestCase):
         Membership.objects.create(
             target_organization=org,
             membership_type=membership_type,
+            expires_at=FAR_FUTURE,
         )
         req = MembershipRequest.objects.create(
             requested_username="",
@@ -1248,7 +1249,7 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        Membership.objects.create(target_organization=org, membership_type=gold)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type=gold)
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -1306,8 +1307,8 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         # Create two memberships in different categories
-        Membership.objects.create(target_organization=org, membership_type=gold)
-        Membership.objects.create(target_organization=org, membership_type=mirror)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type=gold)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type=mirror)
 
         # Verify both rows exist simultaneously (DB-level enforcement)
         self.assertEqual(
@@ -1346,6 +1347,7 @@ class OrganizationUserViewsTests(TestCase):
                             "enabled": True,
                         },
                     )[0],
+                    expires_at=FAR_FUTURE,
                 )
 
     def test_org_detail_shows_change_tier_button_for_multi_type_category(self) -> None:
@@ -1397,7 +1399,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         org = Organization.objects.create(name="Tiered Org", representative="bob")
-        Membership.objects.create(target_organization=org, membership_type_id="silver")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="silver")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -1453,7 +1455,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         org = Organization.objects.create(name="Top Tier Org", representative="bob")
-        Membership.objects.create(target_organization=org, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="gold")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -1504,7 +1506,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         org = Organization.objects.create(name="Gold Tier Org", representative="bob")
-        Membership.objects.create(target_organization=org, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="gold")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -1555,7 +1557,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         org = Organization.objects.create(name="Ruby Tier Org", representative="bob")
-        Membership.objects.create(target_organization=org, membership_type_id="ruby")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="ruby")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -1599,8 +1601,8 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         org = Organization.objects.create(name="Complete Org", representative="bob")
-        Membership.objects.create(target_organization=org, membership_type_id="silver")
-        Membership.objects.create(target_organization=org, membership_type_id="mirror")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="silver")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="mirror")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -1796,7 +1798,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         # Current sponsorship stored in Membership table
-        Membership.objects.create(target_organization=org, membership_type_id="silver")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="silver")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
 
@@ -1898,7 +1900,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         # Prefill is based on Membership row, not org field
-        Membership.objects.create(target_organization=org, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="gold")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -2618,7 +2620,7 @@ class OrganizationUserViewsTests(TestCase):
             representative="bob",
         )
 
-        Membership.objects.create(target_organization=org, membership_type_id="mirror")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="mirror")
 
         bob = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("bob")
@@ -2715,7 +2717,7 @@ class OrganizationUserViewsTests(TestCase):
         sponsorship = Membership.objects.create(
             target_organization=org,
             membership_type_id="gold",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         FreeIPAPermissionGrant.objects.create(
@@ -2982,7 +2984,7 @@ class OrganizationUserViewsTests(TestCase):
         Membership.objects.create(
             target_organization=org,
             membership_type_id="silver",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
 
         FreeIPAPermissionGrant.objects.create(
@@ -3012,7 +3014,7 @@ class OrganizationUserViewsTests(TestCase):
         # Silver membership should be untouched.
         sponsorship = Membership.objects.get(target_organization=org)
         self.assertEqual(sponsorship.membership_type_id, "silver")
-        self.assertIsNone(sponsorship.expires_at)
+        self.assertEqual(sponsorship.expires_at, FAR_FUTURE)
 
     def test_organization_detail_bootstraps_committee_notes_without_api_notes_payload(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note, Organization
@@ -3099,8 +3101,8 @@ class OrganizationUserViewsTests(TestCase):
 
         org = Organization.objects.create(name="Acme", representative="bob")
 
-        Membership.objects.create(target_organization=org, membership_type_id="gold")
-        Membership.objects.create(target_organization=org, membership_type_id="mirror")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="gold")
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type_id="mirror")
 
         req_gold = MembershipRequest.objects.create(
             requested_username="",
@@ -3126,6 +3128,7 @@ class OrganizationUserViewsTests(TestCase):
                     membership_type_id="gold",
                     membership_request=req_gold,
                     action=MembershipLog.Action.approved,
+                    expires_at=FAR_FUTURE,
                 ),
                 MembershipLog(
                     actor_username="reviewer",
@@ -3134,6 +3137,7 @@ class OrganizationUserViewsTests(TestCase):
                     membership_type_id="mirror",
                     membership_request=req_mirror,
                     action=MembershipLog.Action.approved,
+                    expires_at=FAR_FUTURE,
                 ),
             ]
         )

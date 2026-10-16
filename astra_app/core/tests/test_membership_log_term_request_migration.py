@@ -60,6 +60,8 @@ class MembershipLogTermRequestMigrationTests(TransactionTestCase):
                 membership_request=membership_request,
                 requested_group_cn="",
                 action=action,
+                # 0111 requires an expiry on expiry_changed rows once the suite migrates to latest.
+                expires_at=at,
             )
             # created_at is auto_now_add, so it can only be backdated after creation.
             log_model.objects.filter(pk=entry.pk).update(created_at=at)

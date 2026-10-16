@@ -7,6 +7,7 @@ from django.urls import reverse
 from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Membership, MembershipType, MembershipTypeCategory, Organization
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
+from core.tests.utils_test_data import FAR_FUTURE
 
 
 class OrganizationsVueTests(TestCase):
@@ -100,8 +101,8 @@ class OrganizationsVueTests(TestCase):
         mirror_org = Organization.objects.create(name="Mirror Org", representative="carol")
         Organization.objects.create(name="Alice Org", representative="alice")
 
-        Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=mirror_org, membership_type=mirror_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=mirror_org, membership_type=mirror_type)
 
         viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 
@@ -123,9 +124,9 @@ class OrganizationsVueTests(TestCase):
         Organization.objects.create(name="Alice Org", representative="alice")
         unclaimed_org = Organization.objects.create(name="Unclaimed Org", representative="")
 
-        Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=mirror_org, membership_type=mirror_type)
-        Membership.objects.create(target_organization=unclaimed_org, membership_type=mirror_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=mirror_org, membership_type=mirror_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=unclaimed_org, membership_type=mirror_type)
 
         viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 
@@ -151,7 +152,7 @@ class OrganizationsVueTests(TestCase):
         self._login_as_freeipa_user("alice")
 
         sponsor_org = Organization.objects.create(name="Sponsor Org", representative="bob")
-        Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_org, membership_type=sponsor_type)
 
         viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 
@@ -174,8 +175,8 @@ class OrganizationsVueTests(TestCase):
 
         claimed_org = Organization.objects.create(name="Acme Claimed", representative="rep")
         unclaimed_org = Organization.objects.create(name="Acme Unclaimed", representative="")
-        Membership.objects.create(target_organization=claimed_org, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=unclaimed_org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=claimed_org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=unclaimed_org, membership_type=sponsor_type)
 
         manager = FreeIPAUser("manager", {"uid": ["manager"], "memberof_group": [], "c": ["US"]})
 
@@ -198,8 +199,8 @@ class OrganizationsVueTests(TestCase):
         for index in range(26):
             sponsor_org = Organization.objects.create(name=f"Sponsor Org {index:02d}", representative=f"s-{index}")
             mirror_org = Organization.objects.create(name=f"Mirror Org {index:02d}", representative=f"m-{index}")
-            Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
-            Membership.objects.create(target_organization=mirror_org, membership_type=mirror_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_org, membership_type=sponsor_type)
+            Membership.objects.create(expires_at=FAR_FUTURE, target_organization=mirror_org, membership_type=mirror_type)
 
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
 
@@ -232,8 +233,8 @@ class OrganizationsVueTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         org = Organization.objects.create(name="Badge Order Org", representative="org-rep")
-        Membership.objects.create(target_organization=org, membership_type=mirror_type)
-        Membership.objects.create(target_organization=org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type=mirror_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=org, membership_type=sponsor_type)
 
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "memberof_group": [], "c": ["US"]})
 
@@ -251,8 +252,8 @@ class OrganizationsVueTests(TestCase):
 
         sponsor_org = Organization.objects.create(name="Sponsor Org", representative="bob")
         mirror_org = Organization.objects.create(name="Mirror Org", representative="carol")
-        Membership.objects.create(target_organization=sponsor_org, membership_type=sponsor_type)
-        Membership.objects.create(target_organization=mirror_org, membership_type=mirror_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=sponsor_org, membership_type=sponsor_type)
+        Membership.objects.create(expires_at=FAR_FUTURE, target_organization=mirror_org, membership_type=mirror_type)
 
         viewer = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": [], "c": ["US"]})
 

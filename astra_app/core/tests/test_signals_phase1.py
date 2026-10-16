@@ -36,7 +36,7 @@ from core.models import (
 from core.organization_claim import make_organization_claim_token
 from core.permissions import ASTRA_ADD_ELECTION
 from core.tests.ballot_chain import compute_chain_hash
-from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories, ensure_email_templates
 from core.tokens import election_genesis_chain_hash
 
 
@@ -169,21 +169,21 @@ class Phase1ElectionSignalTests(TestCase):
         voter_membership = Membership.objects.create(
             target_username="voter1",
             membership_type=voter_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.filter(pk=voter_membership.pk).update(created_at=now - datetime.timedelta(days=200))
 
         candidate_membership = Membership.objects.create(
             target_username="alice",
             membership_type=voter_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.filter(pk=candidate_membership.pk).update(created_at=now - datetime.timedelta(days=200))
 
         nominator_membership = Membership.objects.create(
             target_username="nominator",
             membership_type=voter_type,
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.filter(pk=nominator_membership.pk).update(created_at=now - datetime.timedelta(days=200))
 

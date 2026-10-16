@@ -9,7 +9,7 @@ from django.utils import timezone
 from core.freeipa.user import FreeIPAUser
 from core.models import FreeIPAPermissionGrant, Membership, MembershipType, Organization
 from core.permissions import ASTRA_VIEW_MEMBERSHIP
-from core.tests.utils_test_data import ensure_core_categories
+from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories
 
 
 class MembershipSponsorsApiTests(TestCase):
@@ -106,7 +106,7 @@ class MembershipSponsorsApiTests(TestCase):
         Membership.objects.create(
             target_organization=fallback_org,
             membership_type_id="sponsor-standard",
-            expires_at=None,
+            expires_at=FAR_FUTURE,
         )
         Membership.objects.create(
             target_username="alice",
@@ -163,8 +163,8 @@ class MembershipSponsorsApiTests(TestCase):
         self.assertEqual(second["organization"]["name"], "Fallback Org")
         self.assertEqual(second["representative"]["username"], "repfallback")
         self.assertEqual(second["representative"]["display_label"], "repfallback")
-        self.assertEqual(second["expires_display"], "-")
-        self.assertEqual(second["expires_at_order"], "9999-12-31")
+        self.assertFalse(second["is_expiring_soon"])
+        self.assertEqual(second["expires_at_order"], "2099-01-01 00:00:00")
 
     def test_membership_sponsors_api_rejects_invalid_query_parameters(self) -> None:
         self._grant_membership_permission()

@@ -88,7 +88,7 @@ function makePayload(overrides: Partial<UserProfileResponse> = {}): UserProfileR
           requestId: null,
           membershipType: { name: "Individual", code: "individual", description: "" },
           createdAt: "2024-01-15T12:00:00Z",
-          expiresAt: null,
+          expiresAt: "2027-01-15T12:00:00Z",
           isExpiringSoon: false,
           canRenew: false,
           canRequestTierChange: false,
