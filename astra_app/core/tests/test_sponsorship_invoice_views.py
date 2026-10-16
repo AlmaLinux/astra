@@ -126,6 +126,9 @@ class SponsorshipInvoiceViewTests(SponsorshipInvoiceTestMixin, TestCase):
         render_mock.assert_called_once()
         with default_storage.open(invoice_storage_key(membership, InvoiceTerm.renewal), "rb") as stored:
             self.assertEqual(stored.read(), b"%PDF-new")
+        [payload] = self._invoice_audit_payloads()
+        self.assertEqual(payload["actor_username"], "rep1")
+        self.assertTrue(payload["regenerated"])
 
     def test_regenerate_is_refused_for_representative_outside_window_and_strangers(self) -> None:
         membership = self._membership_expiring_in(200)
@@ -165,6 +168,7 @@ class SponsorshipInvoiceViewTests(SponsorshipInvoiceTestMixin, TestCase):
             response = self._regenerate(membership)
 
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._invoice_audit_payloads(), [])
 
     def test_detail_payload_includes_billing_notes(self) -> None:
         self._login("rep1")

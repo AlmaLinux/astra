@@ -345,7 +345,14 @@ def send_membership_notification(
 
     attachments: dict[str, object] | None = None
     if membership is not None and invoice_eligible(membership):
-        invoice_parts = invoice_email_parts(membership, InvoiceTerm.renewal, recipient=address, cc=cc)
+        # Renewal reminders are only sent by the scheduled expiration jobs.
+        invoice_parts = invoice_email_parts(
+            membership,
+            InvoiceTerm.renewal,
+            recipient=address,
+            cc=cc,
+            actor_username="system",
+        )
         cc = invoice_parts.cc
         attachments = invoice_parts.attachments
         context |= invoice_parts.context

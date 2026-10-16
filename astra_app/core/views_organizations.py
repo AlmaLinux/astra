@@ -1362,7 +1362,7 @@ def organization_sponsorship_invoice_regenerate(
         return detail_redirect
 
     try:
-        get_or_create_invoice_pdf(membership, term, regenerate=True)
+        get_or_create_invoice_pdf(membership, term, actor_username=get_username(request), regenerate=True)
     except Exception:
         logger.exception(
             "organization_sponsorship_invoice_regenerate: failed org_id=%s membership_id=%s",

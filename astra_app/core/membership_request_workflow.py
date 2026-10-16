@@ -256,6 +256,7 @@ def _send_membership_request_notification(
     extra_context: dict[str, object] | None = None,
     log_context: dict[str, object] | None = None,
     invoice_membership: Membership | None = None,
+    invoice_actor_username: str = "",
 ) -> object | None:
     if not target.email:
         request_id = None
@@ -299,7 +300,13 @@ def _send_membership_request_notification(
     cc: list[str] | None = None
     attachments: dict[str, object] | None = None
     if invoice_membership is not None:
-        invoice_parts = invoice_email_parts(invoice_membership, InvoiceTerm.current, recipient=target.email, cc=cc)
+        invoice_parts = invoice_email_parts(
+            invoice_membership,
+            InvoiceTerm.current,
+            recipient=target.email,
+            cc=cc,
+            actor_username=invoice_actor_username,
+        )
         cc = invoice_parts.cc
         attachments = invoice_parts.attachments
         context.update(invoice_parts.context)
@@ -1154,6 +1161,7 @@ def approve_membership_request(
                     "action": "approved",
                 },
                 invoice_membership=invoice_membership,
+                invoice_actor_username=actor_username,
             )
         except Exception:
             logger.exception(

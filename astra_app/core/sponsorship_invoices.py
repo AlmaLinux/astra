@@ -27,7 +27,7 @@ from core.country_codes import country_name_from_code
 from core.logging_extras import current_exception_log_fields
 from core.mail_attachments import MailAttachment
 from core.membership_dues import discount_percent, effective_dues_usd
-from core.models import Membership
+from core.models import AuditLogEntry, Membership
 
 logger = logging.getLogger(__name__)
 
@@ -175,10 +175,17 @@ def render_invoice_pdf(membership: Membership, term: InvoiceTerm) -> bytes:
     ).write_pdf()
 
 
-def get_or_create_invoice_pdf(membership: Membership, term: InvoiceTerm, *, regenerate: bool = False) -> bytes:
+def get_or_create_invoice_pdf(
+    membership: Membership,
+    term: InvoiceTerm,
+    *,
+    actor_username: str,
+    regenerate: bool = False,
+) -> bytes:
     """Return the stored invoice PDF, rendering and storing it first if needed.
 
-    Regenerating overwrites the PDF in place: same number, same link.
+    Regenerating overwrites the PDF in place: same number, same link. Every render is
+    audited, since each one may bill different amounts or details under that number.
     """
 
     key = invoice_storage_key(membership, term)
@@ -194,6 +201,19 @@ def get_or_create_invoice_pdf(membership: Membership, term: InvoiceTerm, *, rege
     # suffixed name, breaking the link already sent to the sponsor.
     default_storage.delete(key)
     default_storage.save(key, ContentFile(pdf))
+    AuditLogEntry.objects.create(
+        organization_id=membership.target_organization_id,
+        event_type="sponsorship_invoice_generated",
+        payload={
+            "invoice_number": invoice_number(membership, term),
+            "term": term,
+            "membership_type": membership.membership_type_id,
+            "amount_due_usd": effective_dues_usd(membership),
+            "regenerated": regenerate,
+            "actor_username": actor_username,
+        },
+        is_public=False,
+    )
     return pdf
 
 
@@ -220,6 +240,7 @@ def invoice_email_parts(
     *,
     recipient: str,
     cc: list[str] | None,
+    actor_username: str,
 ) -> InvoiceEmailParts:
     """Attach the invoice to an outgoing email and copy the business contact, who usually pays.
 
@@ -232,7 +253,7 @@ def invoice_email_parts(
         cc = [*(cc or []), business_email]
 
     try:
-        pdf = get_or_create_invoice_pdf(membership, term)
+        pdf = get_or_create_invoice_pdf(membership, term, actor_username=actor_username)
     except Exception:
         logger.exception(
             "Failed to generate sponsorship invoice org_id=%s membership_id=%s term=%s",

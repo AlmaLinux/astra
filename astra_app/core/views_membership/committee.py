@@ -1182,7 +1182,13 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
         )
         if invoice_membership is not None:
             # The recipient is only chosen in Send Mail, so the business contact is always copied.
-            invoice_parts = invoice_email_parts(invoice_membership, InvoiceTerm.current, recipient="", cc=None)
+            invoice_parts = invoice_email_parts(
+                invoice_membership,
+                InvoiceTerm.current,
+                recipient="",
+                cc=None,
+                actor_username=get_username(request),
+            )
             approve_extras.update(invoice_parts.context)
             invoice_cc = invoice_parts.cc or []
             if invoice_parts.attachment is not None:
