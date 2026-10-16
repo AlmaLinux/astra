@@ -651,12 +651,20 @@ def election_detail_eligible_voters_api(request: HttpRequest, election_id: int) 
         str(item["username"]) for item in page_obj.object_list if str(item.get("username") or "").strip()
     ])
 
+    # Only a count, never which voters: participation stays private even to managers.
+    pending_voter_count = (
+        elections_services.pending_voter_credentials(election=election).count()
+        if election.status == Election.Status.open
+        else None
+    )
+
     return JsonResponse(
         {
             "eligible_voters": {
                 "items": items,
                 "usernames": context["eligible_voter_usernames"],
                 "pagination": serialize_pagination(context),
+                "pending_voter_count": pending_voter_count,
             },
         }
     )

@@ -11,7 +11,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Q, QuerySet, Sum
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
@@ -595,6 +595,19 @@ def election_quorum_status(*, election: Election) -> dict[str, int | bool]:
         "participating_voter_count": participating_voter_count,
         "participating_vote_weight_total": participating_vote_weight_total,
     }
+
+
+def pending_voter_credentials(*, election: Election) -> QuerySet[VotingCredential]:
+    """Credentials of pending voters: those who have not submitted any ballot yet.
+
+    Only meaningful while the election is open: closing anonymizes the
+    credentials, after which voters can no longer be told apart.
+    """
+    return (
+        VotingCredential.objects.filter(election=election)
+        .exclude(freeipa_username__isnull=True)
+        .exclude(public_id__in=Ballot.objects.for_election(election=election).values("credential_public_id"))
+    )
 
 
 @transaction.atomic

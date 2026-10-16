@@ -12,6 +12,7 @@ const bootstrap: ElectionCredentialResendBootstrap = {
   reminderProgressApiUrl: "/api/v1/elections/1/mail-progress?kind=reminder",
   electionStatus: "open",
   eligibleUsernames: ["alice", "bob"],
+  pendingVoterCount: 1,
 };
 
 const templatePayload = {
@@ -95,6 +96,7 @@ describe("ElectionCredentialResendControls", () => {
       reminderProgressApiUrl: "/api/v1/elections/1/mail-progress?kind=reminder",
       electionStatus: "open",
       eligibleUsernames: [],
+      pendingVoterCount: 0,
     };
 
     const wrapper = mount(ElectionCredentialResendControls, {
@@ -254,6 +256,59 @@ describe("ElectionCredentialResendControls", () => {
     expect(wrapper.find("[data-mail-progress-counts]").exists()).toBe(false);
     expect(wrapper.text()).toContain("Queued voting credential email for 258 recipients.");
     expect(wrapper.find("[data-testid='send-reminder-all']").attributes("disabled")).toBeUndefined();
+  });
+
+  it("offers a pending voter reminder just before send-to-all while the election is open", () => {
+    const wrapper = mount(ElectionCredentialResendControls, { props: { bootstrap } });
+
+    const buttons = wrapper.findAll("[data-testid^='send-reminder-']").map((button) => button.attributes("data-testid"));
+    expect(buttons.slice(-2)).toEqual(["send-reminder-pending-voters", "send-reminder-all"]);
+    expect(wrapper.get("[data-testid='send-reminder-pending-voters']").text()).toBe("Remind pending voters (1)");
+  });
+
+  it("hides the pending voter reminder once voting has ended", () => {
+    const closedBootstrap: ElectionCredentialResendBootstrap = {
+      ...bootstrap,
+      electionStatus: "closed",
+      pendingVoterCount: null,
+    };
+    const wrapper = mount(ElectionCredentialResendControls, { props: { bootstrap: closedBootstrap } });
+
+    expect(wrapper.find("[data-testid='send-reminder-pending-voters']").exists()).toBe(false);
+  });
+
+  it("disables the pending voter reminder when everyone has voted", () => {
+    const wrapper = mount(ElectionCredentialResendControls, {
+      props: { bootstrap: { ...bootstrap, pendingVoterCount: 0 } },
+    });
+
+    const button = wrapper.get<HTMLButtonElement>("[data-testid='send-reminder-pending-voters']");
+    expect(button.attributes("disabled")).toBeDefined();
+    expect(button.element.parentElement?.getAttribute("title")).toBe("Every eligible voter has already voted.");
+  });
+
+  it("sends the pending voter reminder without naming any voter", async () => {
+    const fetchMock = mockTemplateFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapper = mount(ElectionCredentialResendControls, { props: { bootstrap } });
+
+    await wrapper.find("[data-testid='send-reminder-pending-voters']").trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.get(".modal-title").text()).toBe("Send credential reminder to 1 pending voter");
+    expect(wrapper.get("[data-testid='send-credentials-confirm']").text()).toBe("Send 1 email");
+
+    await wrapper.find("[data-testid='send-credentials-confirm']").trigger("click");
+    await flushPromises();
+
+    const sendCall = fetchMock.mock.calls.find(
+      (call: unknown[]) => typeof call[0] === "string" && call[0].includes("send-mail-credentials"),
+    ) as [string, RequestInit] | undefined;
+    const body = JSON.parse(sendCall![1].body as string) as Record<string, unknown>;
+    expect(body.username).toBe("");
+    expect(body.pending_voters_only).toBe(true);
   });
 
   it("closes the modal without sending when cancel is clicked", async () => {

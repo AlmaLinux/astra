@@ -64,6 +64,22 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
             message="Emails can only be sent for open, closed, or tallied elections.",
         )
 
+    target_username = str(data.get("username") or "").strip()
+    pending_voters_only = data.get("pending_voters_only") is True
+    if pending_voters_only and election.status != Election.Status.open:
+        return ElectionCredentialResendResult(
+            success=False,
+            status_code=400,
+            message="Pending voters can only be reminded while the election is open.",
+        )
+    if pending_voters_only and target_username:
+        # Answering for one named voter would reveal whether they have voted.
+        return ElectionCredentialResendResult(
+            success=False,
+            status_code=400,
+            message="Choose either a single voter or all pending voters, not both.",
+        )
+
     admin_username = get_username(request)
 
     if not allow_request(
@@ -77,8 +93,6 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
             status_code=429,
             message="Too many resend attempts. Please try again later.",
         )
-
-    target_username = str(data.get("username") or "").strip()
 
     # Optional custom template content from the compose modal.
     subject_template = str(data.get("subject_template") or "").strip() or None
@@ -105,6 +119,16 @@ def _send_mail_credentials_result(*, request: HttpRequest, election: Election, d
             credential_list = list(
                 credentials_qs.filter(freeipa_username=target_username).only("freeipa_username", "public_id")
             )
+        elif pending_voters_only:
+            credential_list = list(
+                elections_services.pending_voter_credentials(election=election).only("freeipa_username", "public_id")
+            )
+            if not credential_list:
+                return ElectionCredentialResendResult(
+                    success=False,
+                    status_code=400,
+                    message="Every eligible voter has already voted.",
+                )
         else:
             credential_list = list(credentials_qs.only("freeipa_username", "public_id"))
 

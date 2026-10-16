@@ -55,7 +55,9 @@ const username = ref("");
 const select2Initialized = ref(false);
 
 // Modal state
-const modalMode = ref<"single" | "all" | null>(null);
+type ModalMode = "single" | "all" | "pending_voters";
+
+const modalMode = ref<ModalMode | null>(null);
 const isLoadingTemplate = ref(false);
 const templateLoadError = ref("");
 const isSubmitting = ref(false);
@@ -113,8 +115,13 @@ const emptyPreview = { subject: "", html: "", text: "" };
 
 const isOpen = computed(() => props.bootstrap.electionStatus === "open");
 
+// The server only reports how many voters haven't voted, never who they are.
+const pendingVoterCount = computed(() => props.bootstrap.pendingVoterCount ?? 0);
+const canRemindPendingVoters = computed(() => isOpen.value && props.bootstrap.pendingVoterCount !== null);
+
 const recipientCount = computed(() => {
   if (modalMode.value === "single") return 1;
+  if (modalMode.value === "pending_voters") return pendingVoterCount.value;
   return props.bootstrap.eligibleUsernames.length;
 });
 
@@ -129,6 +136,10 @@ const allButtonLabel = computed(() => isOpen.value ? "Send reminder to all" : "S
 const recipientLabel = computed(() => {
   if (modalMode.value === "single") {
     return username.value;
+  }
+  if (modalMode.value === "pending_voters") {
+    const count = pendingVoterCount.value;
+    return `${count} pending voter${count === 1 ? "" : "s"}`;
   }
   const count = props.bootstrap.eligibleUsernames.length;
   return `all ${count} eligible voter${count === 1 ? "" : "s"}`;
@@ -175,7 +186,7 @@ const previewUrl = computed(() => {
   return `${base}${sep}preview_username=${encodeURIComponent(previewUsername.value)}`;
 });
 
-async function openModal(mode: "single" | "all"): Promise<void> {
+async function openModal(mode: ModalMode): Promise<void> {
   modalMode.value = mode;
   isLoadingTemplate.value = true;
   templateLoadError.value = "";
@@ -270,6 +281,7 @@ async function sendCredentials(): Promise<void> {
       },
       body: JSON.stringify({
         username: targetUsername,
+        pending_voters_only: modalMode.value === "pending_voters",
         subject_template: fields.subject,
         html_template: fields.html,
         text_template: fields.text,
@@ -395,7 +407,20 @@ watch(
         </GuardedButton>
       </div>
 
-      <div class="ml-auto flex-shrink-0">
+      <div class="ml-auto flex-shrink-0 d-flex align-items-center" style="gap: .5rem;">
+        <GuardedButton
+          v-if="canRemindPendingVoters"
+          data-testid="send-reminder-pending-voters"
+          type="button"
+          class="btn btn-outline-primary btn-sm"
+          :blocked-reason="pendingVoterCount ? '' : 'Every eligible voter has already voted.'"
+          :busy="progress !== null"
+          title="Send credential reminders to eligible voters who haven't voted yet"
+          style="white-space: nowrap;"
+          @click="openModal('pending_voters')"
+        >
+          Remind pending voters ({{ pendingVoterCount }})
+        </GuardedButton>
         <GuardedButton
           data-testid="send-reminder-all"
           type="button"
@@ -420,8 +445,8 @@ watch(
       :running-title="isOpen ? 'Sending credential reminders...' : 'Sending emails...'"
       :finished-title="isOpen ? 'Reminders sent' : 'Emails sent'"
       :description="isOpen
-        ? 'Each eligible voter is being emailed their own reminder with their voting link — this can take a few minutes.'
-        : 'Each eligible voter is being emailed — this can take a few minutes.'"
+        ? 'Each recipient is being emailed their own reminder with their voting link — this can take a few minutes.'
+        : 'Each recipient is being emailed — this can take a few minutes.'"
       continue-label="Done"
       unit-singular="credential email"
       unit-plural="credential emails"

@@ -21,6 +21,7 @@ const props = defineProps<{
 const eligibleItems = ref<EligibleVoterItem[]>([]);
 const eligiblePagination = ref<ElectionsPagination | null>(null);
 const eligibleUsernames = ref<string[]>([]);
+const pendingVoterCount = ref<number | null>(null);
 const ineligibleItems = ref<EligibleVoterItem[]>([]);
 const ineligiblePagination = ref<ElectionsPagination | null>(null);
 const ineligibleDetailsByUsername = ref<Record<string, IneligibleVoterDetails>>({});
@@ -53,6 +54,7 @@ const credentialResendBootstrap = computed<ElectionCredentialResendBootstrap | n
     reminderProgressApiUrl: props.bootstrap.reminderProgressApiUrl,
     electionStatus: props.bootstrap.electionStatus || "open",
     eligibleUsernames: eligibleUsernames.value,
+    pendingVoterCount: pendingVoterCount.value,
   };
 });
 
@@ -183,6 +185,7 @@ async function loadEligible(nextPage = eligiblePage.value): Promise<void> {
     eligibleItems.value = payload.eligible_voters.items;
     eligiblePagination.value = payload.eligible_voters.pagination;
     eligibleUsernames.value = payload.eligible_voters.usernames;
+    pendingVoterCount.value = payload.eligible_voters.pending_voter_count;
     hasLoadedEligible.value = true;
     syncLocation();
   } catch {

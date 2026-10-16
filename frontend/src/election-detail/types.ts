@@ -112,6 +112,8 @@ export interface EligibleVotersResponse {
     items: EligibleVoterItem[];
     usernames: string[];
     pagination: ElectionsPagination;
+    // Null once voting has ended: participation can no longer be told apart.
+    pending_voter_count: number | null;
   };
 }
 
@@ -187,6 +189,7 @@ export interface ElectionCredentialResendBootstrap {
   reminderProgressApiUrl: string;
   electionStatus: string;
   eligibleUsernames: string[];
+  pendingVoterCount: number | null;
 }
 
 export interface ElectionActionCardBootstrap {
@@ -342,6 +345,7 @@ export function readElectionCredentialResendBootstrap(root: HTMLElement): Electi
     reminderProgressApiUrl,
     electionStatus: String(root.dataset.electionStatus || "open").trim(),
     eligibleUsernames,
+    pendingVoterCount: null,
   };
 }
 

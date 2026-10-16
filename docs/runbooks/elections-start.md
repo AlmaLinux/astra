@@ -72,6 +72,9 @@ Starting an election is a high-impact operation. It sets the election status to 
 3. Confirm the vote link works and the credential autofill behavior matches expectations.
 4. If resend reports missing credentials, do not attempt out-of-band issuance. Investigate why the start transition did not create credentials and resolve before continuing operations.
 
+### 5) Remind pending voters
+While the election is open, `Remind pending voters (N)` in the eligible voters card emails a credential reminder only to pending voters: those with no ballot yet. Astra shows how many voters that is, never which ones, and cannot be asked about a single voter. The option disappears at close, because anonymization removes the link between voters and ballots.
+
 ## Rollback or abort guidance
 Starting an election cannot be "undone" cleanly:
 - Emails cannot be unsent.

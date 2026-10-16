@@ -16,6 +16,7 @@ from core.models import (
     Ballot,
     Candidate,
     Election,
+    ElectionRoll,
     ExclusionGroup,
     FreeIPAPermissionGrant,
     Membership,
@@ -1580,6 +1581,148 @@ class ElectionsApiTests(TestCase):
         second_payload = json.loads(second.content)
         self.assertFalse(second_payload["ok"])
         self.assertEqual(second_payload["errors"], ["Too many resend attempts. Please try again later."])
+
+    def _election_with_voters(self, *, voters: list[str], status: str = Election.Status.open) -> Election:
+        self._login_as_freeipa_user("admin")
+        FreeIPAPermissionGrant.objects.create(
+            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+            principal_name="admin",
+            permission=ASTRA_ADD_ELECTION,
+        )
+        now = timezone.now()
+        election = Election.objects.create(
+            name="Pending voter reminder election",
+            description="",
+            start_datetime=now - datetime.timedelta(days=1),
+            end_datetime=now + datetime.timedelta(days=1),
+            number_of_seats=1,
+            status=status,
+        )
+        for username in voters:
+            VotingCredential.objects.create(
+                election=election,
+                public_id=f"cred-{username}",
+                freeipa_username=username,
+                weight=1,
+            )
+            ElectionRoll.objects.create(election=election, freeipa_username=username)
+        return election
+
+    def _cast_ballot(self, *, election: Election, credential_public_id: str) -> None:
+        candidate, _ = Candidate.objects.get_or_create(
+            election=election,
+            freeipa_username="candidate",
+            defaults={"nominated_by": "nominator"},
+        )
+        elections_services.submit_ballot(
+            election=election,
+            credential_public_id=credential_public_id,
+            ranking=[candidate.id],
+        )
+
+    def _get_eligible_voters_api(self, *, election: Election):
+        admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
+        with patch(
+            "core.freeipa.user.FreeIPAUser.get",
+            side_effect=lambda username, respect_privacy=True: admin if username == "admin" else None,
+        ):
+            return self.client.get(
+                reverse("api-election-detail-eligible-voters", args=[election.id]),
+                HTTP_ACCEPT="application/json",
+            )
+
+    def _post_pending_voter_reminder(self, *, election: Election, data: dict[str, object]):
+        def _get_user(username: str, respect_privacy: bool = True):
+            return FreeIPAUser(
+                username,
+                {"uid": [username], "mail": [f"{username}@example.com"], "memberof_group": []},
+            )
+
+        def _run_inline(target, *, name: str) -> None:
+            target()
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
+            patch("core.mail_progress._spawn", side_effect=_run_inline),
+            patch(
+                "core.elections_services.send_voting_credential_email",
+                autospec=True,
+                return_value=None,
+            ) as send_mock,
+        ):
+            response = self.client.post(
+                reverse("api-election-send-mail-credentials", args=[election.id]),
+                data=json.dumps(data),
+                content_type="application/json",
+            )
+        return response, send_mock
+
+    def test_election_send_mail_credentials_api_pending_voters_only_skips_voters(self) -> None:
+        election = self._election_with_voters(voters=["alice", "bob", "carol"])
+        # Alice re-voted: her first ballot is superseded but she has still voted.
+        self._cast_ballot(election=election, credential_public_id="cred-alice")
+        self._cast_ballot(election=election, credential_public_id="cred-alice")
+
+        response, send_mock = self._post_pending_voter_reminder(election=election, data={"pending_voters_only": True})
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["recipient_count"], 2)
+        self.assertEqual(
+            sorted(call.kwargs["username"] for call in send_mock.call_args_list),
+            ["bob", "carol"],
+        )
+
+    def test_election_send_mail_credentials_api_pending_voters_only_rejects_single_username(self) -> None:
+        election = self._election_with_voters(voters=["alice", "bob"])
+
+        response, send_mock = self._post_pending_voter_reminder(
+            election=election,
+            data={"pending_voters_only": True, "username": "bob"},
+        )
+
+        # Answering per user would reveal whether that voter has voted.
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(json.loads(response.content)["ok"])
+        send_mock.assert_not_called()
+
+    def test_election_send_mail_credentials_api_pending_voters_only_requires_open_election(self) -> None:
+        election = self._election_with_voters(voters=["alice", "bob"], status=Election.Status.closed)
+
+        response, send_mock = self._post_pending_voter_reminder(election=election, data={"pending_voters_only": True})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(json.loads(response.content)["ok"])
+        send_mock.assert_not_called()
+
+    def test_election_send_mail_credentials_api_pending_voters_only_reports_everyone_voted(self) -> None:
+        election = self._election_with_voters(voters=["alice"])
+        self._cast_ballot(election=election, credential_public_id="cred-alice")
+
+        response, send_mock = self._post_pending_voter_reminder(election=election, data={"pending_voters_only": True})
+
+        self.assertEqual(response.status_code, 400)
+        payload = json.loads(response.content)
+        self.assertEqual(payload["errors"], ["Every eligible voter has already voted."])
+        send_mock.assert_not_called()
+
+    def test_election_eligible_voters_api_counts_pending_voters_while_open(self) -> None:
+        election = self._election_with_voters(voters=["alice", "bob", "carol"])
+        self._cast_ballot(election=election, credential_public_id="cred-alice")
+
+        response = self._get_eligible_voters_api(election=election)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)["eligible_voters"]["pending_voter_count"], 2)
+
+    def test_election_eligible_voters_api_omits_pending_voter_count_after_close(self) -> None:
+        election = self._election_with_voters(voters=["alice", "bob"], status=Election.Status.closed)
+
+        response = self._get_eligible_voters_api(election=election)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(json.loads(response.content)["eligible_voters"]["pending_voter_count"])
 
     def test_election_credential_email_template_api_returns_template_content(self) -> None:
         self._login_as_freeipa_user("admin")
