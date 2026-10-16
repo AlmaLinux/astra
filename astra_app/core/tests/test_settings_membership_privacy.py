@@ -265,6 +265,7 @@ class SelfServiceMembershipPrivacyTests(TestCase):
         self.assertLessEqual(retention_window, datetime.timedelta(days=30, minutes=1))
         self.assertFalse(Membership.objects.filter(target_username="alice", membership_type_id="individual").exists())
         signal_send.assert_called_once()
+        self.assertEqual(signal_send.call_args.kwargs["termination_feedback"], feedback)
         # The committee sees why the member left, but never the free text, which is wiped after 30 days.
         note = Note.objects.get(membership_request=term_request)
         self.assertEqual(note.username, "alice")

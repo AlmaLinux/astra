@@ -16,7 +16,7 @@ from core.membership_notifications import (
     membership_extend_url,
     membership_requests_url,
 )
-from core.models import Ballot, MattermostWebhookEndpoint
+from core.models import Ballot, MattermostWebhookEndpoint, MembershipTerminationFeedback
 from core.public_urls import build_public_absolute_url
 from core.signal_receivers import connect_once, safe_receiver
 from core.signals import CANONICAL_SIGNALS
@@ -253,6 +253,8 @@ _EVENT_TEMPLATE_VARIABLES: dict[str, dict[str, str]] = {
         "membership_type": "MembershipType-like object when available.",
         "membership_type_code": "Membership type code.",
         "membership_type_name": "Membership type display name.",
+        "termination_feedback_id": "MembershipTerminationFeedback primary key (see it in the Django admin).",
+        "termination_reason_category": "Reason the member chose: privacy, no_longer_needed, duplicate or other.",
     },
     "account_deletion_requested": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
     "account_deletion_pending_privilege_check": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
@@ -449,7 +451,10 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
         return membership_requests_url()
 
     if event_key == "membership_self_terminated":
-        return build_public_absolute_url(f"{reverse('settings')}?tab=membership", on_missing="relative")
+        return build_public_absolute_url(
+            reverse("admin:core_membershipterminationfeedback_change", args=[kwargs["termination_feedback_id"]]),
+            on_missing="relative",
+        )
 
     if event_key in _ACCOUNT_DELETION_EVENTS:
         account_deletion_request = kwargs.get("account_deletion_request")
@@ -663,6 +668,8 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
             fields.append({"title": "Membership", "value": membership_type_name, "short": True})
         elif membership_type_code:
             fields.append({"title": "Membership", "value": membership_type_code, "short": True})
+        reason = MembershipTerminationFeedback.ReasonCategory(kwargs["termination_reason_category"]).label
+        fields.append({"title": "Reason", "value": reason, "short": True})
         fields.append({"title": "Actor", "value": actor, "short": True})
     elif event_key in _ACCOUNT_DELETION_EVENTS:
         text = _ACCOUNT_DELETION_EVENT_TEXT.get(event_key, _event_title(event_key))
@@ -1089,6 +1096,13 @@ def _build_template_context(event_key: str, kwargs: dict[str, object]) -> dict[s
             blocker_codes = []
         context["account_deletion_blocker_codes"] = blocker_codes
         context["account_deletion_blocker_codes_csv"] = ", ".join(map(str, blocker_codes))
+
+    # Expose only the id and category: the object's free-text reason must not reach
+    # Mattermost, which would keep it past the privacy cleanup window.
+    termination_feedback = context.pop("termination_feedback", None)
+    if termination_feedback is not None:
+        context["termination_feedback_id"] = termination_feedback.pk
+        context["termination_reason_category"] = termination_feedback.reason_category
 
     return context
 

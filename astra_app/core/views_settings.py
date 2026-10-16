@@ -2119,7 +2119,7 @@ def settings_membership_terminate(request: HttpRequest, *, membership_type_code:
                 target_username=username,
                 reason_category=form.cleaned_data["reason_category"],
             )
-            MembershipTerminationFeedback.objects.create(
+            feedback = MembershipTerminationFeedback.objects.create(
                 membership_log=log,
                 username=username,
                 membership_type=membership_type,
@@ -2133,6 +2133,7 @@ def settings_membership_terminate(request: HttpRequest, *, membership_type_code:
                     actor=username,
                     username=username,
                     membership_type=membership_type,
+                    termination_feedback=feedback,
                 )
             )
     except Exception:

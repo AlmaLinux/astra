@@ -445,6 +445,7 @@ JAZZMIN_SETTINGS = {
                 "auth.ipagroup",
                 "core.organization",
                 "core.accountdeletionrequest",
+                "core.membershipterminationfeedback",
             ],
         },
         {

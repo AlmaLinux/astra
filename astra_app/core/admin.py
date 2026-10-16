@@ -140,6 +140,7 @@ from .models import (
     MattermostWebhookEndpoint,
     Membership,
     MembershipCSVImportLink,
+    MembershipTerminationFeedback,
     MembershipType,
     MembershipTypeCategory,
     Organization,
@@ -2485,6 +2486,29 @@ class AuditLogEntryAdmin(ReadOnlyModelAdmin):
     readonly_fields = ("election", "organization", "timestamp", "event_type", "payload", "is_public")
 
 
+@admin.register(MembershipTerminationFeedback)
+class MembershipTerminationFeedbackAdmin(ReadOnlyModelAdmin):
+    """Why members left; the free text is cleared by selfservice_lifecycle_cleanup after 30 days."""
+
+    list_display = ("username", "membership_type", "reason_category", "created_at")
+    list_filter = ("reason_category", "membership_type")
+    search_fields = ("username",)
+    ordering = ("-created_at", "-pk")
+    fields = (
+        "username",
+        "membership_type",
+        "reason_category",
+        "reason_text",
+        "reason_cleanup_due_at",
+        "reason_text_cleared_at",
+        "created_at",
+    )
+
+    def menu_badge_count(self) -> int:
+        """Feedback whose free text hasn't been purged yet (feedback without text has nothing to purge)."""
+        return MembershipTerminationFeedback.objects.exclude(reason_text="").count()
+
+
 @admin.register(AccountDeletionRequest)
 class AccountDeletionRequestAdmin(admin.ModelAdmin):
     APPROVE_SOURCE_STATUSES = (
@@ -2547,6 +2571,9 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
     )
     approve_confirmation_template = "admin/core/accountdeletionrequest/approve_requests_confirmation.html"
     change_form_template = "admin/core/accountdeletionrequest/change_form.html"
+
+    def menu_badge_count(self) -> int:
+        return AccountDeletionRequest.objects.active().count()
 
     @admin.display(description="Manual review")
     def manual_review_flag(self, obj: AccountDeletionRequest) -> str:

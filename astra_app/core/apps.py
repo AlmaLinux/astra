@@ -2,6 +2,7 @@ from copy import deepcopy
 from typing import Any, override
 
 from django.apps import AppConfig
+from django.utils.html import format_html
 
 
 def _patch_jazzmin_format_html() -> None:
@@ -136,6 +137,21 @@ def _apply_jazzmin_model_groups(
     return synthetic_sections + remaining_sections
 
 
+def _apply_admin_menu_badges(menu: list[dict[str, Any]]) -> None:
+    """Append a count badge to models whose ModelAdmin defines ``menu_badge_count()``."""
+    from django.contrib import admin
+
+    for app in menu:
+        for entry in app["models"]:
+            # Custom links have no model, and most admins don't count anything (optional interface).
+            model_admin = admin.site._registry.get(entry.get("model"))
+            if not hasattr(model_admin, "menu_badge_count"):
+                continue
+            count = model_admin.menu_badge_count()
+            if count:
+                entry["name"] = format_html('{} <span class="badge badge-danger right">{}</span>', entry["name"], count)
+
+
 def _patch_jazzmin_side_menu_model_groups() -> None:
     """Support custom model groups in Jazzmin side menu via JAZZMIN_SETTINGS['model_groups']."""
 
@@ -150,6 +166,11 @@ def _patch_jazzmin_side_menu_model_groups() -> None:
     original_get_side_menu = jazzmin_tags.get_side_menu
 
     def grouped_get_side_menu(context, using: str = "available_apps"):
+        menu = _group_side_menu(context, using=using)
+        _apply_admin_menu_badges(menu)
+        return menu
+
+    def _group_side_menu(context, using: str):
         menu = original_get_side_menu(context, using=using)
         options = jazzmin_tags.get_settings()
         configured_groups = options.get("model_groups", [])

@@ -4,6 +4,37 @@
   color: var(--dark) !important;
 }
 
+/* Lay sidebar links out as icon + label columns, so wrapped labels stay aligned with the
+   text instead of falling back under the icon. */
+.nav-sidebar .nav-link {
+  display: flex;
+  /* Matches the stock inline layout: icon sits on the first line's baseline. */
+  align-items: baseline;
+}
+
+/* As a flex item the icon would shrink, and the space after it would collapse: re-add that
+   space here, since AdminLTE resets the label's margin when the collapsed sidebar is hovered. */
+.nav-sidebar .nav-link > .nav-icon {
+  flex-shrink: 0;
+  margin-right: calc(0.2rem + 0.19em);
+}
+
+/* The collapsed sidebar expands on hover with zero-width, single-line labels; grow them to
+   the available room and truncate rather than overflow. Right-pinned children (badges, the
+   treeview arrow) are positioned against the link, so they aren't clipped. */
+.nav-sidebar .nav-link > p {
+  flex-grow: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Count badges (core.apps._apply_admin_menu_badges) are pinned to the link's right edge:
+   reserve room so long names wrap before reaching them. */
+.nav-sidebar .nav-link:has(> p > .badge.right) {
+  padding-right: 3rem;
+}
+
 /* Jazzmin wrapper blur can make in-wrapper modals non-interactive on admin change forms. */
 .modal-open .wrapper {
   filter: none !important;

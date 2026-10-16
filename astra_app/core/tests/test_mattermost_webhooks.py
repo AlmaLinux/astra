@@ -941,6 +941,7 @@ class MattermostWebhookDispatchTests(TestCase):
             events=["membership_self_terminated"],
         )
         membership_type = SimpleNamespace(code="individual", name="Individual")
+        feedback = SimpleNamespace(pk=7, reason_category="no_longer_needed", reason_text="Private details")
 
         with (
             patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
@@ -951,12 +952,43 @@ class MattermostWebhookDispatchTests(TestCase):
                 actor="alice",
                 username="alice",
                 membership_type=membership_type,
+                termination_feedback=feedback,
             )
 
         post_mock.assert_called_once()
         self.assertEqual(post_mock.call_args.args[0].pk, endpoint.pk)
         payload = post_mock.call_args.args[1]
         self.assertEqual(payload["text"], "Membership self-terminated")
+        attachment = payload["attachments"][0]
+        self.assertTrue(
+            attachment["title_link"].endswith(reverse("admin:core_membershipterminationfeedback_change", args=[7]))
+        )
+        self.assertIn({"title": "Reason", "value": "No longer needed", "short": True}, attachment["fields"])
+        # The free text is wiped after the privacy window; Mattermost would keep it forever.
+        self.assertNotIn("Private details", json.dumps(payload))
+
+    def test_membership_self_terminated_template_exposes_the_reason_category(self) -> None:
+        MattermostWebhookEndpoint.objects.create(
+            label="Membership",
+            url="https://hooks.example.invalid/membership",
+            enabled=True,
+            events=["membership_self_terminated"],
+            text="{{ username }} left ({{ termination_reason_category }}) #{{ termination_feedback_id }}",
+        )
+
+        with (
+            patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
+            self._dispatch_thread_patch(),
+        ):
+            CANONICAL_SIGNALS["membership_self_terminated"].send(
+                sender=MembershipLog,
+                actor="alice",
+                username="alice",
+                membership_type=SimpleNamespace(code="individual", name="Individual"),
+                termination_feedback=SimpleNamespace(pk=7, reason_category="privacy", reason_text=""),
+            )
+
+        self.assertEqual(post_mock.call_args.args[1]["text"], "alice left (privacy) #7")
 
     def test_account_deletion_completed_signal_posts_through_connected_receiver(self) -> None:
         endpoint = MattermostWebhookEndpoint.objects.create(
