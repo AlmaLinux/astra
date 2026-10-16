@@ -196,7 +196,7 @@ class Command(BaseCommand):
                 logger.warning(
                     "sponsorship_divergence org_id=%s org_name=%s sponsorship_level=%s reason=expired_sponsorship",
                     org_membership.target_organization_id,
-                    org_membership.target_organization_name,
+                    org_membership.target_organization.name,
                     org_membership.membership_type_id,
                 )
 

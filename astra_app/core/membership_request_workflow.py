@@ -67,7 +67,7 @@ class MembershipTarget:
 
 def _build_membership_target(membership_request: MembershipRequest) -> MembershipTarget:
     """Resolve the notification target from a membership request."""
-    if membership_request.target_kind == MembershipRequest.TargetKind.user:
+    if membership_request.is_user_target:
         user = FreeIPAUser.get(membership_request.requested_username, respect_privacy=False)
         return MembershipTarget(
             email=user.email if user is not None else "",
@@ -341,19 +341,12 @@ def _create_status_change_log(
     rejection_reason: str = "",
 ) -> MembershipLog:
     """Create a MembershipLog for a status change, routing user vs org target."""
-    organization = membership_request.requested_organization
-    organization_identifier = ""
-    organization_name = ""
-    if membership_request.target_kind == MembershipRequest.TargetKind.organization and organization is None:
-        organization_identifier = membership_request.organization_identifier
-        organization_name = membership_request.organization_display_name
-
     log = MembershipLog._create_log(
         actor_username=actor_username,
         target_username=membership_request.requested_username,
-        target_organization=organization,
-        target_organization_code=organization_identifier,
-        target_organization_name=organization_name,
+        target_organization=membership_request.requested_organization,
+        deleted_organization_id=membership_request.deleted_organization_id,
+        deleted_organization_name=membership_request.deleted_organization_name,
         membership_type=membership_type,
         membership_request=membership_request,
         action=action,
@@ -435,7 +428,7 @@ def previous_expires_at_for_extension(
     expired, return None so approval starts a new term.
     """
     filters: dict[str, object] = {"membership_type": membership_type}
-    if membership_request.target_kind == MembershipRequest.TargetKind.user:
+    if membership_request.is_user_target:
         normalized_username = str(membership_request.requested_username or "").strip()
         if not normalized_username:
             return None
@@ -841,7 +834,7 @@ def record_membership_request_created(
             log_prefix=log_prefix,
         )
 
-    if membership_request.target_kind == MembershipRequest.TargetKind.user:
+    if membership_request.is_user_target:
         email_error: Exception | None = None
         sent_email = None
 
@@ -1092,7 +1085,7 @@ def approve_membership_request(
             raise ValidationError("Only pending or on-hold requests can be approved")
         raise ValidationError("Only pending requests can be approved")
 
-    if membership_request.target_kind == MembershipRequest.TargetKind.organization:
+    if membership_request.is_organization_target:
         org = membership_request.requested_organization
         if org is None:
             raise ValidationError("Organization not found")
@@ -1395,7 +1388,7 @@ def reopen_ignored_membership_request(
 
     # Check uniqueness: no conflicting open request for same target + type.
     open_statuses = {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold}
-    if membership_request.target_kind == MembershipRequest.TargetKind.user:
+    if membership_request.is_user_target:
         conflict = MembershipRequest.objects.filter(
             requested_username=membership_request.requested_username,
             membership_type=membership_type,

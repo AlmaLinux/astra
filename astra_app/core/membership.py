@@ -703,12 +703,7 @@ def pending_request_context_entry(
         "status": pending_request.status,
         "on_hold_at": pending_request.on_hold_at,
         "is_organization": is_organization,
-        "organization_name": (
-            pending_request.requested_organization_name
-            or (pending_request.requested_organization.name if pending_request.requested_organization else "")
-        )
-        if is_organization
-        else "",
+        "organization_name": pending_request.organization_display_name if is_organization else "",
     }
 
 

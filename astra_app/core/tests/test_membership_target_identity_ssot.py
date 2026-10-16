@@ -70,7 +70,7 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         self.assertEqual(user_identity.for_membership_log_filter(), {"target_username": "alice"})
 
         org_identity = MembershipTargetIdentity.for_organization(
-            organization_identifier="42",
+            organization_id=42,
             organization_display_name="Acme",
         )
 
@@ -103,7 +103,7 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         request_identity = request_row.target_identity
 
         self.assertEqual(request_identity.kind, MembershipTargetKind.organization)
-        self.assertEqual(request_identity.organization_identifier, str(organization.pk))
+        self.assertEqual(request_identity.organization_id, organization.pk)
         self.assertEqual(request_identity.organization_display_name, "Acme")
 
         membership = Membership.objects.create(
@@ -112,7 +112,7 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         )
         membership_identity = membership.target_identity
         self.assertEqual(membership_identity.kind, MembershipTargetKind.organization)
-        self.assertEqual(membership_identity.organization_identifier, str(organization.pk))
+        self.assertEqual(membership_identity.organization_id, organization.pk)
         self.assertEqual(membership_identity.organization_display_name, "Acme")
 
         log = MembershipLog.objects.create(
@@ -123,10 +123,10 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         )
         log_identity = log.target_identity
         self.assertEqual(log_identity.kind, MembershipTargetKind.organization)
-        self.assertEqual(log_identity.organization_identifier, str(organization.pk))
+        self.assertEqual(log_identity.organization_id, organization.pk)
         self.assertEqual(log_identity.organization_display_name, "Acme")
 
-    def test_membershiplog_queryset_org_matching_ssot_handles_fk_code_and_mismatch(self) -> None:
+    def test_membershiplog_queryset_org_matching_covers_live_and_deleted_organization(self) -> None:
         membership_type = MembershipType.objects.get(code="gold")
         primary_org = Organization.objects.create(name="Primary", representative="rep")
         secondary_org = Organization.objects.create(name="Secondary", representative="rep2")
@@ -136,23 +136,15 @@ class MembershipTargetIdentitySSOTTests(TestCase):
             action=MembershipLog.Action.approved,
             membership_type=membership_type,
             target_organization=primary_org,
-            target_organization_code="999",
         )
-        code_match = MembershipLog.objects.create(
+        deleted_match = MembershipLog.objects.create(
             actor_username="reviewer",
-            action=MembershipLog.Action.approved,
+            action=MembershipLog.Action.terminated,
             membership_type=membership_type,
-            target_organization_code=str(primary_org.pk),
-            target_organization_name="Primary snapshot",
+            deleted_organization_id=primary_org.pk,
+            deleted_organization_name="Primary snapshot",
         )
-        mismatch_match = MembershipLog.objects.create(
-            actor_username="reviewer",
-            action=MembershipLog.Action.approved,
-            membership_type=membership_type,
-            target_organization=secondary_org,
-            target_organization_code=str(primary_org.pk),
-        )
-        non_match = MembershipLog.objects.create(
+        MembershipLog.objects.create(
             actor_username="reviewer",
             action=MembershipLog.Action.approved,
             membership_type=membership_type,
@@ -161,24 +153,9 @@ class MembershipTargetIdentitySSOTTests(TestCase):
 
         logs_manager = cast(Any, MembershipLog.objects)
         matched_ids = set(
-            logs_manager.for_organization_identifier(primary_org.pk).values_list("pk", flat=True)
+            logs_manager.for_organization(primary_org.pk).values_list("pk", flat=True)
         )
-        self.assertEqual(matched_ids, {fk_match.pk, code_match.pk, mismatch_match.pk})
-        self.assertNotIn(non_match.pk, matched_ids)
-
-    def test_membershiplog_queryset_org_matching_includes_snapshot_rows_for_nonexistent_org(self) -> None:
-        membership_type = MembershipType.objects.get(code="gold")
-        snapshot_only = MembershipLog.objects.create(
-            actor_username="reviewer",
-            action=MembershipLog.Action.approved,
-            membership_type=membership_type,
-            target_organization_code="424242",
-            target_organization_name="Deleted org",
-        )
-
-        logs_manager = cast(Any, MembershipLog.objects)
-        ids = set(logs_manager.for_organization_identifier(424242).values_list("pk", flat=True))
-        self.assertEqual(ids, {snapshot_only.pk})
+        self.assertEqual(matched_ids, {fk_match.pk, deleted_match.pk})
 
     def test_replace_within_category_uses_effective_category_when_denorm_drifts(self) -> None:
         organization = Organization.objects.create(name="Acme", representative="rep")

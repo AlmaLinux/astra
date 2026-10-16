@@ -292,13 +292,12 @@ def _membership_audit_log_queryset(
     if username:
         logs = logs.filter(target_username=username)
     if organization_id is not None:
-        logs = logs.for_organization_identifier(organization_id)
+        logs = logs.for_organization(organization_id)
     if q:
         logs = logs.filter(
             Q(target_username__icontains=q)
             | Q(target_organization__name__icontains=q)
-            | Q(target_organization_code__icontains=q)
-            | Q(target_organization_name__icontains=q)
+            | Q(deleted_organization_name__icontains=q)
             | Q(actor_username__icontains=q)
             | Q(membership_type__name__icontains=q)
             | Q(membership_type__code__icontains=q)
@@ -332,7 +331,7 @@ def _serialize_membership_audit_log_row_contract(log: MembershipLog, *, data_onl
         target = {
             "kind": "organization",
             "id": None,
-            "label": log.target_organization_name,
+            "label": log.deleted_organization_name,
             "secondary_label": "",
             "deleted": True,
         }
@@ -884,14 +883,8 @@ def _build_membership_stats_active_memberships_chart_payloads(
     ]
     events = list(
         MembershipLog.objects.filter(action__in=relevant_actions)
-        .select_related("membership_type")
-        .order_by(
-            "membership_type_id",
-            "target_username",
-            "target_organization_code",
-            "created_at",
-            "id",
-        )
+        .select_related("membership_type", "target_organization")
+        .order_by("created_at", "id")
     )
 
     if not events:
@@ -934,7 +927,7 @@ def _build_membership_stats_active_memberships_chart_payloads(
         type_names: dict[str, str] = {}
         events_by_membership: dict[tuple[str, str], list[MembershipLog]] = defaultdict(list)
         for event in events:
-            target_key = f"user:{event.target_username}" if event.target_username else f"org:{event.organization_identifier}"
+            target_key = f"user:{event.target_username}" if event.target_username else f"org:{event.target_identifier}"
             events_by_membership[(target_key, str(event.membership_type_id))].append(event)
             type_names[str(event.membership_type_id)] = str(event.membership_type.name)
 

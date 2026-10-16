@@ -51,8 +51,6 @@ class MembershipDuesTestMixin(SponsorshipInvoiceTestMixin):
             membership_request=membership_request,
             actor_username="committee",
             target_organization=self.organization,
-            target_organization_code=str(self.organization.pk),
-            target_organization_name=self.organization.name,
             membership_type=self.gold,
             action=MembershipLog.Action.approved,
             expires_at=timezone.now() + datetime.timedelta(days=days),

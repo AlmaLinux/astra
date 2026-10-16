@@ -4049,7 +4049,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertTrue(
             MembershipLog.objects.filter(
                 action=MembershipLog.Action.terminated,
-                target_organization_code=str(org.pk),
+                deleted_organization_id=org.pk,
                 membership_type_id="gold",
             ).exists()
         )

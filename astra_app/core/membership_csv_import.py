@@ -1139,8 +1139,8 @@ class MembershipCSVImportResource(resources.ModelResource):
 
         instance.requested_username = username
         instance.requested_organization = None
-        instance.requested_organization_code = ""
-        instance.requested_organization_name = ""
+        instance.deleted_organization_id = None
+        instance.deleted_organization_name = ""
         instance.membership_type = membership_type
         if existing_open is None:
             instance.status = MembershipRequest.Status.pending
@@ -1255,7 +1255,7 @@ class MembershipCSVImportResource(resources.ModelResource):
                 decided_at=decided_at,
                 on_group_add_success=(
                     _record_import_note
-                    if import_note_content and instance.target_kind == MembershipRequest.TargetKind.user
+                    if import_note_content and instance.is_user_target
                     else None
                 ),
             )
@@ -1286,7 +1286,7 @@ class MembershipCSVImportResource(resources.ModelResource):
             # Only record the import note after a fully successful apply. This
             # avoids leaving misleading "[Import]" notes behind when approval
             # fails (e.g. FreeIPA group add failure).
-            if import_note_content and instance.target_kind != MembershipRequest.TargetKind.user:
+            if import_note_content and not instance.is_user_target:
                 _record_import_note()
         except Exception:
             logger.exception(

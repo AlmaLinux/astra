@@ -12,32 +12,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def cleanup_orphaned_organization_memberships(*, log: MembershipLog) -> None:
-    from core.models import Membership, MembershipLog
-
-    if log.action not in {
-        MembershipLog.Action.approved,
-        MembershipLog.Action.expiry_changed,
-        MembershipLog.Action.terminated,
-    }:
-        return
-
-    try:
-        organization_id = int(log.target_organization_code)
-    except ValueError:
-        return
-
-    # The organization FK is already NULL (organization deleted), so this code is
-    # the only remaining identifier and any stale membership rows for that org
-    # must be cleaned up.
-    deleted_count, _ = Membership.objects.filter(target_organization_id=organization_id).delete()
-    if deleted_count > 0:
-        logger.info(
-            "cleanup_orphaned_organization_memberships: removed memberships for orphan org_code=%s",
-            log.target_organization_code,
-        )
-
-
 def resolve_term_start_at(
     *,
     log: MembershipLog,
@@ -199,10 +173,6 @@ def apply_membership_log_side_effects(*, log: MembershipLog) -> None:
 
     if log.target_organization_id is not None:
         apply_org_side_effects(log=log)
-        return
-
-    if log.target_organization_code:
-        cleanup_orphaned_organization_memberships(log=log)
-        return
-
-    apply_user_side_effects(log=log)
+    elif log.target_username:
+        apply_user_side_effects(log=log)
+    # Otherwise the org is deleted: CASCADE already removed its memberships.

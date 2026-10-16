@@ -49,7 +49,7 @@
                     {% if l.target_organization %}
                       <a href="{% url 'organization-detail' l.target_organization.pk %}">{{ l.target_organization.name }}</a>
                     {% else %}
-                      <span>{{ l.target_organization_name }}</span>
+                      <span>{{ l.deleted_organization_name }}</span>
                       <span class="text-muted">(deleted)</span>
                     {% endif %}
                   {% else %}

@@ -1,5 +1,4 @@
 import datetime
-import enum
 import hashlib
 import json
 import logging
@@ -16,7 +15,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.db.models import Q
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
 from PIL import Image
@@ -289,6 +288,18 @@ class MembershipType(models.Model):
             )
 
 
+def _exactly_one_target_q(*, username_field: str, organization_field: str) -> Q:
+    """A user, a live organization, or a deleted organization's snapshot: exactly one."""
+    no_user = Q(**{username_field: ""})
+    no_organization = Q(**{f"{organization_field}__isnull": True})
+    no_deleted_organization = Q(deleted_organization_id__isnull=True)
+    return (
+        (~no_user & no_organization & no_deleted_organization)
+        | (no_user & ~no_organization & no_deleted_organization)
+        | (no_user & no_organization & ~no_deleted_organization)
+    )
+
+
 class Organization(models.Model):
     class Status(models.TextChoices):
         unclaimed = "unclaimed", "Unclaimed"
@@ -420,10 +431,6 @@ class Organization(models.Model):
 
 
 class MembershipRequest(models.Model):
-    class TargetKind(enum.StrEnum):
-        user = "user"
-        organization = "organization"
-
     class Status(models.TextChoices):
         pending = "pending", "Pending"
         on_hold = "on_hold", "On Hold"
@@ -440,8 +447,9 @@ class MembershipRequest(models.Model):
         null=True,
         related_name="membership_requests",
     )
-    requested_organization_code = models.CharField(max_length=64, blank=True, default="")
-    requested_organization_name = models.CharField(max_length=255, blank=True, default="")
+    # Filled by snapshot_deleted_organization() as the FK is nulled; empty while the org exists.
+    deleted_organization_id = models.PositiveBigIntegerField(blank=True, null=True)
+    deleted_organization_name = models.CharField(max_length=255, blank=True, default="")
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
     requested_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.pending, db_index=True)
@@ -464,16 +472,9 @@ class MembershipRequest(models.Model):
                 name="uniq_membershiprequest_open_org_type",
             ),
             models.CheckConstraint(
-                condition=(
-                    (
-                        Q(requested_organization__isnull=True)
-                        & Q(requested_organization_code="")
-                        & ~Q(requested_username="")
-                    )
-                    | (
-                        Q(requested_username="")
-                        & (Q(requested_organization__isnull=False) | ~Q(requested_organization_code=""))
-                    )
+                condition=_exactly_one_target_q(
+                    username_field="requested_username",
+                    organization_field="requested_organization",
                 ),
                 name="chk_membershiprequest_exactly_one_target",
             ),
@@ -483,19 +484,11 @@ class MembershipRequest(models.Model):
             models.Index(fields=["status", "requested_at"], name="mr_status_at"),
             models.Index(fields=["requested_username", "status"], name="mr_user_status"),
             models.Index(fields=["requested_organization", "status"], name="mr_org_status"),
-            models.Index(fields=["requested_organization_code", "status"], name="mr_org_code_status"),
         ]
         ordering = ("-requested_at",)
 
-    @override
-    def save(self, *args, **kwargs) -> None:
-        if self.requested_organization_id is not None and not self.requested_organization_code:
-            self.requested_organization_code = str(self.requested_organization_id)
-            self.requested_organization_name = self.requested_organization.name
-        super().save(*args, **kwargs)
-
     def __str__(self) -> str:
-        if self.target_kind == self.TargetKind.user:
+        if self.target_kind == MembershipTargetKind.user:
             return f"{self.requested_username} → {self.membership_type_id}"
         return f"org:{self.target_identifier} → {self.membership_type_id}"
 
@@ -503,27 +496,22 @@ class MembershipRequest(models.Model):
     def target_identity(self) -> MembershipTargetIdentity:
         return MembershipTargetIdentity.from_target_fields(
             username=self.requested_username,
-            organization_id=self.requested_organization_id,
-            organization_code=self.requested_organization_code,
-            organization_name=self.requested_organization_name,
-            organization_fk_name=self.requested_organization.name if self.requested_organization is not None else "",
+            organization=self.requested_organization,
+            deleted_organization_id=self.deleted_organization_id,
+            deleted_organization_name=self.deleted_organization_name,
         )
 
     @property
-    def target_kind(self) -> TargetKind:
-        return self.TargetKind(self.target_identity.kind.value)
+    def target_kind(self) -> MembershipTargetKind:
+        return self.target_identity.kind
 
     @property
     def is_user_target(self) -> bool:
-        return self.target_kind == self.TargetKind.user
+        return self.target_kind == MembershipTargetKind.user
 
     @property
     def is_organization_target(self) -> bool:
-        return self.target_kind == self.TargetKind.organization
-
-    @property
-    def organization_identifier(self) -> str:
-        return self.target_identity.organization_identifier
+        return self.target_kind == MembershipTargetKind.organization
 
     @property
     def organization_display_name(self) -> str:
@@ -531,9 +519,7 @@ class MembershipRequest(models.Model):
 
     @property
     def target_identifier(self) -> str:
-        if self.target_kind == self.TargetKind.user:
-            return self.target_identity.identifier
-        return self.target_identity.organization_identifier or "?"
+        return self.target_identity.identifier or "?"
 
 
 class MirrorMembershipValidation(models.Model):
@@ -749,8 +735,6 @@ class Membership(models.Model):
         null=True,
         related_name="memberships",
     )
-    target_organization_code = models.CharField(max_length=64, blank=True, default="")
-    target_organization_name = models.CharField(max_length=255, blank=True, default="")
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
     expires_at = models.DateTimeField(blank=True, null=True)
     # Committee-set dues for an in-kind sponsor, below the tier default; None charges
@@ -779,7 +763,6 @@ class Membership(models.Model):
                     (
                         ~models.Q(target_username="")
                         & models.Q(target_organization__isnull=True)
-                        & models.Q(target_organization_code="")
                     )
                     | (
                         models.Q(target_username="")
@@ -812,12 +795,6 @@ class Membership(models.Model):
                         "One membership per category is allowed for each organization."
                     )
 
-                # Denormalize org identifiers for display after FK deletion.
-                if not self.target_organization_code:
-                    self.target_organization_code = str(self.target_organization_id)
-                if not self.target_organization_name and self.target_organization is not None:
-                    self.target_organization_name = self.target_organization.name
-
                 super().save(*args, **kwargs)
             return
 
@@ -825,21 +802,15 @@ class Membership(models.Model):
 
     @property
     def target_identity(self) -> MembershipTargetIdentity:
+        # No deleted-organization snapshot: CASCADE means a membership never outlives its org.
         return MembershipTargetIdentity.from_target_fields(
             username=self.target_username,
-            organization_id=self.target_organization_id,
-            organization_code=self.target_organization_code,
-            organization_name=self.target_organization_name,
-            organization_fk_name=self.target_organization.name if self.target_organization is not None else "",
+            organization=self.target_organization,
         )
 
     @property
     def target_kind(self) -> MembershipTargetKind:
         return self.target_identity.kind
-
-    @property
-    def organization_identifier(self) -> str:
-        return self.target_identity.organization_identifier
 
     @property
     def organization_display_name(self) -> str:
@@ -879,8 +850,6 @@ class Membership(models.Model):
                 old_copy = Membership(
                     pk=old.pk,
                     target_organization_id=old.target_organization_id,
-                    target_organization_code=old.target_organization_code,
-                    target_organization_name=old.target_organization_name,
                     membership_type_id=old.membership_type_id,
                     expires_at=old.expires_at,
                     dues_usd=old.dues_usd,
@@ -909,15 +878,12 @@ class Membership(models.Model):
     def __str__(self) -> str:
         if self.target_kind == MembershipTargetKind.user:
             return f"{self.target_identifier} ({self.membership_type_id})"
-        code = self.organization_identifier or "?"
-        return f"org:{code} ({self.membership_type_id})"
+        return f"org:{self.target_identifier or '?'} ({self.membership_type_id})"
 
 
 class MembershipLogQuerySet(models.QuerySet["MembershipLog"]):
-    def for_organization_identifier(self, organization_id: int) -> MembershipLogQuerySet:
-        return self.filter(
-            Q(target_organization_id=organization_id) | Q(target_organization_code=str(organization_id))
-        )
+    def for_organization(self, organization_id: int) -> MembershipLogQuerySet:
+        return self.filter(Q(target_organization_id=organization_id) | Q(deleted_organization_id=organization_id))
 
 
 class MembershipLog(models.Model):
@@ -944,8 +910,9 @@ class MembershipLog(models.Model):
         null=True,
         related_name="membership_logs",
     )
-    target_organization_code = models.CharField(max_length=64, blank=True, default="")
-    target_organization_name = models.CharField(max_length=255, blank=True, default="")
+    # Filled by snapshot_deleted_organization() as the FK is nulled; empty while the org exists.
+    deleted_organization_id = models.PositiveBigIntegerField(blank=True, null=True)
+    deleted_organization_name = models.CharField(max_length=255, blank=True, default="")
     membership_type = models.ForeignKey(MembershipType, on_delete=models.PROTECT)
     membership_request = models.ForeignKey(
         MembershipRequest,
@@ -969,16 +936,9 @@ class MembershipLog(models.Model):
     class Meta:
         constraints = [
             models.CheckConstraint(
-                condition=(
-                    (
-                        Q(target_username="")
-                        & (Q(target_organization__isnull=False) | ~Q(target_organization_code=""))
-                    )
-                    | (
-                        ~Q(target_username="")
-                        & Q(target_organization__isnull=True)
-                        & Q(target_organization_code="")
-                    )
+                condition=_exactly_one_target_q(
+                    username_field="target_username",
+                    organization_field="target_organization",
                 ),
                 name="chk_membershiplog_exactly_one_target",
             )
@@ -988,8 +948,7 @@ class MembershipLog(models.Model):
             models.Index(fields=["target_username", "action", "created_at"], name="ml_tgt_act_at"),
             models.Index(fields=["target_organization", "created_at"], name="ml_org_at"),
             models.Index(fields=["target_organization", "action", "created_at"], name="ml_org_act_at"),
-            models.Index(fields=["target_organization_code", "created_at"], name="ml_org_code_at"),
-            models.Index(fields=["target_organization_code", "action", "created_at"], name="ml_org_code_act_at"),
+            models.Index(fields=["deleted_organization_id", "created_at"], name="ml_deleted_org_at"),
             models.Index(fields=["expires_at"], name="ml_exp_at"),
         ]
         ordering = ("-created_at",)
@@ -998,19 +957,14 @@ class MembershipLog(models.Model):
     def target_identity(self) -> MembershipTargetIdentity:
         return MembershipTargetIdentity.from_target_fields(
             username=self.target_username,
-            organization_id=self.target_organization_id,
-            organization_code=self.target_organization_code,
-            organization_name=self.target_organization_name,
-            organization_fk_name=self.target_organization.name if self.target_organization is not None else "",
+            organization=self.target_organization,
+            deleted_organization_id=self.deleted_organization_id,
+            deleted_organization_name=self.deleted_organization_name,
         )
 
     @property
     def target_kind(self) -> MembershipTargetKind:
         return self.target_identity.kind
-
-    @property
-    def organization_identifier(self) -> str:
-        return self.target_identity.organization_identifier
 
     @property
     def organization_display_name(self) -> str:
@@ -1020,18 +974,9 @@ class MembershipLog(models.Model):
     def target_identifier(self) -> str:
         return self.target_identity.identifier
 
-    @override
-    def save(self, *args, **kwargs) -> None:
-        if self.target_organization_id is not None and not self.target_organization_code:
-            self.target_organization_code = str(self.target_organization_id)
-            self.target_organization_name = self.target_organization.name
-        super().save(*args, **kwargs)
-
     def __str__(self) -> str:
-        if self.target_kind == MembershipTargetKind.organization:
-            code = self.organization_identifier
-            return f"{self.action}: org:{code} ({self.membership_type_id})"
-        return f"{self.action}: {self.target_identifier} ({self.membership_type_id})"
+        prefix = "org:" if self.target_kind == MembershipTargetKind.organization else ""
+        return f"{self.action}: {prefix}{self.target_identifier} ({self.membership_type_id})"
 
     @classmethod
     def expiry_for_approval_at(
@@ -1066,8 +1011,8 @@ class MembershipLog(models.Model):
         membership_type: MembershipType,
         target_username: str = "",
         target_organization: Organization | None = None,
-        target_organization_code: str = "",
-        target_organization_name: str = "",
+        deleted_organization_id: int | None = None,
+        deleted_organization_name: str = "",
         membership_request: MembershipRequest | None = None,
         expires_at: datetime.datetime | None = None,
         rejection_reason: str = "",
@@ -1078,20 +1023,15 @@ class MembershipLog(models.Model):
         kwargs: dict[str, object] = {
             "actor_username": actor_username,
             "target_username": target_username,
+            "target_organization": target_organization,
+            "deleted_organization_id": deleted_organization_id,
+            "deleted_organization_name": deleted_organization_name,
             "membership_type": membership_type,
             "membership_request": membership_request,
             "requested_group_cn": membership_type.group_cn,
             "action": action,
             "dues_usd": dues_usd,
         }
-        if target_organization is not None:
-            kwargs["target_organization"] = target_organization
-            kwargs["target_organization_code"] = str(target_organization.pk)
-            kwargs["target_organization_name"] = target_organization.name
-        elif target_organization_code or target_organization_name:
-            # Org FK is gone but caller supplied identifiers (e.g. deleted org).
-            kwargs["target_organization_code"] = target_organization_code
-            kwargs["target_organization_name"] = target_organization_name
         if expires_at is not None:
             kwargs["expires_at"] = expires_at
         if rejection_reason:
@@ -2027,5 +1967,29 @@ def _invalidate_badge_cache_on_membership_request_delete(
 ) -> None:
     """Invalidate badge count cache when membership requests are deleted."""
     from core.membership import invalidate_membership_review_badge_cache
-    
+
     invalidate_membership_review_badge_cache()
+
+
+@receiver(pre_delete, sender=Organization)
+def snapshot_deleted_organization(
+    sender: type[Organization],
+    instance: Organization,
+    **kwargs: object,
+) -> None:
+    """Record which org requests and logs belonged to before SET_NULL drops the FK.
+
+    The FK is nulled in the same UPDATE because the target check constraint rejects
+    rows carrying both the FK and the snapshot. Collector applies SET_NULL after
+    pre_delete, so it then finds nothing left to update.
+    """
+    MembershipRequest.objects.filter(requested_organization=instance).update(
+        requested_organization=None,
+        deleted_organization_id=instance.pk,
+        deleted_organization_name=instance.name,
+    )
+    MembershipLog.objects.filter(target_organization=instance).update(
+        target_organization=None,
+        deleted_organization_id=instance.pk,
+        deleted_organization_name=instance.name,
+    )
