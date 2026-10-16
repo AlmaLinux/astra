@@ -659,8 +659,10 @@ describe("OrganizationDetailPage", () => {
     };
   }
 
-  it("shows a sponsor's in-kind discount next to the membership", async () => {
+  it("shows a sponsor's annual dues next to the membership", async () => {
     for (const [duesUsd, expected] of [
+      [20000, "Annual dues: $20,000"],
+      [null, "Annual dues: $20,000"],
       [5000, "Annual dues: $5,000 (discounted from $20,000)"],
       [0, "In-kind sponsor: dues waived"],
     ] as const) {
@@ -669,11 +671,36 @@ describe("OrganizationDetailPage", () => {
       await flushPromises();
       expect(wrapper.find('[data-membership-dues="gold"]').text()).toBe(expected);
     }
+  });
 
-    const undiscounted = mountWithOrganization({ memberships: [goldMembership(null)] });
+  it("states the dues once, on their own line, instead of in the tier description", async () => {
+    const wrapper = mountWithOrganization({
+      memberships: [{
+        ...goldMembership(null),
+        membershipType: { name: "Gold Sponsor Member", code: "gold", description: "Gold tier", annualDuesUsd: 20000 },
+      }],
+      pending_memberships: [{
+        requestId: 9,
+        kind: "pending",
+        key: "pending-9",
+        status: "pending",
+        membershipType: { name: "Platinum Sponsor Member", code: "platinum", description: "Platinum tier", annualDuesUsd: 100000 },
+      }],
+    });
+
     await flushPromises();
     await flushPromises();
-    expect(undiscounted.find('[data-membership-dues="gold"]').exists()).toBe(false);
+
+    const rows = wrapper.findAll("li.list-group-item");
+    const active = rows.find((item) => item.text().includes("Gold Sponsor Member"))!;
+    const pending = rows.find((item) => item.text().includes("Platinum Sponsor Member"))!;
+    expect(active.text()).toContain("Gold tier");
+    expect(pending.text()).toContain("Platinum tier");
+    expect(pending.text()).toContain("Annual dues: $100,000");
+    for (const row of [active, pending]) {
+      expect(row.text()).not.toContain("USD");
+      expect(row.text().split("Annual dues").length - 1).toBe(1);
+    }
   });
 
   it("lets the committee change a sponsor's dues with a reason in the manage dialog", async () => {

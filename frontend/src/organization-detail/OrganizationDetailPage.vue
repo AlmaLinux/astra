@@ -4,12 +4,13 @@ import { computed, onMounted, ref } from "vue";
 import DuesAmountInput from "../shared/components/DuesAmountInput.vue";
 import GuardedButton from "../shared/components/GuardedButton.vue";
 import MembershipCard from "../shared/components/MembershipCard.vue";
-import { duesAmountError, formatDateInputValue, formatFullDate, formatUsd, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
+import { duesAmountError, formatDateInputValue, formatFullDate, formatUsd, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   OrganizationDetailBootstrap,
   OrganizationDetailContactGroup,
   OrganizationDetailMembership,
+  OrganizationDetailMembershipType,
   OrganizationDetailResponse,
 } from "./types";
 
@@ -155,12 +156,15 @@ function duesSaveBlocker(membership: OrganizationDetailMembership): string {
   return "";
 }
 
-// Only discounted sponsors get a line: the tier description already states the default dues.
-function duesDiscountLabel(membership: OrganizationDetailMembership): string {
-  const defaultDues = membership.membershipType.annualDuesUsd;
-  const dues = membership.duesUsd;
-  if (!hasDues(membership) || dues === null || dues >= defaultDues) {
+// The page's only statement of a paid tier's dues: descriptions are shown without them.
+// Pending requests have no dues yet (null), so they show the standard price.
+function duesLabel(membershipType: OrganizationDetailMembershipType, dues: number | null): string {
+  const defaultDues = membershipType.annualDuesUsd;
+  if (!(defaultDues > 0)) {
     return "";
+  }
+  if (dues === null || dues >= defaultDues) {
+    return `Annual dues: ${formatUsd(defaultDues)}`;
   }
   if (dues === 0) {
     return "In-kind sponsor: dues waived";
@@ -416,14 +420,14 @@ onMounted(async () => {
             >
               <div>
                 <div class="font-weight-bold">{{ membershipLabel(membership) }}</div>
-                <div v-if="membershipTypeDescription(membership.membershipType)" class="text-muted small">{{ membershipTypeDescription(membership.membershipType) }}</div>
+                <div v-if="membership.membershipType.description" class="text-muted small">{{ membership.membershipType.description }}</div>
                 <div v-if="memberSinceLabel(membership)" class="text-muted small">Member since {{ memberSinceLabel(membership) }}</div>
                 <div v-if="expiresLabel(membership)" class="small" :class="expiresToneClass(membership)">
                   <i v-if="membership.isExpiringSoon" class="fas fa-exclamation-triangle mr-1" />
                   Expires {{ expiresLabel(membership) }}
                 </div>
-                <div v-if="duesDiscountLabel(membership)" class="small" :data-membership-dues="membershipTypeCode(membership)">
-                  <i class="fas fa-hand-holding-dollar mr-1" />{{ duesDiscountLabel(membership) }}
+                <div v-if="duesLabel(membership.membershipType, membership.duesUsd)" class="small" :data-membership-dues="membershipTypeCode(membership)">
+                  <i class="fas fa-hand-holding-dollar mr-1" />{{ duesLabel(membership.membershipType, membership.duesUsd) }}
                 </div>
                 <div v-if="membership.invoice?.url" class="small">
                   <a
@@ -671,8 +675,11 @@ onMounted(async () => {
                 <div class="small text-muted">
                   <a :href="requestDetailUrl(pendingMembership.requestId)">Request #{{ pendingMembership.requestId }}</a>
                 </div>
-                <div v-if="membershipTypeDescription(pendingMembership.membershipType)" class="small text-muted">
-                  {{ membershipTypeDescription(pendingMembership.membershipType) }}
+                <div v-if="pendingMembership.membershipType.description" class="small text-muted">
+                  {{ pendingMembership.membershipType.description }}
+                </div>
+                <div v-if="duesLabel(pendingMembership.membershipType, null)" class="small">
+                  <i class="fas fa-hand-holding-dollar mr-1" />{{ duesLabel(pendingMembership.membershipType, null) }}
                 </div>
               </div>
               <span :class="pendingBadge(pendingMembership.status).className">{{ pendingBadge(pendingMembership.status).label }}</span>
