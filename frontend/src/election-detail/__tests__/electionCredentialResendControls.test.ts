@@ -84,6 +84,7 @@ describe("ElectionCredentialResendControls", () => {
     const button = wrapper.find<HTMLButtonElement>("[data-testid='send-reminder-single']");
     expect(button.exists()).toBe(true);
     expect(button.attributes("disabled")).toBeDefined();
+    expect(button.element.parentElement?.getAttribute("title")).toBe("Select a voter first.");
   });
 
   it("resend-all button is disabled when there are no eligible usernames", () => {
@@ -102,6 +103,7 @@ describe("ElectionCredentialResendControls", () => {
 
     const button = wrapper.find<HTMLButtonElement>("[data-testid='send-reminder-all']");
     expect(button.attributes("disabled")).toBeDefined();
+    expect(button.element.parentElement?.getAttribute("title")).toBe("There are no eligible voters to email.");
   });
 
   it("opens a compose modal with template content when clicking send-reminder-single", async () => {

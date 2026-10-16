@@ -257,6 +257,7 @@ describe("MembershipNotesCard", () => {
     const textarea = wrapper.get('textarea[name="message"]');
     const submitButton = wrapper.get('button[data-note-action="message"]');
     expect(submitButton.attributes("disabled")).toBeDefined();
+    expect(submitButton.element.parentElement?.getAttribute("title")).toBe("Write a note first.");
 
     await textarea.setValue("   ");
     expect(submitButton.attributes("disabled")).toBeDefined();
@@ -267,6 +268,7 @@ describe("MembershipNotesCard", () => {
 
     await textarea.setValue("Ready to send");
     expect(submitButton.attributes("disabled")).toBeUndefined();
+    expect(submitButton.element.parentElement?.getAttribute("title")).toBe("Send (Ctrl+Enter)");
   });
 
   it("keeps the form hidden for read-only viewers", async () => {

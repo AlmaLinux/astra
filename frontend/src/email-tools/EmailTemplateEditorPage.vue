@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import ComposeCard from "./ComposeCard.vue";
 import { fetchEmailTemplateEditorPayload, toComposeFieldSpec, type EmailTemplateEditorBootstrap, type EmailTemplateEditorField, type EmailTemplateEditorPayload } from "./types";
 
@@ -157,16 +158,15 @@ onMounted(async () => {
                 >
                   Delete
                 </button>
-                <button
+                <GuardedButton
                   v-else-if="payload.template && payload.template.isLocked"
                   type="button"
                   class="btn btn-outline-danger"
-                  disabled
-                  aria-disabled="true"
-                  title="This template is referenced by the app configuration and cannot be deleted."
+                  blocked-reason="This template is referenced by the app configuration and cannot be deleted."
+                  title="Delete this template"
                 >
                   Delete
-                </button>
+                </GuardedButton>
               </div>
 
               <button type="submit" class="btn btn-success ml-auto" title="Save template changes">Save</button>

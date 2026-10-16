@@ -18,7 +18,7 @@ describe("DuesAmountInput", () => {
     const wrapper = mount(DuesAmountInput, { props: { id: "dues", modelValue: "25000", defaultUsd: 20000 } });
 
     expect(wrapper.get("input").classes()).toContain("is-invalid");
-    expect(wrapper.text()).toContain("Can't exceed the standard price of $20,000.");
+    expect(wrapper.text()).toContain("The annual dues can't exceed the standard price of $20,000.");
 
     await wrapper.setProps({ modelValue: "20000" });
     expect(wrapper.get("input").classes()).not.toContain("is-invalid");

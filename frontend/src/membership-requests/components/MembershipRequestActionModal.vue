@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 
 import DuesAmountInput from "../../shared/components/DuesAmountInput.vue";
+import GuardedButton from "../../shared/components/GuardedButton.vue";
 import { duesAmountError } from "../../shared/membershipPresentation";
 import type { MembershipRequestActionIntent } from "../types";
 import { inKindDuesSummary } from "../types";
@@ -249,19 +250,21 @@ const currentDiscountText = computed(() => {
   return `${inKindDuesSummary(dues)} under an in-kind agreement, which renewing keeps. Confirm the agreement is still valid.`;
 });
 
-function validationError(): string {
+// Why the action can't be submitted yet, or "" when it can.
+const blockedReason = computed(() => {
   if (requiresMessage.value && !message.value.trim()) {
-    return "This field is required.";
+    return props.action?.actionKind === "rfi" ? "Enter the RFI message first." : "Enter a justification for the override first.";
   }
   const dues = props.action?.dues;
-  if (showsDues.value && dues && duesAmountError(duesInput.value, dues.default_usd)) {
-    return duesAmountError(duesInput.value, dues.default_usd);
+  const duesError = showsDues.value && dues ? duesAmountError(duesInput.value, dues.default_usd) : "";
+  if (duesError) {
+    return duesError;
   }
   if (duesChanged.value && !duesReason.value.trim()) {
-    return "Give a reason for the dues change.";
+    return "Give a reason for the dues change first.";
   }
   return "";
-}
+});
 
 function onPresetChange(): void {
   message.value = selectedPreset.value;
@@ -283,11 +286,7 @@ function buildRequestBody(trimmedMessage: string): FormData {
 }
 
 async function submitCustomEmail(): Promise<void> {
-  if (!customEmailForm.value || isSubmitting.value) {
-    return;
-  }
-  error.value = validationError();
-  if (error.value) {
+  if (!customEmailForm.value || isSubmitting.value || blockedReason.value) {
     return;
   }
 
@@ -307,15 +306,11 @@ function closeModal(): void {
 }
 
 async function submitAction(): Promise<void> {
-  if (!props.action || isSubmitting.value) {
+  if (!props.action || isSubmitting.value || blockedReason.value) {
     return;
   }
 
-  error.value = validationError();
-  if (error.value) {
-    return;
-  }
-
+  error.value = "";
   isSubmitting.value = true;
 
   try {
@@ -439,15 +434,23 @@ async function submitAction(): Promise<void> {
             <div class="d-flex justify-content-between">
               <button type="button" class="btn btn-secondary" :disabled="isSubmitting" @click="closeModal">Cancel</button>
               <div class="d-flex flex-wrap justify-content-end" style="gap: .5rem;">
-                <button
+                <GuardedButton
                   v-if="customEmailLabel"
                   type="button"
                   class="btn btn-outline-secondary"
-                  :disabled="isSubmitting"
+                  :blocked-reason="blockedReason"
+                  :busy="isSubmitting"
                   title="Skip the standard email and write a custom one in Send Mail"
                   @click="submitCustomEmail"
-                >{{ customEmailLabel }}</button>
-                <button type="button" :class="submitClass" :disabled="isSubmitting" @click="submitAction">{{ submitLabel }}</button>
+                >{{ customEmailLabel }}</GuardedButton>
+                <GuardedButton
+                  type="button"
+                  :class="submitClass"
+                  :blocked-reason="blockedReason"
+                  :busy="isSubmitting"
+                  :title="submitLabel"
+                  @click="submitAction"
+                >{{ submitLabel }}</GuardedButton>
               </div>
             </div>
 

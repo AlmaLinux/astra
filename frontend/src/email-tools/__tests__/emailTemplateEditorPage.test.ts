@@ -119,6 +119,9 @@ describe("EmailTemplateEditorPage", () => {
     expect(wrapper.text()).toContain("Template details");
     expect(wrapper.text()).toContain("This template is referenced by the app configuration and cannot be renamed.");
     expect(wrapper.get("#id_name").attributes("disabled")).toBeDefined();
+    const lockedDelete = wrapper.findAll("button").find((button) => button.text() === "Delete")!;
+    expect(lockedDelete.attributes("disabled")).toBeDefined();
+    expect(lockedDelete.element.parentElement?.getAttribute("title")).toBe("This template is referenced by the app configuration and cannot be deleted.");
     expect(wrapper.find("[data-templated-email-compose]").exists()).toBe(true);
     expect(wrapper.get("[data-templated-email-compose]").attributes("data-compose-skip-initial-preview-refresh")).toBe("1");
     expect(wrapper.find('iframe[data-compose-preview-iframe="1"]').exists()).toBe(true);

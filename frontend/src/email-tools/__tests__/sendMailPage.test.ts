@@ -160,6 +160,24 @@ describe("SendMailPage", () => {
     expect(initPage).toHaveBeenCalled();
   });
 
+  it("keeps Send disabled, saying why, until there are recipients", () => {
+    const withoutRecipients = mount(SendMailPage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          initialPayload: { ...initialPayload, recipientPreview: { ...initialPayload.recipientPreview, recipientCount: 0 } },
+        },
+      },
+    });
+    const blocked = withoutRecipients.get("#send-mail-send-btn");
+    expect(blocked.attributes("disabled")).toBeDefined();
+    expect(blocked.element.parentElement?.getAttribute("title")).toBe("Add recipients first.");
+
+    const send = mount(SendMailPage, { props: { bootstrap } }).get("#send-mail-send-btn");
+    expect(send.attributes("disabled")).toBeUndefined();
+    expect(send.element.parentElement?.getAttribute("title")).toBe("Send emails now");
+  });
+
   it("renders the compose controls and selects a newly created template from the payload", async () => {
     const wrapper = mount(SendMailPage, {
       props: {

@@ -29,6 +29,7 @@ describe("ElectionTallyAction", () => {
     await wrapper.get("button.btn-primary").trigger("click");
 
     expect(wrapper.get("#tally-submit").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("#tally-submit").element.parentElement?.getAttribute("title")).toBe("Type the election name to confirm first.");
 
     await wrapper.get("#tally-confirm").setValue("Board election");
     expect(wrapper.get("#tally-submit").attributes("disabled")).toBeUndefined();

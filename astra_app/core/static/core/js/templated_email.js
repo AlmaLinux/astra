@@ -454,10 +454,24 @@
       setField('text_content', values.text);
     }
 
-    function setRestoreEnabled(on) {
-      var btn = q(container, '[data-compose-action="restore"]');
+    // Like the Vue GuardedButton: a blocked button is disabled and its wrapper's tooltip
+    // says why (disabled buttons get no hover events). The wrapper's data-ready-title is
+    // the tooltip once the action is possible.
+    function setGuardedButton(action, blockedReason) {
+      var btn = q(container, '[data-compose-action="' + action + '"]');
       if (!btn) return;
-      btn.disabled = !on;
+      btn.disabled = Boolean(blockedReason);
+      btn.style.pointerEvents = blockedReason ? 'none' : '';
+      var wrapper = btn.closest('[data-ready-title]');
+      if (wrapper) wrapper.title = blockedReason || wrapper.getAttribute('data-ready-title');
+    }
+
+    function setRestoreEnabled(on) {
+      setGuardedButton('restore', on ? '' : 'Nothing to restore yet.');
+    }
+
+    function syncSaveEnabled() {
+      setGuardedButton('save', getTemplateId() ? '' : 'Select a template first, or use Save as.');
     }
 
     function markBaseline(values) {
@@ -509,6 +523,7 @@
       var el = getTemplateSelectEl();
       if (!el) return;
       el.value = value == null ? '' : String(value);
+      syncSaveEnabled();
     }
 
     async function loadTemplateJson(templateId) {
@@ -699,6 +714,7 @@
     var templateSelect = q(container, 'select[name="email_template_id"]');
     if (templateSelect) {
       templateSelect.addEventListener('change', function () {
+        syncSaveEnabled();
         var id = String(templateSelect.value || '').trim();
         if (!id) return;
         loadTemplateJson(id);
@@ -715,6 +731,8 @@
     }
 
     updateUnsavedBadge();
+    syncSaveEnabled();
+    setRestoreEnabled(restoreBtn ? !restoreBtn.disabled : false);
     return api;
   }
 

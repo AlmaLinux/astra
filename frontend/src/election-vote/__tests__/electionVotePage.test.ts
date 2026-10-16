@@ -91,6 +91,39 @@ describe("ElectionVotePage", () => {
     expect(wrapper.text()).toContain("Save this together with your ballot receipt code.");
   });
 
+  it("keeps the ballot unsubmittable, saying what is missing, until it is complete", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      election: {
+        id: 1,
+        name: "Board election",
+        start_datetime: "2026-04-01T10:00:00+00:00",
+        end_datetime: "2026-04-10T10:00:00+00:00",
+        submit_url: "/api/v1/elections/1/vote/submit",
+        can_submit_vote: true,
+        voter_votes: 2,
+      },
+      vote_weight_breakdown: [],
+      candidates: [{ id: 11, username: "alice", label: "Alice User (alice)" }],
+    }))));
+    const wrapper = mount(ElectionVotePage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+
+    const submit = wrapper.get("#election-submit-button");
+    const tooltip = () => submit.element.parentElement?.getAttribute("title");
+    expect(submit.attributes("disabled")).toBeDefined();
+    expect(tooltip()).toBe("Add a candidate to your ranking first.");
+
+    await wrapper.get("button.btn-outline-primary").trigger("click");
+    expect(submit.attributes("disabled")).toBeDefined();
+    expect(tooltip()).toBe("Enter your voting credential first.");
+
+    await wrapper.get("#election-credential").setValue("cred-1");
+    expect(submit.attributes("disabled")).toBeUndefined();
+    expect(tooltip()).toBe("Submit your ballot");
+    expect(wrapper.find('#election-ranking-error').exists()).toBe(false);
+  });
+
   it("preserves the username ranking fallback when submitting through Vue", async () => {
     document.cookie = "csrftoken=test-token; path=/";
     const fetchMock = vi

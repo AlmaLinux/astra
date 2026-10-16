@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 import MailProgressModal from "../mail-progress/MailProgressModal.vue";
 import { useMailProgress } from "../mail-progress/useMailProgress";
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import ComposeCard from "./ComposeCard.vue";
 import SendMailAttachments from "./SendMailAttachments.vue";
 import { fetchSendMailPayload, toComposeFieldSpec, type SendMailBootstrap, type SendMailField, type SendMailFieldOption, type SendMailPayload } from "./types";
@@ -356,8 +357,8 @@ onMounted(async () => {
       >
         <template #template-selector-extra>
           <div class="mt-2">
-            <button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" title="Restore last saved content" disabled>Restore</button>
-            <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save" title="Save to selected template">Save</button>
+            <span class="d-inline-block" title="Restore last saved content" data-ready-title="Restore last saved content"><button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" disabled>Restore</button></span>
+            <span class="d-inline-block" title="Save to selected template" data-ready-title="Save to selected template"><button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save">Save</button></span>
             <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save-as" title="Save as a new template">Save as…</button>
           </div>
         </template>
@@ -423,9 +424,15 @@ onMounted(async () => {
             </div>
             <div class="card-body d-flex align-items-center justify-content-center flex-wrap">
               <div>
-                <button type="button" class="btn btn-danger" id="send-mail-send-btn" title="Send emails now" :disabled="recipientCount === 0">
+                <GuardedButton
+                  id="send-mail-send-btn"
+                  type="button"
+                  class="btn btn-danger"
+                  :blocked-reason="recipientCount ? '' : 'Add recipients first.'"
+                  title="Send emails now"
+                >
                   Send <b><span id="send-mail-send-count" :data-server-count="recipientCount">{{ recipientCount }}</span></b> Email{{ recipientCount === 1 ? '' : 's' }}
-                </button>
+                </GuardedButton>
               </div>
             </div>
           </div>

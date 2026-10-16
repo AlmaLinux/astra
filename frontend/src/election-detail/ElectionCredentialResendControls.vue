@@ -6,6 +6,7 @@ import MailProgressModal from "../mail-progress/MailProgressModal.vue";
 import { useMailProgress } from "../mail-progress/useMailProgress";
 import { useComposeSaveHandlers } from "../email-tools/compose-actions";
 import type { ComposeFieldSpec, ComposeTemplateOption, ComposeVariable } from "../email-tools/types";
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import { readCsrfToken } from "../shared/csrf";
 import type { MailProgress } from "../mail-progress/types";
 import type { ElectionCredentialResendBootstrap } from "./types";
@@ -380,31 +381,33 @@ watch(
             </option>
           </select>
         </div>
-        <button
+        <GuardedButton
           data-testid="send-reminder-single"
           type="button"
           class="btn btn-outline-primary btn-sm"
-          :disabled="!username || progress !== null"
+          :blocked-reason="username ? '' : 'Select a voter first.'"
+          :busy="progress !== null"
           :title="isOpen ? 'Send a credential reminder to the selected user' : 'Send an email to the selected user'"
           style="white-space: nowrap;"
           @click="openModal('single')"
         >
           {{ singleButtonLabel }}
-        </button>
+        </GuardedButton>
       </div>
 
       <div class="ml-auto flex-shrink-0">
-        <button
+        <GuardedButton
           data-testid="send-reminder-all"
           type="button"
           class="btn btn-outline-primary btn-sm"
-          :disabled="bootstrap.eligibleUsernames.length === 0 || progress !== null"
+          :blocked-reason="bootstrap.eligibleUsernames.length ? '' : 'There are no eligible voters to email.'"
+          :busy="progress !== null"
           :title="isOpen ? 'Send credential reminders to all eligible voters' : 'Send an email to all eligible voters'"
           style="white-space: nowrap;"
           @click="openModal('all')"
         >
           {{ allButtonLabel }}
-        </button>
+        </GuardedButton>
       </div>
     </div>
 

@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 
 import "./membershipNotes.css";
 
+import GuardedButton from "../../shared/components/GuardedButton.vue";
 import { formatMembershipTimestamp } from "../../shared/membershipPresentation";
 import { useMembershipNotes } from "../composables/useMembershipNotes";
 import { replaceTemplateToken, type ContactedEmail, type NoteEntry, type NoteGroup } from "../types";
@@ -368,19 +369,18 @@ function groupTimestampLabel(group: NoteGroup): string {
               v-model="message"
               @keydown="onComposerKeydown"
             ></textarea>
-            <div class="input-group-append">
-              <button
-                type="submit"
-                class="btn btn-light border"
-                data-note-action="message"
-                title="Send (Ctrl+Enter)"
-                aria-label="Send note"
-                :disabled="!canSubmitMessage"
-                @click.prevent="submit('message')"
-              >
-                <i class="fas fa-paper-plane" aria-hidden="true"></i>
-              </button>
-            </div>
+            <GuardedButton
+              type="submit"
+              class="btn btn-light border"
+              data-note-action="message"
+              aria-label="Send note"
+              wrapper-class="input-group-append"
+              :blocked-reason="canSubmitMessage ? '' : 'Write a note first.'"
+              title="Send (Ctrl+Enter)"
+              @click.prevent="submit('message')"
+            >
+              <i class="fas fa-paper-plane" aria-hidden="true"></i>
+            </GuardedButton>
           </div>
           <div v-if="canVote" class="d-flex w-100 mt-1" role="group" aria-label="Vote actions">
             <button

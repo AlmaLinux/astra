@@ -30,8 +30,8 @@ export async function saveComposeTemplate(
   values: { subject: string; html_content: string; text_content: string },
   csrfToken?: string,
 ): Promise<boolean> {
+  // The Save button stays disabled until a template is selected.
   if (!templateId) {
-    window.alert("Select a template to save, or use Save as.");
     return false;
   }
 

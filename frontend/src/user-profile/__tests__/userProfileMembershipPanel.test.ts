@@ -220,7 +220,7 @@ describe("UserProfileMembershipPanel", () => {
     expect(wrapper.text()).toContain("Current expiration: April 30 2026 00:00 (UTC)");
   });
 
-  it("builds management and notes wiring from the shell bootstrap instead of the API payload", () => {
+  it("builds management and notes wiring from the shell bootstrap instead of the API payload", async () => {
     const wrapper = mount(UserProfileMembershipPanel, {
       props: {
         membership: makeMembershipSection({
@@ -270,6 +270,12 @@ describe("UserProfileMembershipPanel", () => {
     expect(wrapper.text()).toContain("Edit expiration");
     expect(wrapper.find('form[action="/membership/manage/alice/individual/expiry/"]').exists()).toBe(true);
     expect(wrapper.find('form[action="/membership/manage/alice/individual/terminate/"]').exists()).toBe(true);
+    const terminate = wrapper.get('form[action="/membership/manage/alice/individual/terminate/"] button[type="submit"]');
+    expect(terminate.attributes("disabled")).toBeDefined();
+    expect(terminate.element.parentElement?.getAttribute("title")).toBe("Type the username to confirm first.");
+    await wrapper.get('form[action="/membership/manage/alice/individual/terminate/"] input[name="confirm"]').setValue("Alice");
+    expect(terminate.attributes("disabled")).toBeUndefined();
+    expect(terminate.element.parentElement?.getAttribute("title")).toBe("Terminate this membership now");
     expect(wrapper.find('input[name="csrfmiddlewaretoken"]').attributes("value")).toBe("csrf-token");
     expect(wrapper.find('input[name="next"]').attributes("value")).toBe("/user/alice/");
     expect(wrapper.find('[data-test="notes-card"]').exists()).toBe(true);

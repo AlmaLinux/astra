@@ -46,8 +46,8 @@
 
           {% if show_save_buttons != False %}
             <div class="mt-2">
-              <button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" title="Restore last saved content" disabled>Restore</button>
-              <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save" title="Save to selected template">Save</button>
+              <span class="d-inline-block" title="Restore last saved content" data-ready-title="Restore last saved content"><button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" disabled>Restore</button></span>
+              <span class="d-inline-block" title="Save to selected template" data-ready-title="Save to selected template"><button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save">Save</button></span>
               <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save-as" title="Save as a new template">Save as…</button>
             </div>
           {% endif %}

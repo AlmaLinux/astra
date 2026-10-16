@@ -45,6 +45,34 @@ describe("MembershipRequestActionModal", () => {
     return wrapper.findAll("button").find((button) => button.text() === text);
   }
 
+  // Blocked actions stay disabled, with the reason as the tooltip on the button's wrapper.
+  function expectBlocked(wrapper: ReturnType<typeof mount>, text: string, reason: string): void {
+    const button = buttonByText(wrapper, text)!;
+    expect(button.attributes("disabled")).toBeDefined();
+    expect(button.element.parentElement?.getAttribute("title")).toBe(reason);
+  }
+
+  function expectEnabled(wrapper: ReturnType<typeof mount>, text: string): void {
+    expect(buttonByText(wrapper, text)!.attributes("disabled")).toBeUndefined();
+  }
+
+  it("keeps an on-hold override disabled until the committee justifies it", async () => {
+    const wrapper = mount(MembershipRequestActionModal, {
+      props: {
+        action: { ...rejectAction, requestStatus: "on_hold", actionKind: "approve_on_hold", actionUrl: "/api/v1/membership/request/42/approve-on-hold" },
+        csrfToken: "csrf-token",
+      },
+    });
+
+    expectBlocked(wrapper, "Approve", "Enter a justification for the override first.");
+    await wrapper.get("#membership-request-action-text").setValue("   ");
+    expectBlocked(wrapper, "Approve", "Enter a justification for the override first.");
+
+    await wrapper.get("#membership-request-action-text").setValue("Sponsor confirmed by phone");
+    expectEnabled(wrapper, "Approve");
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
+
   it("submits the action as a form post when the committee chooses a custom email", async () => {
     const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
     const wrapper = mount(MembershipRequestActionModal, {
@@ -79,7 +107,6 @@ describe("MembershipRequestActionModal", () => {
   });
 
   it("still requires the RFI message before handing off to a custom email", async () => {
-    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
     const wrapper = mount(MembershipRequestActionModal, {
       props: {
         action: { ...rejectAction, actionKind: "rfi", customEmailUrl: "/membership/requests/42/rfi/" },
@@ -87,10 +114,12 @@ describe("MembershipRequestActionModal", () => {
       },
     });
 
-    await buttonByText(wrapper, "Send RFI with custom email")!.trigger("click");
+    expectBlocked(wrapper, "Send RFI", "Enter the RFI message first.");
+    expectBlocked(wrapper, "Send RFI with custom email", "Enter the RFI message first.");
 
-    expect(submit).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("This field is required.");
+    await wrapper.get("#membership-request-action-text").setValue("Please share your mirror URL.");
+    expectEnabled(wrapper, "Send RFI");
+    expectEnabled(wrapper, "Send RFI with custom email");
   });
 
   it("offers no custom email without a custom-email URL or for bulk actions", () => {
@@ -144,9 +173,7 @@ describe("MembershipRequestActionModal", () => {
 
       expect((wrapper.get("#membership-request-action-dues").element as HTMLInputElement).value).toBe("");
       await wrapper.get("#membership-request-action-dues").setValue("0");
-      await buttonByText(wrapper, "Approve")!.trigger("click");
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(wrapper.text()).toContain("Give a reason for the dues change.");
+      expectBlocked(wrapper, "Approve", "Give a reason for the dues change first.");
 
       await wrapper.get("#membership-request-action-dues-reason").setValue("Mirror bandwidth in kind");
       await buttonByText(wrapper, "Approve")!.trigger("click");
@@ -176,8 +203,7 @@ describe("MembershipRequestActionModal", () => {
       const wrapper = mount(MembershipRequestActionModal, { props: { action: approveAction, csrfToken: "csrf-token" } });
 
       await wrapper.get("#membership-request-action-dues").setValue("");
-      await buttonByText(wrapper, "Approve")!.trigger("click");
-      expect(fetchMock).not.toHaveBeenCalled();
+      expectBlocked(wrapper, "Approve", "Give a reason for the dues change first.");
 
       await wrapper.get("#membership-request-action-dues-reason").setValue("In-kind agreement ended");
       await buttonByText(wrapper, "Approve")!.trigger("click");
@@ -187,15 +213,13 @@ describe("MembershipRequestActionModal", () => {
     });
 
     it("refuses dues above the standard price before contacting the server", async () => {
-      const fetchMock = mockApproveFetch();
       const wrapper = mount(MembershipRequestActionModal, { props: { action: approveAction, csrfToken: "csrf-token" } });
 
       await wrapper.get("#membership-request-action-dues").setValue("25000");
       await wrapper.get("#membership-request-action-dues-reason").setValue("Typo");
-      await buttonByText(wrapper, "Approve")!.trigger("click");
 
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(wrapper.get('[role="alert"]').text()).toBe("Can't exceed the standard price of $20,000.");
+      expectBlocked(wrapper, "Approve", "The annual dues can't exceed the standard price of $20,000.");
+      expectBlocked(wrapper, "Approve with custom email", "The annual dues can't exceed the standard price of $20,000.");
     });
 
     it("has no dues field for approvers who cannot set dues", () => {

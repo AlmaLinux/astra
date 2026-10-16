@@ -314,6 +314,29 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Cancel deletion request");
   });
 
+  it("explains why an already-signed agreement cannot be signed again", () => {
+    const wrapper = mount(SettingsPage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          initialPayload: {
+            ...initialPayload,
+            activeTab: "agreements",
+            tabs: ["profile", "emails", "keys", "security", "privacy", "membership", "agreements"],
+            agreements: {
+              agreement: { cn: "cla", descriptionMarkdown: "Terms", groups: [], signed: true },
+              agreements: [{ cn: "cla", groups: [], signed: true }],
+            },
+          },
+        },
+      },
+    });
+
+    const signed = wrapper.findAll("button").find((button) => button.text() === "Signed")!;
+    expect(signed.attributes("disabled")).toBeDefined();
+    expect(signed.element.parentElement?.getAttribute("title")).toBe("You have already signed this agreement.");
+  });
+
   it("does not crash when modal enhancement is unavailable during agreements-tab render", async () => {
     const errors: unknown[] = [];
     window.jQuery = (() => ({})) as typeof window.jQuery;

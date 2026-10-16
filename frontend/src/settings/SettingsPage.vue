@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import { membershipLogActionLabel } from "../shared/membershipPresentation";
 import { fetchSettingsPayload, type SettingsBootstrap, type SettingsField, type SettingsForm, type SettingsPayload } from "./types";
 
@@ -717,7 +718,7 @@ onMounted(async () => {
                 <div class="mb-2"><span class="badge" :class="payload.agreements.agreement.signed ? 'badge-success' : 'badge-danger'">{{ payload.agreements.agreement.signed ? 'Signed' : 'Not signed' }}</span></div>
                 <div v-if="payload.agreements.agreement.groups.length" class="mb-3"><strong>Required for:</strong> <span v-for="(groupName, index) in payload.agreements.agreement.groups" :key="groupName"><a :href="groupDetailUrl(groupName)">{{ groupName }}</a><span v-if="index < payload.agreements.agreement.groups.length - 1">, </span></span></div>
                 <div class="mb-3" v-html="formatAgreementHtml(payload.agreements.agreement.descriptionMarkdown)" />
-                <form method="post" novalidate :action="bootstrap.submitUrl"><input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken"><input type="hidden" name="tab" value="agreements"><input type="hidden" name="action" value="sign"><input type="hidden" name="cn" :value="payload.agreements.agreement.cn"><button v-if="!payload.agreements.agreement.signed" type="submit" class="btn btn-primary" title="Sign this agreement">Sign</button><button v-else type="button" class="btn btn-outline-secondary" disabled title="Already signed">Signed</button></form>
+                <form method="post" novalidate :action="bootstrap.submitUrl"><input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken"><input type="hidden" name="tab" value="agreements"><input type="hidden" name="action" value="sign"><input type="hidden" name="cn" :value="payload.agreements.agreement.cn"><button v-if="!payload.agreements.agreement.signed" type="submit" class="btn btn-primary" title="Sign this agreement">Sign</button><GuardedButton v-else type="button" class="btn btn-outline-secondary" blocked-reason="You have already signed this agreement." title="Signed">Signed</GuardedButton></form>
                 <div class="mt-3"><a :href="bootstrap.routeConfig.agreementsUrl">Back to agreements</a></div>
               </template>
               <template v-else>

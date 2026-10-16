@@ -134,7 +134,8 @@ describe("OnHoldRequestsTable", () => {
     expect(wrapper.text()).toContain(expectedLocalTimestamp(row.on_hold_since));
     expect(wrapper.text()).toContain("1 day ago");
     expect(wrapper.find(".membership-request-actions.membership-request-actions--list").exists()).toBe(true);
-    expect(wrapper.get('button[type="submit"].btn.btn-default').attributes("title")).toBe("Apply selected action to checked requests");
+    // Nothing is checked yet, so Apply explains what is missing.
+    expect(wrapper.get('button[type="submit"].btn.btn-default').element.parentElement?.getAttribute("title")).toBe("Select one or more rows first.");
     expect(wrapper.findAll(".pagination .page-link").map((link) => link.text())).toEqual(["«", "1", "2", "3", "4", "5", "6", "»"]);
     expect(wrapper.findAll(".pagination a.page-link").map((link) => ({
       text: link.text(),

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import { fetchEmailTemplatesPayload, replaceTemplateToken, type EmailTemplateListItem, type EmailTemplatesBootstrap, type EmailTemplatesPayload } from "./types";
 
 const props = defineProps<{
@@ -69,16 +70,15 @@ onMounted(async () => {
                     <td class="text-muted">{{ template.description }}</td>
                     <td>
                       <a class="btn btn-outline-primary btn-sm" :href="editUrl(template)" title="Edit this template">Edit</a>
-                      <button
+                      <GuardedButton
                         v-if="template.isLocked"
                         type="button"
                         class="btn btn-outline-danger btn-sm"
-                        disabled
-                        aria-disabled="true"
-                        title="This template is referenced by the app configuration and cannot be deleted."
+                        blocked-reason="This template is referenced by the app configuration and cannot be deleted."
+                        title="Delete this template"
                       >
                         Delete
-                      </button>
+                      </GuardedButton>
                       <button
                         v-else
                         type="button"

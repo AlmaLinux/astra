@@ -26,6 +26,41 @@ describe("templated email compose", () => {
     delete (window as Window & { TemplatedEmailComposeRegistry?: unknown }).TemplatedEmailComposeRegistry;
   });
 
+  it("keeps Save and Restore disabled, saying why, until a template is loaded", async () => {
+    document.body.innerHTML = `
+      <div class="templated-email-compose" data-templated-email-compose>
+        <select name="email_template_id">
+          <option value="">(none)</option>
+          <option value="7">Election template</option>
+        </select>
+        <input name="subject" value="">
+        <textarea name="html_content"></textarea>
+        <textarea name="text_content"></textarea>
+        <span class="d-inline-block" data-ready-title="Restore last saved content"><button type="button" data-compose-action="restore" disabled>Restore</button></span>
+        <span class="d-inline-block" data-ready-title="Save to selected template"><button type="button" data-compose-action="save">Save</button></span>
+      </div>
+    `;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ subject: "S", html_content: "<p>H</p>", text_content: "T" }))));
+    loadTemplatedEmailComposeScript();
+
+    const save = document.querySelector<HTMLButtonElement>('[data-compose-action="save"]')!;
+    const restore = document.querySelector<HTMLButtonElement>('[data-compose-action="restore"]')!;
+    expect(save.disabled).toBe(true);
+    expect(save.parentElement?.title).toBe("Select a template first, or use Save as.");
+    expect(restore.disabled).toBe(true);
+    expect(restore.parentElement?.title).toBe("Nothing to restore yet.");
+
+    const select = document.querySelector<HTMLSelectElement>('select[name="email_template_id"]')!;
+    select.value = "7";
+    select.dispatchEvent(new Event("change"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(save.disabled).toBe(false);
+    expect(save.parentElement?.title).toBe("Save to selected template");
+    expect(restore.disabled).toBe(false);
+    expect(restore.parentElement?.title).toBe("Restore last saved content");
+  });
+
   it("closes the save confirmation modal when the save form is confirmed", () => {
     document.body.innerHTML = `
       <form id="election-edit-form">

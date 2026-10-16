@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, useSlots, watch } from "vue";
 
+import GuardedButton from "./GuardedButton.vue";
+
 interface ColumnDef {
   key: string;
   label: string;
@@ -66,6 +68,13 @@ const colspan = computed(() => props.columns.length + (showSelection.value ? 1 :
 const hasBulkActions = computed(() => (props.bulkActions?.length || 0) > 0);
 const bulkActionPlaceholder = computed(() => props.bulkActionPlaceholder || "Bulk action…");
 const bulkSubmitTitle = computed(() => props.bulkSubmitTitle || "Apply selected action to checked rows");
+
+const bulkBlockedReason = computed(() => {
+  if (selectedIds.value.length === 0) {
+    return "Select one or more rows first.";
+  }
+  return selectedAction.value ? "" : "Choose a bulk action first.";
+});
 const selectAllAriaLabel = computed(() => props.selectAllAriaLabel || "Select all rows");
 const effectiveBulkError = computed(() => props.bulkError || localBulkError.value);
 const showFooter = computed(() => props.totalPages > 1 || Boolean(slots["footer-meta"]) || Boolean(props.pageSize && props.count > 0));
@@ -207,14 +216,14 @@ defineSlots<{
                   <option value="">{{ bulkActionPlaceholder }}</option>
                   <option v-for="option in bulkActions" :key="option.value" :value="option.value">{{ option.label }}</option>
                 </select>
-                <div class="input-group-append">
-                  <button
-                    type="submit"
-                    class="btn btn-default"
-                    :title="bulkSubmitTitle"
-                    :disabled="selectedIds.length === 0 || !selectedAction || bulkSubmitting"
-                  >Apply</button>
-                </div>
+                <GuardedButton
+                  type="submit"
+                  class="btn btn-default"
+                  wrapper-class="input-group-append"
+                  :blocked-reason="bulkBlockedReason"
+                  :busy="bulkSubmitting"
+                  :title="bulkSubmitTitle"
+                >Apply</GuardedButton>
               </div>
               <input v-for="rowId in selectedIds" :key="rowId" type="hidden" name="selected" :value="rowId">
             </form>

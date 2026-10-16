@@ -147,7 +147,8 @@ describe("PendingRequestsTable", () => {
     expect(typeCell?.text()).toContain("Still contributing.");
     expect(wrapper.find(".membership-request-actions.membership-request-actions--list").exists()).toBe(true);
     expect(wrapper.find(".badge.badge-primary").text()).toContain("Renewal");
-    expect(wrapper.get('button[type="submit"].btn.btn-default').attributes("title")).toBe("Apply selected action to checked requests");
+    // Nothing is checked yet, so Apply explains what is missing.
+    expect(wrapper.get('button[type="submit"].btn.btn-default').element.parentElement?.getAttribute("title")).toBe("Select one or more rows first.");
     expect(wrapper.findAll(".pagination .page-link").map((link) => link.text())).toEqual([
       "«",
       "1",
@@ -357,6 +358,23 @@ describe("PendingRequestsTable", () => {
     expect(badge.text()).toBe("In-kind");
     expect(badge.attributes("title")).toBe("Pays $5,000 of $20,000");
     expect(mountPending([{ ...row, dues: { default_usd: 20000, current_usd: null } }]).find("[data-membership-request-dues]").exists()).toBe(false);
+  });
+
+  it("keeps Apply disabled, saying what is missing, until rows and an action are chosen", async () => {
+    const wrapper = mountPending([row]);
+    const apply = wrapper.get('button[type="submit"].btn.btn-default');
+    const tooltip = () => apply.element.parentElement?.getAttribute("title");
+
+    expect(apply.attributes("disabled")).toBeDefined();
+    expect(tooltip()).toBe("Select one or more rows first.");
+
+    await wrapper.get<HTMLInputElement>('tbody input[type="checkbox"][name="selected"][value="101"]').setValue(true);
+    expect(apply.attributes("disabled")).toBeDefined();
+    expect(tooltip()).toBe("Choose a bulk action first.");
+
+    await wrapper.get('select[name="bulk_action"]').setValue("accept");
+    expect(apply.attributes("disabled")).toBeUndefined();
+    expect(tooltip()).toBe("Apply selected action to checked requests");
   });
 
   it("explains which requests bulk approval left for individual review", async () => {

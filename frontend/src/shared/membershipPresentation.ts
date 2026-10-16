@@ -78,7 +78,7 @@ export function formatUsd(amount: number): string {
 
 // Committee-entered dues ("" for the standard price) may only discount, never surcharge.
 export function duesAmountError(amount: string, defaultUsd: number): string {
-  return amount !== "" && Number(amount) > defaultUsd ? `Can't exceed the standard price of ${formatUsd(defaultUsd)}.` : "";
+  return amount !== "" && Number(amount) > defaultUsd ? `The annual dues can't exceed the standard price of ${formatUsd(defaultUsd)}.` : "";
 }
 
 export function membershipTypeDescription(membershipType: { description: string; annualDuesUsd: number }): string {

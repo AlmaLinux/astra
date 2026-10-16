@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
+import GuardedButton from "../shared/components/GuardedButton.vue";
+
 import type {
   ElectionVoteBootstrap,
   ElectionVoteCandidate,
@@ -22,7 +24,6 @@ const voteWeightBreakdown = ref<VoteBreakdownRow[]>([]);
 const credentialPublicId = ref("");
 const ranking = ref<ElectionVoteCandidate[]>([]);
 const rankingUsernameFallback = ref("");
-const rankingError = ref("");
 const resultMessage = ref("");
 const resultIsError = ref(false);
 const isSubmitting = ref(false);
@@ -38,6 +39,14 @@ const availableCandidates = computed(() =>
 );
 const hasReceipt = computed(() => ballotHash.value !== "");
 const hasRankingInput = computed(() => ranking.value.length > 0 || rankingUsernameFallback.value.trim() !== "");
+
+// Why the ballot can't be submitted yet, or "" when it can.
+const blockedReason = computed(() => {
+  if (!hasRankingInput.value) {
+    return "Add a candidate to your ranking first.";
+  }
+  return credentialPublicId.value.trim() ? "" : "Enter your voting credential first.";
+});
 const submitLabel = computed(() => {
   if (isSubmitting.value) {
     return "Submitting...";
@@ -95,19 +104,6 @@ function setResult(message: string, isError: boolean): void {
   resultIsError.value = isError;
 }
 
-function clearRankingError(): void {
-  rankingError.value = "";
-}
-
-function validateRanking(): boolean {
-  if (hasRankingInput.value) {
-    clearRankingError();
-    return true;
-  }
-  rankingError.value = 'Add a candidate to your ranking from the "Candidates" box.';
-  return false;
-}
-
 function clearReceipt(): void {
   ballotHash.value = "";
   nonce.value = "";
@@ -127,7 +123,6 @@ function addCandidate(candidate: ElectionVoteCandidate): void {
     return;
   }
   ranking.value = [...ranking.value, candidate];
-  clearRankingError();
 }
 
 function moveCandidate(index: number, direction: -1 | 1): void {
@@ -140,12 +135,10 @@ function moveCandidate(index: number, direction: -1 | 1): void {
   const [candidate] = nextRanking.splice(index, 1);
   nextRanking.splice(nextIndex, 0, candidate);
   ranking.value = nextRanking;
-  clearRankingError();
 }
 
 function removeCandidate(candidateId: number): void {
   ranking.value = ranking.value.filter((candidate) => candidate.id !== candidateId);
-  clearRankingError();
 }
 
 function copyReceiptWithSelectionFallback(): boolean {
@@ -211,14 +204,7 @@ async function load(): Promise<void> {
 }
 
 async function submitVote(): Promise<void> {
-  if (!validateRanking()) {
-    clearReceipt();
-    return;
-  }
-
-  if (election.value === null || credentialPublicId.value.trim() === "") {
-    setResult("Voting credential is required.", true);
-    clearReceipt();
+  if (election.value === null || blockedReason.value) {
     return;
   }
 
@@ -286,7 +272,7 @@ onMounted(async () => {
                 Note: Election administrators may extend the end date if quorum is not reached.
               </div>
 
-              <form id="election-vote-form" method="post" :action="election.submit_url" :data-verify-url="props.bootstrap.verifyUrl" @keydown.enter="validateRanking" @submit.prevent="submitVote">
+              <form id="election-vote-form" method="post" :action="election.submit_url" :data-verify-url="props.bootstrap.verifyUrl" @submit.prevent="submitVote">
               <div class="form-group">
                 <label for="election-credential">Voting credential</label>
                 <input
@@ -379,8 +365,7 @@ onMounted(async () => {
                   </div>
                 </div>
                 <input id="election-ranking-input" type="hidden" name="ranking" :value="ranking.map((candidate) => candidate.id).join(',')" />
-                <div id="election-ranking-error" class="text-danger small" :class="{ 'd-none': !rankingError }" role="alert">{{ rankingError }}</div>
-                <div id="election-ranking-hint" class="text-muted small" :class="{ 'd-none': hasRankingInput || Boolean(rankingError) }">Add a candidate to your ranking from the "Candidates" box.</div>
+                <div id="election-ranking-hint" class="text-muted small" :class="{ 'd-none': hasRankingInput }">Add a candidate to your ranking from the "Candidates" box.</div>
                 <div id="election-ranking-order" class="text-muted small" :class="{ 'd-none': !hasRankingInput }">Use the buttons on the right to order your ranking.</div>
               </div>
 
@@ -420,23 +405,23 @@ onMounted(async () => {
                 </div>
               </div>
 
-              <button
+              <GuardedButton
                 id="election-submit-button"
                 type="submit"
-                class="btn btn-primary btn-block mt-2"
+                class="btn btn-primary btn-block"
+                wrapper-class="d-block mt-2"
+                :blocked-reason="blockedReason"
+                :busy="isSubmitting || !election.can_submit_vote"
                 title="Submit your ballot"
-                :aria-disabled="isSubmitting || !election.can_submit_vote"
-                :disabled="isSubmitting || !election.can_submit_vote"
-                @click="validateRanking"
               >
                 {{ submitLabel }}
-              </button>
+              </GuardedButton>
 
               <div class="mt-3">
                 <details>
                   <summary class="text-muted">No-JS fallback</summary>
                   <p class="text-muted mb-2">If you can't use the ranking UI, enter usernames as comma-separated values (first choice first).</p>
-                  <input v-model="rankingUsernameFallback" class="form-control" type="text" name="ranking_usernames" placeholder="e.g. alice,bob,charlie" @input="clearRankingError" />
+                  <input v-model="rankingUsernameFallback" class="form-control" type="text" name="ranking_usernames" placeholder="e.g. alice,bob,charlie" />
                 </details>
               </div>
               </form>

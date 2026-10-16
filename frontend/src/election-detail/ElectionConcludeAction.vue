@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import type { ElectionConcludeActionBootstrap } from "./types";
 
 const props = defineProps<{
@@ -20,9 +21,10 @@ const confirmMatches = computed(() => {
   return confirmValue.value.trim().toLowerCase() === props.bootstrap.electionName.trim().toLowerCase();
 });
 
-const canSubmit = computed(() => {
-  return confirmMatches.value && !isSubmitting.value;
-});
+// Why the election can't be concluded yet, or "" when it can.
+const blockedReason = computed(() => (confirmMatches.value ? "" : "Type the election name to confirm first."));
+
+const canSubmit = computed(() => !blockedReason.value && !isSubmitting.value);
 
 function readCsrfToken(): string {
   for (const cookie of document.cookie.split(";")) {
@@ -163,9 +165,9 @@ async function toggleAutoEnd(): Promise<void> {
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-outline-secondary" title="Close dialog without concluding" @click="closeModal">Cancel</button>
-              <button id="conclude-submit" type="submit" class="btn btn-danger" :disabled="!canSubmit" :aria-disabled="!canSubmit" title="Conclude the election and stop voting">
+              <GuardedButton id="conclude-submit" type="submit" class="btn btn-danger" :blocked-reason="blockedReason" :busy="isSubmitting" title="Conclude the election and stop voting">
                 {{ isSubmitting ? "Concluding..." : "Conclude Election" }}
-              </button>
+              </GuardedButton>
             </div>
           </form>
         </div>

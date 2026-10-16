@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import type { ElectionTallyActionBootstrap } from "./types";
 
 const props = defineProps<{
@@ -16,9 +17,10 @@ const confirmMatches = computed(() => {
   return confirmValue.value.trim().toLowerCase() === props.bootstrap.electionName.trim().toLowerCase();
 });
 
-const canSubmit = computed(() => {
-  return confirmMatches.value && !isSubmitting.value;
-});
+// Why the election can't be tallied yet, or "" when it can.
+const blockedReason = computed(() => (confirmMatches.value ? "" : "Type the election name to confirm first."));
+
+const canSubmit = computed(() => !blockedReason.value && !isSubmitting.value);
 
 function readCsrfToken(): string {
   for (const cookie of document.cookie.split(";")) {
@@ -128,9 +130,9 @@ async function submit(): Promise<void> {
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-outline-secondary" title="Close dialog without tallying" @click="closeModal">Cancel</button>
-              <button id="tally-submit" type="submit" class="btn btn-primary" :disabled="!canSubmit" :aria-disabled="!canSubmit" title="Tally the closed election">
+              <GuardedButton id="tally-submit" type="submit" class="btn btn-primary" :blocked-reason="blockedReason" :busy="isSubmitting" title="Tally the closed election">
                 {{ isSubmitting ? "Tallying..." : "Tally Election" }}
-              </button>
+              </GuardedButton>
             </div>
           </form>
         </div>

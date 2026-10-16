@@ -34,11 +34,18 @@ describe("ElectionExtendAction", () => {
     const submit = wrapper.get("#extend-submit");
     expect(submit.attributes("disabled")).toBeDefined();
 
+    expect(submit.element.parentElement?.getAttribute("title")).toBe("Type the election name to confirm first.");
+
     await wrapper.get("#extend-confirm").setValue("wrong name");
     expect(wrapper.get("#extend-submit").attributes("disabled")).toBeDefined();
 
     await wrapper.get("#extend-confirm").setValue("Board election");
     expect(wrapper.get("#extend-submit").attributes("disabled")).toBeUndefined();
+    expect(submit.element.parentElement?.getAttribute("title")).toBe("Extend the election end date");
+
+    await wrapper.get("#extend-end-datetime").setValue("");
+    expect(submit.attributes("disabled")).toBeDefined();
+    expect(submit.element.parentElement?.getAttribute("title")).toBe("Choose the new end date and time first.");
   });
 
   it("matches the legacy extend modal body spacing", async () => {

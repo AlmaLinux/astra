@@ -31,6 +31,7 @@ describe("ElectionConcludeAction", () => {
 
     expect(wrapper.text()).toContain("Quorum not met:");
     expect(wrapper.get("#conclude-submit").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("#conclude-submit").element.parentElement?.getAttribute("title")).toBe("Type the election name to confirm first.");
 
     await wrapper.get("#conclude-confirm").setValue("Board election");
     expect(wrapper.get("#conclude-submit").attributes("disabled")).toBeUndefined();

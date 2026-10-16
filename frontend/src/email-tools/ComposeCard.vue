@@ -91,8 +91,8 @@ const textPreviewSrcdoc = computed(() => {
                   <small class="form-text text-muted">Selecting a template will populate subject + bodies.</small>
                   <slot name="template-selector-extra" />
                   <div v-if="showSaveButtons" class="mt-2">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" title="Restore last saved content" disabled>Restore</button>
-                    <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save" title="Save to selected template">Save</button>
+                    <span class="d-inline-block" title="Restore last saved content" data-ready-title="Restore last saved content"><button type="button" class="btn btn-outline-secondary btn-sm" data-compose-action="restore" disabled>Restore</button></span>
+                    <span class="d-inline-block" title="Save to selected template" data-ready-title="Save to selected template"><button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save">Save</button></span>
                     <button type="button" class="btn btn-outline-primary btn-sm" data-compose-action="save-as" title="Save as a new template">Save as&hellip;</button>
                   </div>
                 </div>

@@ -163,10 +163,16 @@ describe("GroupDetailPage", () => {
     expect(wrapper.find('form[data-member-group-form="true"] .d-flex.align-items-stretch').exists()).toBe(true);
     expect(wrapper.find('form[data-member-user-form="true"] .flex-grow-1 select[name="username"]').exists()).toBe(true);
     expect(wrapper.find('form[data-member-user-form="true"] .flex-grow-1').attributes("style")).toContain("min-width: 0");
-    expect(wrapper.find('form[data-member-user-form="true"] .d-flex.align-items-stretch > button').text()).toBe("Add");
+    const addMember = wrapper.get('form[data-member-user-form="true"] .d-flex.align-items-stretch > span.d-flex > button');
+    expect(addMember.text()).toBe("Add");
+    expect(addMember.attributes("disabled")).toBeDefined();
+    expect(addMember.element.parentElement?.getAttribute("title")).toBe("Select a user first.");
     expect(wrapper.find('form[data-member-group-form="true"] .flex-grow-1 select[name="group_name"]').exists()).toBe(true);
     expect(wrapper.find('form[data-member-group-form="true"] .flex-grow-1').attributes("style")).toContain("min-width: 0");
-    expect(wrapper.find('form[data-member-group-form="true"] .d-flex.align-items-stretch > button').text()).toBe("Add group");
+    const addGroup = wrapper.get('form[data-member-group-form="true"] .d-flex.align-items-stretch > span.d-flex > button');
+    expect(addGroup.text()).toBe("Add group");
+    expect(addGroup.attributes("disabled")).toBeDefined();
+    expect(addGroup.element.parentElement?.getAttribute("title")).toBe("Select a group first.");
   });
 
   it("renders linked chat channels when values are parseable and plain text otherwise", async () => {
@@ -448,6 +454,56 @@ describe("GroupDetailPage", () => {
     expect(wrapper.text()).not.toContain("ops");
   });
 
+  it("keeps the newest team-leads page when an older reload answers last", async () => {
+    window.history.replaceState({}, "", "/group/infra/?leaders_page=2");
+    const pageOne = { leaders: { items: [{ kind: "user", username: "alice", full_name: "Alice Example", avatar_url: "" }], pagination: { count: 2, page: 1, num_pages: 2, page_numbers: [1, 2], show_first: false, show_last: false, has_previous: false, has_next: true, previous_page_number: null, next_page_number: 2, start_index: 1, end_index: 1 } } };
+    const pageTwo = { leaders: { items: [{ kind: "user", username: "carol", full_name: "Carol Lead", avatar_url: "" }], pagination: { count: 2, page: 2, num_pages: 2, page_numbers: [1, 2], show_first: false, show_last: false, has_previous: true, has_next: false, previous_page_number: 1, next_page_number: null, start_index: 2, end_index: 2 } } };
+    let releaseStalePageTwo: () => void = () => undefined;
+    let pageTwoCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }));
+      }
+      if (url.includes("/info")) {
+        return new Response(JSON.stringify({ group: { cn: "infra", description: "", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 0, is_member: true, is_sponsor: true, required_agreements: [], unsigned_usernames: [] } }));
+      }
+      if (url.includes("leaders?page=2")) {
+        pageTwoCalls += 1;
+        if (pageTwoCalls === 2) {
+          // The reload after the action answers only after the user moved to page 1.
+          await new Promise<void>((resolve) => { releaseStalePageTwo = resolve; });
+        }
+        return new Response(JSON.stringify(pageTwo));
+      }
+      if (url.includes("/leaders")) {
+        return new Response(JSON.stringify(pageOne));
+      }
+      return new Response(JSON.stringify({ members: { q: "", items: [], pagination: { count: 0, page: 1, num_pages: 1, page_numbers: [1], show_first: false, show_last: false, has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 0, end_index: 0 } }, member_groups: { items: [] } }));
+    }));
+
+    const wrapper = mount(GroupDetailPage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+    expect(wrapper.text()).toContain("Carol Lead");
+
+    const groupSelect = wrapper.get('select[name="group_name"]');
+    (groupSelect.element as HTMLSelectElement).append(new Option("child-c", "child-c", true, true));
+    await groupSelect.setValue("child-c");
+    await wrapper.get('form[data-member-group-form="true"]').trigger("submit");
+    await flushPromises();
+
+    await wrapper.findAll('a[aria-label="Previous"]')[0].trigger("click");
+    await flushPromises();
+    releaseStalePageTwo();
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Alice Example");
+    expect(wrapper.text()).not.toContain("Carol Lead");
+    window.history.replaceState({}, "", "/");
+  });
+
   it("renders member groups inline in the Members grid and posts add member group actions", async () => {
     const fetchMock = vi.fn(async (input, init) => {
       const url = String(input);
@@ -487,6 +543,9 @@ describe("GroupDetailPage", () => {
     const nativeGroupSelect = groupSelect.element as HTMLSelectElement;
     nativeGroupSelect.append(new Option("child-c", "child-c", true, true));
     await groupSelect.setValue("child-c");
+    const addGroup = wrapper.get('form[data-member-group-form="true"] button[type="submit"]');
+    expect(addGroup.attributes("disabled")).toBeUndefined();
+    expect(addGroup.element.parentElement?.getAttribute("title")).toBe("Add group");
     await wrapper.get('form[data-member-group-form="true"]').trigger("submit");
     await flushPromises();
     await flushPromises();
@@ -495,6 +554,60 @@ describe("GroupDetailPage", () => {
     expect(postCall).toBeTruthy();
     expect(postCall?.[0]).toBe("/api/v1/groups/infra/action");
     expect(postCall?.[1]?.body).toBe(JSON.stringify({ action: "add_member_group", group_name: "child-c" }));
+  });
+
+  it("lets team leads add a user picked through select2", async () => {
+    const vueErrors = vi.spyOn(console, "error");
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }));
+      }
+      if (url.includes("/info")) {
+        return new Response(JSON.stringify({ group: { cn: "infra", description: "", fas_url: "", fas_mailing_list: "", fas_discussion_url: "", fas_irc_channels: [], member_count: 0, is_member: true, is_sponsor: true, required_agreements: [], unsigned_usernames: [] } }));
+      }
+      if (url.includes("/leaders")) {
+        return new Response(JSON.stringify({ leaders: { items: [], pagination: { count: 0, page: 1, num_pages: 1, page_numbers: [1], show_first: false, show_last: false, has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 0, end_index: 0 } } }));
+      }
+      return new Response(JSON.stringify({ members: { q: "", items: [], pagination: { count: 0, page: 1, num_pages: 1, page_numbers: [1], show_first: false, show_last: false, has_previous: false, has_next: false, previous_page_number: null, next_page_number: null, start_index: 0, end_index: 0 } }, member_groups: { items: [] } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    // select2 announces selections through jQuery only, never as native change events.
+    const select2Handlers = new Map<Element, () => void>();
+    const jquery = Object.assign(
+      (element: Element) => ({
+        select2: vi.fn(),
+        on: (_events: string, handler: () => void) => select2Handlers.set(element, handler),
+        val: vi.fn(),
+        trigger: vi.fn(),
+      }),
+      { fn: { select2: vi.fn() } },
+    );
+    vi.stubGlobal("jQuery", jquery);
+
+    const wrapper = mount(GroupDetailPage, { props: { bootstrap }, attachTo: document.body });
+    await flushPromises();
+    await flushPromises();
+
+    const select = wrapper.get<HTMLSelectElement>('select[name="username"]').element;
+    select.append(new Option("bob", "bob", true, true));
+    select2Handlers.get(select)?.();
+    await flushPromises();
+
+    const addButton = () => wrapper.get('form[data-member-user-form="true"] button[type="submit"]');
+    expect(addButton().attributes("disabled")).toBeUndefined();
+
+    // select2 owns the picker's options, so resetting it after the add must not break rendering.
+    await wrapper.get('form[data-member-user-form="true"]').trigger("submit");
+    await flushPromises();
+    await flushPromises();
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(post?.[1]?.body).toBe(JSON.stringify({ action: "add_member", username: "bob" }));
+    expect(addButton().attributes("disabled")).toBeDefined();
+    expect(addButton().element.parentElement?.getAttribute("title")).toBe("Select a user first.");
+    expect(vueErrors).not.toHaveBeenCalled();
+    wrapper.unmount();
+    vi.unstubAllGlobals();
   });
 
   it("posts remove member group actions through the confirm flow", async () => {

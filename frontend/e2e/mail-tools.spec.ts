@@ -138,6 +138,8 @@ test("mail-tools-send-mail-workflow", async ({ page }) => {
   const saveAsModal = page.getByRole("dialog").filter({ hasText: "Save email template as…" }).first();
   await expect(saveAsModal).toBeVisible();
   await expect(saveAsModal.getByText("Create a new template from the current subject and contents?")).toBeVisible();
+  // Bootstrap ignores Cancel until the opening animation ends, after which the name gets focus.
+  await expect(saveAsModal.locator('input[name="name"]')).toBeFocused();
   await saveAsModal.locator('input[name="name"]').fill(`wave7-save-as-${Date.now()}`);
   await saveAsModal.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(saveAsModal).not.toBeVisible();
@@ -200,7 +202,14 @@ test("mail-tools-send-mail-attachments", async ({ page }) => {
   await openSendMailWorkflow(page);
 
   await page.getByRole("tab", { name: "Manual", exact: true }).click();
+  // Entering recipients makes the page reload itself with a refreshed preview; files
+  // attached before that reload would be lost with the old page, so let it happen first.
+  const previewReload = page.waitForResponse((response) => {
+    return new URL(response.url()).pathname === "/email-tools/send-mail/" && response.request().method() === "POST";
+  });
   await page.getByLabel("Manual to:", { exact: true }).fill("attachments01@example.test");
+  await previewReload;
+  await page.waitForLoadState("load");
   await expect(page.locator("#send-mail-recipient-count")).toHaveText("1");
   await selectExistingTemplate(page);
 

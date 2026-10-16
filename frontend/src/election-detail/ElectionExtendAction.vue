@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import type { ElectionExtendActionBootstrap } from "./types";
 
 const props = defineProps<{
@@ -18,9 +19,15 @@ const confirmMatches = computed(() => {
     || confirmValue.value.trim().toLowerCase() === props.bootstrap.electionName.trim().toLowerCase();
 });
 
-const canSubmit = computed(() => {
-  return confirmMatches.value && endDatetime.value.trim().length > 0 && !isSubmitting.value;
+// Why the extension can't be submitted yet, or "" when it can.
+const blockedReason = computed(() => {
+  if (!confirmMatches.value) {
+    return "Type the election name to confirm first.";
+  }
+  return endDatetime.value.trim() ? "" : "Choose the new end date and time first.";
 });
+
+const canSubmit = computed(() => !blockedReason.value && !isSubmitting.value);
 
 function readCsrfToken(): string {
   for (const cookie of document.cookie.split(";")) {
@@ -142,9 +149,9 @@ async function submit(): Promise<void> {
             </div>
             <div class="modal-footer">
               <button type="button" class="btn btn-outline-secondary" title="Close dialog without extending" @click="closeModal">Cancel</button>
-              <button id="extend-submit" type="submit" class="btn btn-warning" :disabled="!canSubmit" :aria-disabled="!canSubmit" title="Extend the election end date">
+              <GuardedButton id="extend-submit" type="submit" class="btn btn-warning" :blocked-reason="blockedReason" :busy="isSubmitting" title="Extend the election end date">
                 {{ isSubmitting ? "Extending..." : "Extend Election" }}
-              </button>
+              </GuardedButton>
             </div>
           </form>
         </div>

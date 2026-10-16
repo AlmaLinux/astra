@@ -286,6 +286,12 @@ describe("OrganizationDetailPage", () => {
     expect(wrapper.text()).toContain("Edit expiration");
     expect(wrapper.find('form[action="/organization/1/sponsorship/gold/expiry/"]').exists()).toBe(true);
     expect(wrapper.find('form[action="/organization/1/sponsorship/gold/terminate/"]').exists()).toBe(true);
+    const terminate = wrapper.get("#sponsorship-expiry-modal-gold-terminate-submit");
+    expect(terminate.attributes("disabled")).toBeDefined();
+    expect(terminate.element.parentElement?.getAttribute("title")).toBe("Type the organization name to confirm first.");
+    await wrapper.get("#sponsorship-expiry-modal-gold-terminate-confirm-input").setValue("acme org");
+    expect(terminate.attributes("disabled")).toBeUndefined();
+    expect(terminate.element.parentElement?.getAttribute("title")).toBe("Terminate this membership now");
     expect(wrapper.find('#sponsorship-expires-on-gold').attributes("value")).toBe("2026-04-30");
     expect(wrapper.find('input[name="csrfmiddlewaretoken"]').attributes("value")).toBe("csrf-token");
     expect(wrapper.text()).toContain("Manage membership: Gold Sponsor Member for Acme Org");
@@ -729,7 +735,7 @@ describe("OrganizationDetailPage", () => {
 
     const save = form.get("button[type=submit]");
     expect(save.attributes("disabled")).toBeDefined();
-    expect(save.element.parentElement?.getAttribute("title")).toBe("The annual dues can't exceed the standard price.");
+    expect(save.element.parentElement?.getAttribute("title")).toBe("The annual dues can't exceed the standard price of $20,000.");
   });
 
   it("names the membership once, without repeating it as a badge", async () => {

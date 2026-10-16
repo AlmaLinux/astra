@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import MembershipCard from "../shared/components/MembershipCard.vue";
 import { formatDateInputValue, formatFullDate, formatPreciseDateTime, membershipTierClass, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
@@ -258,14 +259,13 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
 
                       <div class="d-flex justify-content-end">
                         <button type="button" class="btn btn-outline-secondary" data-terminate-action="cancel" title="Cancel termination and collapse this section" @click="resetTermination(entry)">Cancel termination</button>
-                        <button
+                        <GuardedButton
                           type="submit"
                           class="btn btn-danger ml-2"
                           :id="managementTerminationSubmitId(index + 1)"
-                          :disabled="!terminationMatches(entry)"
-                          :aria-disabled="terminationMatches(entry) ? 'false' : 'true'"
-                          title="Terminate membership (enabled after confirmation)"
-                        >Terminate membership</button>
+                          :blocked-reason="terminationMatches(entry) ? '' : 'Type the username to confirm first.'"
+                          title="Terminate this membership now"
+                        >Terminate membership</GuardedButton>
                       </div>
                     </form>
                   </div>

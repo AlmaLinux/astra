@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 
 import { buildChatLink } from "../shared/chatLinks";
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import WidgetGrid from "../shared/components/WidgetGrid.vue";
 import WidgetUser from "../shared/components/WidgetUser.vue";
 import {
@@ -36,6 +37,7 @@ type MemberGridItem = MemberGridUserItem | MemberGridGroupItem;
 
 type JQueryCollection = {
   select2?: (options?: unknown) => void;
+  on?: (events: string, handler: () => void) => void;
   trigger?: (event: string) => void;
   val?: (value?: string | null) => unknown;
 };
@@ -65,9 +67,7 @@ const q = ref("");
 const currentPage = ref(1);
 const leadersPage = ref(1);
 const addMemberUsername = ref("");
-const addMemberUsernameLabel = ref("");
 const addMemberGroupName = ref("");
-const addMemberGroupLabel = ref("");
 const confirmModalOpen = ref(false);
 const pendingAction = ref<{ action: string; username: string; groupName: string }>({
   action: "",
@@ -137,11 +137,6 @@ function supportsSelect2(jquery: JQueryFunction | null): jquery is JQueryFunctio
   return Boolean(jquery?.fn && typeof jquery.fn.select2 === "function");
 }
 
-function selectedOptionLabel(select: HTMLSelectElement): string {
-  return Array.from(select.selectedOptions)
-    .map((option) => String(option.textContent || "").trim())
-    .find((text) => text.length > 0) || "";
-}
 
 function initSponsorSelect2(): void {
   const jquery = getJQuery();
@@ -174,6 +169,11 @@ function initSponsorSelect2(): void {
         processResults: (payload: unknown) => normalizeSelect2Results(payload, resultKind),
         cache: true,
       },
+    });
+    // select2 announces picks through jQuery, which the native @change listeners never
+    // see; forward them. (Forwarding jQuery's own "change" would loop back through jQuery.)
+    jquery(element).on?.("select2:select select2:clear", () => {
+      element.dispatchEvent(new Event("change", { bubbles: true }));
     });
   });
 }
@@ -478,7 +478,13 @@ async function loadGroupInfo(): Promise<boolean> {
   }
 }
 
+// Reloads can overlap (e.g. a page change while an action's refresh is in flight); only
+// the newest request may update the page, so a slow, outdated answer can't replace it.
+let leadersRequestId = 0;
+let membersRequestId = 0;
+
 async function loadLeaders(pushState: boolean): Promise<boolean> {
+  const requestId = ++leadersRequestId;
   leadersLoading.value = true;
   leadersError.value = "";
 
@@ -487,12 +493,18 @@ async function loadLeaders(pushState: boolean): Promise<boolean> {
       headers: { Accept: "application/json" },
       credentials: "same-origin",
     });
+    if (requestId !== leadersRequestId) {
+      return true;
+    }
     if (!response.ok) {
       leadersError.value = "Unable to load team leads right now.";
       return false;
     }
 
     const leadersData = (await response.json()) as GroupLeadersResponse;
+    if (requestId !== leadersRequestId) {
+      return true;
+    }
     leadersPayload.value = leadersData.leaders;
     leadersPage.value = leadersData.leaders.pagination.page;
     if (pushState) {
@@ -500,14 +512,19 @@ async function loadLeaders(pushState: boolean): Promise<boolean> {
     }
     return true;
   } catch {
-    leadersError.value = "Unable to load team leads right now.";
+    if (requestId === leadersRequestId) {
+      leadersError.value = "Unable to load team leads right now.";
+    }
     return false;
   } finally {
-    leadersLoading.value = false;
+    if (requestId === leadersRequestId) {
+      leadersLoading.value = false;
+    }
   }
 }
 
 async function loadMembers(pushState: boolean): Promise<boolean> {
+  const requestId = ++membersRequestId;
   membersLoading.value = true;
   membersError.value = "";
 
@@ -516,12 +533,18 @@ async function loadMembers(pushState: boolean): Promise<boolean> {
       headers: { Accept: "application/json" },
       credentials: "same-origin",
     });
+    if (requestId !== membersRequestId) {
+      return true;
+    }
     if (!response.ok) {
       membersError.value = "Unable to load members right now.";
       return false;
     }
 
     const membersData = (await response.json()) as GroupMembersResponse;
+    if (requestId !== membersRequestId) {
+      return true;
+    }
     membersPayload.value = {
       ...membersData.members,
       member_groups: membersData.member_groups,
@@ -533,10 +556,14 @@ async function loadMembers(pushState: boolean): Promise<boolean> {
     }
     return true;
   } catch {
-    membersError.value = "Unable to load members right now.";
+    if (requestId === membersRequestId) {
+      membersError.value = "Unable to load members right now.";
+    }
     return false;
   } finally {
-    membersLoading.value = false;
+    if (requestId === membersRequestId) {
+      membersLoading.value = false;
+    }
   }
 }
 
@@ -605,7 +632,6 @@ async function addMemberAction(event: Event): Promise<void> {
   }
   await postAction("add_member", { username: addMemberUsername.value.trim() });
   addMemberUsername.value = "";
-  addMemberUsernameLabel.value = "";
   resetSponsorSelect("username");
 }
 
@@ -616,7 +642,6 @@ async function addMemberGroupAction(event: Event): Promise<void> {
   }
   await postAction("add_member_group", { groupName: addMemberGroupName.value.trim() });
   addMemberGroupName.value = "";
-  addMemberGroupLabel.value = "";
   resetSponsorSelect("group_name");
 }
 
@@ -627,7 +652,6 @@ function onAddMemberSelectionChange(event: Event): void {
   }
 
   addMemberUsername.value = String(select.value || "").trim();
-  addMemberUsernameLabel.value = addMemberUsername.value ? selectedOptionLabel(select) : "";
 }
 
 function onAddMemberGroupSelectionChange(event: Event): void {
@@ -637,7 +661,6 @@ function onAddMemberGroupSelectionChange(event: Event): void {
   }
 
   addMemberGroupName.value = String(select.value || "").trim();
-  addMemberGroupLabel.value = addMemberGroupName.value ? selectedOptionLabel(select) : "";
 }
 
 function openConfirmModal(action: string, username?: string, groupName?: string): void {
@@ -859,11 +882,18 @@ onMounted(async () => {
                       :disabled="actionSubmitting"
                       @change="onAddMemberSelectionChange"
                     >
+                      <!-- Only the placeholder: select2 owns the picked options, and resets them after an add. -->
                       <option value=""></option>
-                      <option v-if="addMemberUsername" :value="addMemberUsername">{{ addMemberUsernameLabel || addMemberUsername }}</option>
                     </select>
                   </div>
-                  <button class="btn btn-primary" type="submit" :disabled="actionSubmitting" title="Add this user to the group">Add</button>
+                  <GuardedButton
+                    class="btn btn-primary"
+                    type="submit"
+                    wrapper-class="d-flex"
+                    :blocked-reason="addMemberUsername.trim() ? '' : 'Select a user first.'"
+                    :busy="actionSubmitting"
+                    title="Add this user to the group"
+                  >Add</GuardedButton>
                 </div>
               </form>
 
@@ -879,11 +909,18 @@ onMounted(async () => {
                       :disabled="actionSubmitting"
                       @change="onAddMemberGroupSelectionChange"
                     >
+                      <!-- Only the placeholder: select2 owns the picked options, and resets them after an add. -->
                       <option value=""></option>
-                      <option v-if="addMemberGroupName" :value="addMemberGroupName">{{ addMemberGroupLabel || addMemberGroupName }}</option>
                     </select>
                   </div>
-                  <button class="btn btn-primary" type="submit" :disabled="actionSubmitting" title="Add group">Add group</button>
+                  <GuardedButton
+                    class="btn btn-primary"
+                    type="submit"
+                    wrapper-class="d-flex"
+                    :blocked-reason="addMemberGroupName.trim() ? '' : 'Select a group first.'"
+                    :busy="actionSubmitting"
+                    title="Add group"
+                  >Add group</GuardedButton>
                 </div>
               </form>
 

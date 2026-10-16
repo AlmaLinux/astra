@@ -33,7 +33,9 @@ describe("EmailTemplatesPage", () => {
     expect(wrapper.find('a[href="/email-tools/templates/1/"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("editable-template");
     expect(wrapper.text()).toContain("Locked");
-    expect(wrapper.find('button[disabled][aria-disabled="true"]').exists()).toBe(true);
+    const lockedDelete = wrapper.get("button[disabled]");
+    expect(lockedDelete.text()).toBe("Delete");
+    expect(lockedDelete.element.parentElement?.getAttribute("title")).toBe("This template is referenced by the app configuration and cannot be deleted.");
   });
 
   it("loads from the canonical endpoint when no initial payload is embedded", async () => {

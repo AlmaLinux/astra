@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 
 import DuesAmountInput from "../shared/components/DuesAmountInput.vue";
+import GuardedButton from "../shared/components/GuardedButton.vue";
 import MembershipCard from "../shared/components/MembershipCard.vue";
 import { duesAmountError, formatDateInputValue, formatFullDate, formatUsd, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
@@ -144,8 +145,9 @@ function duesSaveBlocker(membership: OrganizationDetailMembership): string {
   if (!draft) {
     return "";
   }
-  if (duesAmountError(draft.amount, membership.membershipType.annualDuesUsd)) {
-    return "The annual dues can't exceed the standard price.";
+  const amountError = duesAmountError(draft.amount, membership.membershipType.annualDuesUsd);
+  if (amountError) {
+    return amountError;
   }
   if (!draft.reason.trim()) {
     return "Enter a reason for the dues change first.";
@@ -586,15 +588,12 @@ onMounted(async () => {
                         </div>
 
                         <div class="d-flex justify-content-end">
-                          <!-- The tooltip sits on a wrapper because disabled buttons get no hover events. -->
-                          <span class="d-inline-block" :title="duesSaveBlocker(membership) || 'Save annual dues'">
-                            <button
-                              type="submit"
-                              class="btn btn-primary"
-                              :disabled="Boolean(duesSaveBlocker(membership))"
-                              :style="duesSaveBlocker(membership) ? 'pointer-events: none;' : undefined"
-                            >Save dues</button>
-                          </span>
+                          <GuardedButton
+                            type="submit"
+                            class="btn btn-primary"
+                            :blocked-reason="duesSaveBlocker(membership)"
+                            title="Save annual dues"
+                          >Save dues</GuardedButton>
                         </div>
                       </form>
 
@@ -644,14 +643,13 @@ onMounted(async () => {
 
                               <div class="d-flex justify-content-end">
                                 <button type="button" class="btn btn-outline-secondary" data-terminate-action="cancel" title="Cancel termination and collapse this section" @click="resetTermination(membershipTypeCode(membership))">Cancel termination</button>
-                                <button
+                                <GuardedButton
                                   type="submit"
                                   class="btn btn-danger ml-2"
                                   :id="`${managementModalId(membership)}-terminate-submit`"
-                                  :disabled="!terminationMatches(membershipTypeCode(membership), organizationName())"
-                                  :aria-disabled="terminationMatches(membershipTypeCode(membership), organizationName()) ? 'false' : 'true'"
-                                  title="Terminate membership (enabled after confirmation)"
-                                >Terminate membership</button>
+                                  :blocked-reason="terminationMatches(membershipTypeCode(membership), organizationName()) ? '' : 'Type the organization name to confirm first.'"
+                                  title="Terminate this membership now"
+                                >Terminate membership</GuardedButton>
                               </div>
                             </form>
                           </div>
