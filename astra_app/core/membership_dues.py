@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from core.membership import latest_membership_request_for_target
+from core.membership import term_membership_request
 from core.membership_notes import add_note
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note, Organization
 
@@ -101,12 +101,9 @@ def change_membership_dues(*, membership: Membership, dues_usd: int, reason: str
     # A no-op would still log and note a "change", muddying the audit trail.
     if dues_usd == old_dues_usd:
         raise ValidationError(f"{membership.membership_type.name} dues are already ${old_dues_usd:,}.")
-    # The request that granted the current term; every membership has one, even when
-    # granted directly (see create_approved_membership_request).
-    term_request = latest_membership_request_for_target(
-        organization_id=membership.target_organization_id,
-        membership_category_id=membership.membership_type.category_id,
-        statuses=[MembershipRequest.Status.approved],
+    term_request = term_membership_request(
+        membership_type=membership.membership_type,
+        target_organization=membership.target_organization,
     )
     if term_request is None:
         raise ValueError(f"Organization {membership.target_organization_id} has no approved request for its sponsorship.")

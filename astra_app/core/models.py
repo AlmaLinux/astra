@@ -1180,10 +1180,17 @@ class MembershipLog(models.Model):
         membership_request: MembershipRequest | None = None,
         import_batch_id: uuid.UUID | None = None,
     ) -> MembershipLog:
+        from core.membership import term_membership_request
+
         log = cls._create_log(
             actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
-            membership_type=membership_type, membership_request=membership_request,
+            membership_type=membership_type,
+            membership_request=membership_request or term_membership_request(
+                membership_type=membership_type,
+                target_username=target_username,
+                target_organization=target_organization,
+            ),
             action=cls.Action.expiry_changed, expires_at=expires_at,
             import_batch_id=import_batch_id,
             dues_usd=cls._current_dues_usd(membership_type, target_organization),
@@ -1235,10 +1242,17 @@ class MembershipLog(models.Model):
         target_organization: Organization | None = None,
         membership_request: MembershipRequest | None = None,
     ) -> MembershipLog:
+        from core.membership import term_membership_request
+
         log = cls._create_log(
             actor_username=actor_username, target_username=target_username,
             target_organization=target_organization,
-            membership_type=membership_type, membership_request=membership_request,
+            membership_type=membership_type,
+            membership_request=membership_request or term_membership_request(
+                membership_type=membership_type,
+                target_username=target_username,
+                target_organization=target_organization,
+            ),
             action=cls.Action.terminated, expires_at=timezone.now(),
         )
         apply_membership_log_side_effects(log=log)

@@ -140,6 +140,23 @@ def latest_membership_request_for_target(
     return queryset.order_by("-requested_at", "-pk").first()
 
 
+def term_membership_request(
+    *,
+    membership_type: MembershipType,
+    target_username: str = "",
+    target_organization: Organization | None = None,
+) -> MembershipRequest | None:
+    """The approved request that granted the target's current term, which owns its
+    lifecycle history. Every membership has one, even when granted directly
+    (see create_approved_membership_request)."""
+    return latest_membership_request_for_target(
+        username=None if target_organization is not None else target_username,
+        organization=target_organization,
+        membership_category_id=membership_type.category_id,
+        statuses=[MembershipRequest.Status.approved],
+    )
+
+
 def _normalized_group_cns(group_cns: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     targeted_group_cns: list[str] = []
     skipped_group_cns: list[str] = []
