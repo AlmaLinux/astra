@@ -8,7 +8,6 @@ import { inKindDuesSummary, isInKindRenewal } from "../membership-requests/types
 import type {
   MembershipRequestCompatibilityResponse,
   MembershipRequestDetailBootstrap,
-  MembershipRequestDetailFormField,
   MembershipRequestDetailPayload,
   MembershipRequestResponseSegment,
 } from "./types";
@@ -94,10 +93,6 @@ function targetUrl(): string {
     return "";
   }
   return props.bootstrap.userProfileUrlTemplate.replace("__username__", encodeURIComponent(target.username));
-}
-
-function fieldByName(name: string): MembershipRequestDetailFormField | null {
-  return selfServiceForm.value?.fields.find((field) => field.name === name) ?? null;
 }
 
 function clearFormErrors(): void {

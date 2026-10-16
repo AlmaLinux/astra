@@ -28,6 +28,7 @@ type TemplatedEmailCompose = {
   getCsrfToken: () => string;
   getTemplateSelectEl?: () => HTMLSelectElement | null;
   getTemplateId?: () => string;
+  notify?: (title: string, message: string) => void;
 };
 
 type TemplatedEmailComposePreview = {
@@ -501,7 +502,6 @@ export function initElectionEditController(): void {
     }
   }
 
-  const compose = getCompose();
   const templateSelect = getTemplateSelectEl();
   if (templateSelect) {
     templateSelect.addEventListener("change", () => {
@@ -520,7 +520,7 @@ export function initElectionEditController(): void {
     const values = composeForEvent?.getValues?.() ?? { subject: getField("subject"), html_content: getField("html_content"), text_content: getField("text_content") };
     const token = composeForEvent?.getCsrfToken?.() ?? "";
 
-    void saveComposeTemplate(templateId, { subject: values.subject, html_content: values.html_content ?? values.html ?? "", text_content: values.text_content ?? values.text ?? "" }, token).then((ok) => {
+    void saveComposeTemplate(composeForEvent, templateId, { subject: values.subject, html_content: values.html_content ?? values.html ?? "", text_content: values.text_content ?? values.text ?? "" }, token).then((ok) => {
       if (!ok) {
         return;
       }
@@ -540,7 +540,7 @@ export function initElectionEditController(): void {
     const values = composeForEvent?.getValues?.() ?? { subject: getField("subject"), html_content: getField("html_content"), text_content: getField("text_content") };
     const token = composeForEvent?.getCsrfToken?.() ?? "";
 
-    const result = await saveAsComposeTemplate(name, { subject: values.subject, html_content: values.html_content ?? values.html ?? "", text_content: values.text_content ?? values.text ?? "" }, token);
+    const result = await saveAsComposeTemplate(composeForEvent, name, { subject: values.subject, html_content: values.html_content ?? values.html ?? "", text_content: values.text_content ?? values.text ?? "" }, token);
     if (!result.ok) {
       return;
     }
@@ -558,7 +558,6 @@ export function initElectionEditController(): void {
     }
     markComposeBaselineFromFields();
     scheduleEmailPreviewRefresh(getCompose(), 50);
-    window.alert("Template created.");
   });
 
   markComposeBaselineFromFields();

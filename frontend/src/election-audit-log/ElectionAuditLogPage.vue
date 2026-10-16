@@ -11,6 +11,7 @@ import {
   type ElectionAuditRouteState,
   type ElectionAuditSummaryResponse,
 } from "./types";
+import { copyToClipboard } from "../shared/clipboard";
 import { buildSankeyChart, type SankeyFlow } from "../shared/sankeyChart";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 
@@ -25,6 +26,7 @@ const summary = ref<ElectionAuditSummaryResponse["summary"] | null>(null);
 const currentPage = ref(1);
 const auditLoading = ref(false);
 const error = ref("");
+const copyError = ref("");
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const sankeyRenderRetryDelayMs = 50;
 const sankeyRenderMaxAttempts = 20;
@@ -157,16 +159,12 @@ function ballotEntryKey(entry: ElectionAuditBallotEntry): string {
   return `${entry.timestamp || ""}-${entry.ballot_hash}`;
 }
 
-function copyText(text: string): void {
+async function copyText(text: string): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) {
     return;
   }
-  if (navigator.clipboard?.writeText) {
-    void navigator.clipboard.writeText(trimmed);
-    return;
-  }
-  window.prompt("Copy:", trimmed);
+  copyError.value = (await copyToClipboard(trimmed)) ? "" : "Could not copy to the clipboard. Select the text and copy it manually.";
 }
 
 function destroySankeyChart(): void {
@@ -334,6 +332,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div data-election-audit-log-vue-root>
+    <div v-if="copyError" class="alert alert-warning" role="alert">{{ copyError }}</div>
     <div v-if="error" class="alert alert-danger">{{ error }}</div>
     <div v-else class="row">
       <div class="col-lg-4">

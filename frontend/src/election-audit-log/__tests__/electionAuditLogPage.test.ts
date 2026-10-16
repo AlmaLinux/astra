@@ -309,6 +309,14 @@ describe("ElectionAuditLogPage", () => {
     expect(wrapper.html().indexOf("Continuing count.")).toBeGreaterThan(wrapper.html().indexOf("0.7500"));
     expect(wrapper.text()).toContain("Show ballot hashes");
     expect(wrapper.find('button[title="Copy full ballot hash"]').exists()).toBe(true);
+    // Without any way to copy, the page says so instead of opening a browser prompt.
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => false) });
+    const prompt = vi.spyOn(window, "prompt").mockImplementation(() => null);
+    await wrapper.get('button[title="Copy full ballot hash"]').trigger("click");
+    await flushPromises();
+    expect(prompt).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("Could not copy to the clipboard. Select the text and copy it manually.");
     expect(wrapper.text()).toContain("Showing first 1 ballot.");
     expect(wrapper.find('a[href="#timeline-top"]').text()).toBe("Back to top");
     expect(wrapper.find("i.fas.fa-clock.bg-gray").exists()).toBe(true);

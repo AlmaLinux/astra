@@ -242,6 +242,24 @@ const textPreviewSrcdoc = computed(() => {
             </div>
           </div>
         </div>
+
+        <!-- Notice modal: templated_email.js fills the title and body to report outcomes. -->
+        <div data-compose-modal="notice">
+          <div class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+            <div class="modal-dialog" role="document" style="text-align: left;">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h5 class="modal-title"></h5>
+                  <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog"><span aria-hidden="true">&times;</span></button>
+                </div>
+                <div class="modal-body"></div>
+                <div class="modal-footer">
+                  <button type="button" class="btn btn-primary" data-dismiss="modal" title="Close dialog">OK</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

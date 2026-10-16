@@ -26,6 +26,47 @@ describe("templated email compose", () => {
     delete (window as Window & { TemplatedEmailComposeRegistry?: unknown }).TemplatedEmailComposeRegistry;
   });
 
+  it("reports outcomes in its own notice modal instead of a browser alert", async () => {
+    document.body.innerHTML = `
+      <div class="templated-email-compose" data-templated-email-compose>
+        <select name="email_template_id">
+          <option value="">(none)</option>
+          <option value="7">Election template</option>
+        </select>
+        <input name="subject" value="">
+        <textarea name="html_content"></textarea>
+        <textarea name="text_content"></textarea>
+        <div data-compose-modal="notice">
+          <div class="modal"><h5 class="modal-title"></h5><div class="modal-body"></div></div>
+        </div>
+      </div>
+    `;
+    const shown: string[] = [];
+    vi.stubGlobal("jQuery", Object.assign(
+      (target: Element) => ({ modal: (action: string) => { if (action === "show") shown.push(target.textContent || ""); } }),
+      { fn: { modal: vi.fn() } },
+    ));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
+    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
+    loadTemplatedEmailComposeScript();
+    const registry = (window as Window & { TemplatedEmailComposeRegistry?: { instances: Array<{ notify: (title: string, message: string) => void }> } }).TemplatedEmailComposeRegistry!;
+
+    registry.instances[0].notify("Template created", "Created it.");
+    expect(document.querySelector(".modal-title")?.textContent).toBe("Template created");
+    expect(document.querySelector(".modal-body")?.textContent).toBe("Created it.");
+    expect(shown).toHaveLength(1);
+
+    const select = document.querySelector<HTMLSelectElement>('select[name="email_template_id"]')!;
+    select.value = "7";
+    select.dispatchEvent(new Event("change"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(document.querySelector(".modal-title")?.textContent).toBe("Template not loaded");
+    expect(document.querySelector(".modal-body")?.textContent).toBe("The template could not be loaded. Please try again.");
+    expect(shown).toHaveLength(2);
+    expect(alert).not.toHaveBeenCalled();
+  });
+
   it("keeps Save and Restore disabled, saying why, until a template is loaded", async () => {
     document.body.innerHTML = `
       <div class="templated-email-compose" data-templated-email-compose>

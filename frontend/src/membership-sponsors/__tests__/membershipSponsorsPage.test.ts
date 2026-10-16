@@ -108,6 +108,13 @@ describe("MembershipSponsorsPage", () => {
     expect(String(lastCall?.[2])).toContain("q=new");
 
     expect(wrapper.find('[data-export-copy]').exists()).toBe(true);
+    // Copy still works where the Clipboard API is unavailable (non-HTTPS origins).
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+    await wrapper.get("[data-export-copy]").trigger("click");
+    await flushPromises();
+    expect(execCommand).toHaveBeenCalledWith("copy");
     expect(wrapper.find('[data-export-csv]').exists()).toBe(true);
     expect(wrapper.find('[data-export-excel]').exists()).toBe(true);
     expect(wrapper.find('[data-export-pdf]').exists()).toBe(true);

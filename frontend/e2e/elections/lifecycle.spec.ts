@@ -85,6 +85,33 @@ test("elections-edit-manage-candidates-exclusion-groups-and-email opens the draf
   await expect(page.locator('input[name="groups-0-name"]')).toHaveValue("Lifecycle Group");
 });
 
+// As an election operator, I am told in a modal, not a browser alert, when I save the email as a new template.
+test("elections-edit-save-as-template confirms the new template in a modal", async ({ page }) => {
+  const manager = resetState.actors.manager;
+  page.on("dialog", (dialog) => {
+    throw new Error(`Unexpected browser dialog: ${dialog.message()}`);
+  });
+
+  await loginViaForm(page, manager.username, manager.password);
+  await page.goto(resetState.routes.edit_draft);
+  await expect(page.getByRole("heading", { name: "Election edit", exact: true })).toBeVisible();
+
+  await page.locator('[data-compose-action="save-as"]').click();
+  const saveAsModal = page.getByRole("dialog").filter({ hasText: "Save email template as…" }).first();
+  // Bootstrap ignores clicks until the opening animation ends, after which the name gets focus.
+  await expect(saveAsModal.locator('input[name="name"]')).toBeFocused();
+  const templateName = `lifecycle-save-as-${Date.now()}`;
+  await saveAsModal.locator('input[name="name"]').fill(templateName);
+  await saveAsModal.getByRole("button", { name: "Create", exact: true }).click();
+
+  const notice = page.getByRole("dialog").filter({ hasText: "Template created" });
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText(`Created "${templateName}" from the current subject and contents.`);
+  await notice.getByRole("button", { name: "OK", exact: true }).click();
+  await expect(notice).not.toBeVisible();
+  await expect(page.locator('select[name="email_template_id"]')).toHaveValue(/\d+/);
+});
+
 // As an election operator, I can start a draft election through an explicit confirmation modal.
 test("elections-edit-draft-save-and-start opens the draft start confirmation modal without mutating the shared fixture", async ({ page }) => {
   const manager = resetState.actors.manager;
@@ -307,7 +334,8 @@ test("elections-email-open-reminder sends a credential reminder to one user and 
   const modal = controls.locator(".modal.d-block");
   await expect(modal).toBeVisible();
   await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send credential reminder to");
-  await expect(modal.locator(".modal-content > .modal-body")).toContainText("unique voting credential and link");
+  // The dialog's own body; the compose card inside it carries its own (hidden) modals.
+  await expect(modal.locator("> .modal-dialog > .modal-content > .modal-body")).toContainText("unique voting credential and link");
 
   // Intercept the send API and click confirm.
   const singleSendPromise = page.waitForResponse((response) =>
@@ -406,7 +434,7 @@ test("elections-email-closed-send sends an email to one user and to all eligible
   const modal = controls.locator(".modal.d-block");
   await expect(modal).toBeVisible();
   await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send email to");
-  await expect(modal.locator(".modal-content > .modal-body")).not.toContainText("unique voting credential");
+  await expect(modal.locator("> .modal-dialog > .modal-content > .modal-body")).not.toContainText("unique voting credential");
 
   const singleSendPromise = page.waitForResponse((response) =>
     response.url().includes(`/api/v1/elections/${closedElection.id}/send-mail-credentials`)
@@ -468,7 +496,7 @@ test("elections-email-tallied-send sends an email to one user and to all eligibl
   const modal = controls.locator(".modal.d-block");
   await expect(modal).toBeVisible();
   await expect(modal.locator("> .modal-dialog .modal-title").first()).toContainText("Send email to");
-  await expect(modal.locator(".modal-content > .modal-body")).not.toContainText("unique voting credential");
+  await expect(modal.locator("> .modal-dialog > .modal-content > .modal-body")).not.toContainText("unique voting credential");
 
   const singleSendPromise = page.waitForResponse((response) =>
     response.url().includes(`/api/v1/elections/${talliedElection.id}/send-mail-credentials`)

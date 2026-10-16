@@ -13,11 +13,13 @@ import type { ComposeTemplateOption } from "./types";
 
 // -- low-level API (also usable from non-Vue code like controller.ts) --
 
-interface ComposeInstance {
+export interface ComposeInstance {
   getTemplateId?: () => string;
   getValues?: () => Record<string, string>;
   getCsrfToken?: () => string;
   container?: HTMLElement;
+  // Shows the compose's notice modal (templated_email.js); the project avoids browser alerts.
+  notify?: (title: string, message: string) => void;
 }
 
 /**
@@ -26,6 +28,7 @@ interface ComposeInstance {
  * Returns `true` on success.
  */
 export async function saveComposeTemplate(
+  compose: ComposeInstance | null | undefined,
   templateId: string,
   values: { subject: string; html_content: string; text_content: string },
   csrfToken?: string,
@@ -51,10 +54,10 @@ export async function saveComposeTemplate(
     if (!response.ok || payload.ok !== true) {
       throw new Error("save failed");
     }
-    window.alert("Template saved.");
+    compose?.notify?.("Template saved", "The selected template now has the current subject and contents.");
     return true;
   } catch {
-    window.alert("Failed to save template.");
+    compose?.notify?.("Template not saved", "The template could not be saved. Please try again.");
     return false;
   }
 }
@@ -71,6 +74,7 @@ export interface SaveAsResult {
  * Returns the new template id/name on success, or `{ ok: false }`.
  */
 export async function saveAsComposeTemplate(
+  compose: ComposeInstance | null | undefined,
   name: string,
   values: { subject: string; html_content: string; text_content: string },
   csrfToken?: string,
@@ -96,9 +100,11 @@ export async function saveAsComposeTemplate(
     if (!response.ok || payload.ok !== true) {
       throw new Error("save as failed");
     }
-    return { ok: true, id: payload.id, name: payload.name ?? trimmedName };
+    const createdName = payload.name ?? trimmedName;
+    compose?.notify?.("Template created", `Created "${createdName}" from the current subject and contents.`);
+    return { ok: true, id: payload.id, name: createdName };
   } catch {
-    window.alert("Failed to create template.");
+    compose?.notify?.("Template not created", "The template could not be created. Please try again.");
     return { ok: false };
   }
 }
@@ -170,7 +176,7 @@ export function useComposeSaveHandlers(options: UseComposeSaveOptions): void {
     const values = extractComposeValues(instance);
     const token = extractCsrfToken(instance);
 
-    const ok = await saveComposeTemplate(templateId, values, token);
+    const ok = await saveComposeTemplate(instance, templateId, values, token);
     if (ok) {
       options.onAfterSave?.();
     }
@@ -187,7 +193,7 @@ export function useComposeSaveHandlers(options: UseComposeSaveOptions): void {
     const values = extractComposeValues(instance);
     const token = extractCsrfToken(instance);
 
-    const result = await saveAsComposeTemplate(name, values, token);
+    const result = await saveAsComposeTemplate(instance, name, values, token);
     if (!result.ok || result.id == null) return;
 
     // Update reactive state.
@@ -201,7 +207,6 @@ export function useComposeSaveHandlers(options: UseComposeSaveOptions): void {
     const container = options.containerRef?.value ?? instance?.container;
     addOptionToLiveSelect(container, result.id, result.name ?? name);
 
-    window.alert("Template created.");
     options.onAfterSave?.();
   }
 

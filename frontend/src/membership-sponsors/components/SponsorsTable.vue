@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import { copyToClipboard } from "../../shared/clipboard";
 import TableBase from "../../shared/components/TableBase.vue";
 import { fillUrlTemplate } from "../../shared/urlTemplates";
 import type { SponsorRow } from "../types";
@@ -25,6 +26,7 @@ const emit = defineEmits<{
 }>();
 
 const searchText = ref(props.q);
+const copyError = ref("");
 const hasSearchValue = computed(() => searchText.value.length > 0);
 
 interface ColumnState {
@@ -122,10 +124,7 @@ function download(filename: string, content: string, mimeType: string): void {
 }
 
 async function copyRows(): Promise<void> {
-  const csv = buildCsv();
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(csv);
-  }
+  copyError.value = (await copyToClipboard(buildCsv())) ? "" : "Could not copy to the clipboard. Select the text and copy it manually.";
 }
 
 function exportCsv(): void {
@@ -179,6 +178,7 @@ defineSlots<{
         <button data-export-pdf type="button" class="btn btn-default" title="PDF" @click="exportPdf">PDF</button>
         <button data-export-print type="button" class="btn btn-default" title="Print" @click="printTable">Print</button>
       </div>
+      <span v-if="copyError" class="small text-danger ml-2" role="alert">{{ copyError }}</span>
       <div class="dropdown d-inline-block ml-2">
         <button
           data-colvis-toggle

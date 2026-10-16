@@ -95,10 +95,6 @@ const groupChatLinks = computed(() => (groupInfo.value?.fas_irc_channels || []).
   link: buildChatLink(value, { kind: "channel", config: props.bootstrap.chatConfig }),
 })));
 
-function asMember(row: unknown): GroupMemberItem {
-  return row as GroupMemberItem;
-}
-
 function asLeaderItem(row: unknown): GroupLeaderItem {
   return row as GroupLeaderItem;
 }
@@ -109,10 +105,6 @@ function asLeaderUser(row: unknown): GroupLeaderUserItem {
 
 function asLeaderGroup(row: unknown): GroupLeaderGroupItem {
   return row as GroupLeaderGroupItem;
-}
-
-function asMemberGroup(row: unknown): GroupMemberGroupItem {
-  return row as GroupMemberGroupItem;
 }
 
 function asMemberGridItem(row: unknown): MemberGridItem {

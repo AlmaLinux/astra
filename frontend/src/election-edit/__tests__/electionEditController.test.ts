@@ -120,6 +120,7 @@ describe("initElectionEditController", () => {
       getCsrfToken: vi.fn(() => "token"),
       getTemplateId: vi.fn(() => "7"),
       getTemplateSelectEl: vi.fn(() => null),
+      notify: vi.fn(),
     };
     const schedulePreviewRefresh = vi.fn();
     const fetchMock = vi.fn().mockResolvedValue({
@@ -133,7 +134,7 @@ describe("initElectionEditController", () => {
       getComposeFromEvent: () => compose,
       schedulePreviewRefresh,
     });
-    vi.spyOn(window, "alert").mockImplementation(() => {});
+    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
 
     initElectionEditController();
 
@@ -146,6 +147,34 @@ describe("initElectionEditController", () => {
     expect(fetchMock).toHaveBeenCalled();
     expect(compose.markBaseline).toHaveBeenCalled();
     expect(schedulePreviewRefresh).toHaveBeenCalledWith(compose, 0);
+    // Outcomes go to the compose's own notice modal, never a browser alert.
+    expect(compose.notify).toHaveBeenCalledWith("Template saved", "The selected template now has the current subject and contents.");
+    expect(alert).not.toHaveBeenCalled();
+  });
+
+  it("confirms a new template in the compose notice modal instead of a browser alert", async () => {
+    const compose = {
+      getValues: vi.fn(() => ({ subject: "S", html_content: "<p>H</p>", text_content: "T" })),
+      setRestoreEnabled: vi.fn(),
+      markBaseline: vi.fn(),
+      getCsrfToken: vi.fn(() => "token"),
+      getTemplateId: vi.fn(() => ""),
+      getTemplateSelectEl: vi.fn(() => null),
+      notify: vi.fn(),
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, id: 9, name: "Board reminder" }) }));
+    vi.stubGlobal("TemplatedEmailCompose", compose);
+    vi.stubGlobal("TemplatedEmailComposePreview", { getComposeFromEvent: () => compose, schedulePreviewRefresh: vi.fn() });
+    const alert = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+    initElectionEditController();
+    document.dispatchEvent(new CustomEvent("templated-email-compose:save-as-confirmed", {
+      detail: { instance: compose, name: "Board reminder" },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(compose.notify).toHaveBeenCalledWith("Template created", 'Created "Board reminder" from the current subject and contents.');
+    expect(alert).not.toHaveBeenCalled();
   });
 
   it("does not prompt when compose registers after init and the template id still matches", () => {

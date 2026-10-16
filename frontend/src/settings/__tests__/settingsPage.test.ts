@@ -314,6 +314,22 @@ describe("SettingsPage", () => {
     expect(wrapper.text()).toContain("Cancel deletion request");
   });
 
+  it("explains the OTP token fields the way the original forms did", () => {
+    const wrapper = mount(SettingsPage, {
+      props: {
+        bootstrap: {
+          ...bootstrap,
+          initialPayload: { ...initialPayload, activeTab: "security", tabs: ["profile", "emails", "keys", "security", "privacy", "membership"] },
+        },
+      },
+    });
+
+    const helpFor = (inputName: string) => wrapper.get(`input[name="${inputName}"]`).element.parentElement?.querySelector(".form-text")?.textContent?.trim();
+    expect(helpFor("add-description")).toBe("Optional: helps you identify this token.");
+    expect(helpFor("add-password")).toBe("Please reauthenticate so we know it is you.");
+    expect(helpFor("confirm-code")).toBe("Generate a code in your authenticator app and enter it here.");
+  });
+
   it("explains why an already-signed agreement cannot be signed again", () => {
     const wrapper = mount(SettingsPage, {
       props: {

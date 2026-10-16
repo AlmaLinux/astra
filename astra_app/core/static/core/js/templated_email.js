@@ -545,7 +545,7 @@
         setRestoreEnabled(true);
         dispatch('templated-email-compose:template-loaded', { instance: api, id: templateId, payload: payload });
       } catch (_e) {
-        try { window.alert('Failed to load template.'); } catch (__e) { /* noop */ }
+        notify('Template not loaded', 'The template could not be loaded. Please try again.');
       }
     }
 
@@ -569,6 +569,23 @@
       if (jq && jq.fn && typeof jq.fn.modal === 'function') {
         jq(modalEl).modal('hide');
       }
+    }
+
+    // Reports an outcome in the compose's own notice modal rather than a browser alert.
+    function notify(title, message) {
+      var modalEl = getModalEl('notice');
+      if (!modalEl) return;
+      modalEl.querySelector('.modal-title').textContent = title;
+      modalEl.querySelector('.modal-body').textContent = message;
+
+      // A save dialog may still be closing; Bootstrap mishandles two modals in transition.
+      var closing = container.querySelector('[data-compose-modal]:not([data-compose-modal="notice"]) .modal.show');
+      var jq = window.jQuery;
+      if (closing && jq) {
+        jq(closing).one('hidden.bs.modal', function () { showModal(modalEl); });
+        return;
+      }
+      showModal(modalEl);
     }
 
     function bindModalConfirmation(modalEl, handler) {
@@ -604,34 +621,17 @@
         saveAsBtn.addEventListener('click', function (e) {
           e.preventDefault();
 
+          // Every compose that offers Save as also renders its modal.
           var saveAsModalEl = getModalEl('save-as');
-          if (saveAsModalEl) {
-            var nameEl = saveAsModalEl.querySelector('input[name="name"]');
-            if (nameEl) nameEl.value = '';
+          if (!saveAsModalEl) return;
+          var nameEl = saveAsModalEl.querySelector('input[name="name"]');
+          if (nameEl) nameEl.value = '';
 
-            if (showModal(saveAsModalEl)) {
-              var jq = window.jQuery;
-              if (jq && jq.fn) {
-                try {
-                  jq(saveAsModalEl).one('shown.bs.modal', function () {
-                    var el = saveAsModalEl.querySelector('input[name="name"]');
-                    if (el && el.focus) el.focus();
-                  });
-                } catch (_e) {
-                  // Ignore.
-                }
-              }
-              return;
-            }
+          var jq = window.jQuery;
+          if (jq && nameEl) {
+            jq(saveAsModalEl).one('shown.bs.modal', function () { nameEl.focus(); });
           }
-
-          var name = '';
-          try {
-            name = String(window.prompt('New template name:') || '').trim();
-          } catch (_e) {
-            name = '';
-          }
-          if (name) dispatch('templated-email-compose:save-as-confirmed', { instance: api, name: name });
+          showModal(saveAsModalEl);
         });
       }
 
@@ -667,6 +667,7 @@
       getTemplateSelectEl: getTemplateSelectEl,
       getTemplateId: getTemplateId,
       setTemplateId: setTemplateId,
+      notify: notify,
     };
 
     setBaselineToCurrent();

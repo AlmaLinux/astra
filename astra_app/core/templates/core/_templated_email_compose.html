@@ -160,4 +160,9 @@
   </div>
 {% endif %}
 
+{# Notice modal: templated_email.js fills the title and body to report outcomes. #}
+<div data-compose-modal="notice">
+  {% include 'core/_modal_base.html' with title='' dialog_style='text-align: left;' render_default_footer=True cancel_label='OK' cancel_button_class='btn-primary' cancel_title='Close dialog' %}
+</div>
+
 </div>
