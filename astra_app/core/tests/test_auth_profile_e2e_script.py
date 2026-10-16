@@ -216,7 +216,8 @@ class AuthProfileE2EScriptTests(unittest.TestCase):
             "e2e/shell-routes.spec.ts "
             "e2e/reports-admin.spec.ts "
             "e2e/membership/self-service-entry.spec.ts "
-            "e2e/membership/self-service-detail.spec.ts"
+            "e2e/membership/self-service-detail.spec.ts "
+            "e2e/membership/minutes-generator.spec.ts"
         )
         if playwright_args:
             command = f"{command} {' '.join(playwright_args)}"

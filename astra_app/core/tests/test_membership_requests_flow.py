@@ -665,7 +665,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(
             resp,
-            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}?membership_type=individual"',
         )
         payload = api_resp.json()
         option_values = [
@@ -734,7 +734,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(
             resp,
-            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}?membership_type=individual"',
         )
         payload = api_resp.json()
         option_values = [

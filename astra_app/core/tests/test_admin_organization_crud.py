@@ -233,7 +233,7 @@ class AdminOrganizationCRUDTests(TestCase):
         old_rep = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": ["almalinux-gold"]})
         new_rep = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": []})
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "alice":
                 return admin_user
             if username == "bob":
@@ -325,7 +325,7 @@ class AdminOrganizationCRUDTests(TestCase):
         old_rep = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": ["almalinux-gold"]})
         new_rep = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": []})
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "alice":
                 return admin_user
             if username == "bob":
@@ -430,7 +430,7 @@ class AdminOrganizationCRUDTests(TestCase):
         old_rep = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": ["almalinux-gold"]})
         new_rep = FreeIPAUser("carol", {"uid": ["carol"], "memberof_group": []})
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "alice":
                 return admin_user
             if username == "bob":

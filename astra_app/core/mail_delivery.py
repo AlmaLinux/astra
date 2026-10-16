@@ -13,6 +13,7 @@ from itertools import batched
 
 from post_office.models import Attachment, Email
 
+from core.logging_extras import current_exception_log_fields
 from core.templated_email import bulk_save_emails
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ def deliver_in_batches[T](
             try:
                 prepared = prepare(item)
             except Exception:
-                logger.exception("mail delivery: preparing an email failed")
+                logger.exception("mail delivery: preparing an email failed", extra=current_exception_log_fields())
                 failures += 1
                 continue
             if prepared is not None:

@@ -1,4 +1,5 @@
 import datetime
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -59,7 +60,7 @@ class ElectionsPhase10ExtendEndSSOTTests(TestCase):
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get") as get_user,
-            patch("core.views_elections.edit._extend_election_end_from_post") as edit_helper,
+            patch("core.views_elections.lifecycle._extend_election_end_from_post") as api_helper,
         ):
             get_user.return_value = FreeIPAUser(
                 "admin",
@@ -70,11 +71,14 @@ class ElectionsPhase10ExtendEndSSOTTests(TestCase):
                     "memberofindirect_group": [],
                 },
             )
-            edit_helper.return_value = SimpleNamespace(success=True, errors=())
+            api_helper.return_value = SimpleNamespace(success=True, errors=())
             response = self.client.post(
-                reverse("election-edit", args=[election.id]),
-                data={"action": "extend_end", "end_datetime": (now + datetime.timedelta(days=3)).strftime("%Y-%m-%dT%H:%M")},
+                reverse("api-election-extend-end", args=[election.id]),
+                data=json.dumps(
+                    {"confirm": election.name, "end_datetime": (now + datetime.timedelta(days=3)).strftime("%Y-%m-%dT%H:%M")}
+                ),
+                content_type="application/json",
             )
 
-        self.assertEqual(response.status_code, 302)
-        edit_helper.assert_called_once()
+        self.assertEqual(response.status_code, 200)
+        api_helper.assert_called_once()

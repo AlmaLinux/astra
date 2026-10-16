@@ -12,7 +12,7 @@ class FormFieldDryPhase4TemplateTests(SimpleTestCase):
         expectations: dict[str, list[str]] = {
             "election_edit.html": [
                 "{% include 'core/_form_field.html' with field=details_form.name %}",
-                "{% include 'core/_form_field.html' with field=details_form.start_datetime wrapper_class='col-md-6' %}",
+                "{% include 'core/_form_field_inner.html' with field=details_form.start_datetime %}",
                 "{% include 'core/_form_field_inner.html' with field=f.freeipa_username show_label=0 show_help=0 %}",
                 "{% include 'core/_form_field_inner.html' with field=g.candidate_usernames show_label=0 show_help=0 %}",
             ],

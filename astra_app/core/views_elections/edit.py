@@ -31,7 +31,6 @@ from core.templated_email import placeholderize_empty_values, render_templated_e
 from core.user_labels import user_choice_from_freeipa
 from core.views_elections._helpers import (
     _election_email_preview_context,
-    _extend_election_end_from_post,
     _get_active_election,
 )
 
@@ -252,7 +251,6 @@ def election_edit(request, election_id: int):
     if election is not None and election.pk is not None:
         candidate_queryset = Candidate.objects.filter(election=election).order_by("id")
         group_queryset = ExclusionGroup.objects.filter(election=election).order_by("name", "id")
-    election_locked = election is not None and election.status != Election.Status.draft
 
     templates = list(EmailTemplate.objects.all().order_by("name"))
     default_template = EmailTemplate.objects.filter(name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME).first()
@@ -298,9 +296,6 @@ def election_edit(request, election_id: int):
             if election is None:
                 messages.error(request, "Save the draft first.")
                 return redirect("elections")
-            if election.status != Election.Status.draft:
-                messages.error(request, "Only draft elections can be deleted.")
-                return redirect("election-edit", election_id=election.id)
 
             election.delete()
             messages.success(request, "Draft deleted.")
@@ -317,27 +312,12 @@ def election_edit(request, election_id: int):
             or ""
         ).strip()
 
-        if election_locked:
-            for field_name in (
-                "name", "description", "url", "start_datetime", "number_of_seats", "quorum",
-            ):
-                details_form.fields[field_name].disabled = True
-            if election.status != Election.Status.open:
-                details_form.fields["end_datetime"].disabled = True
-
         if action == "save_draft":
             candidate_formset = CandidateWizardFormSet(
                 request.POST, queryset=candidate_queryset, prefix="candidates",
             )
             group_formset = ExclusionGroupWizardFormSet(
                 request.POST, queryset=group_queryset, prefix="groups",
-            )
-        elif action == "extend_end":
-            candidate_formset = CandidateWizardFormSet(
-                queryset=candidate_queryset, prefix="candidates",
-            )
-            group_formset = ExclusionGroupWizardFormSet(
-                queryset=group_queryset, prefix="groups",
             )
         else:
             candidate_formset = CandidateWizardFormSet(queryset=Candidate.objects.none(), prefix="candidates")
@@ -349,12 +329,6 @@ def election_edit(request, election_id: int):
         if action == "save_draft":
             _configure_candidate_choices(request, election, candidate_formset)
             _configure_group_choices_for_formset(request, election, candidate_formset, group_formset)
-
-        if election_locked:
-            for formset in (candidate_formset, group_formset):
-                for form in formset.forms:
-                    for field in form.fields.values():
-                        field.disabled = True
 
         candidate_usernames: list[str] = []
         nominator_usernames: list[str] = []
@@ -374,22 +348,6 @@ def election_edit(request, election_id: int):
                         candidate_usernames.append(username)
                     if nominator:
                         nominator_usernames.append(nominator)
-
-        if action == "save_draft" and election is not None and election.status != Election.Status.draft:
-            messages.error(request, "This election is no longer in draft; draft changes are locked.")
-            formsets_ok = False
-
-        if action == "extend_end":
-            if election is None:
-                messages.error(request, "Save the draft first.")
-            else:
-                result = _extend_election_end_from_post(request=request, election=election)
-                if result.success:
-                    messages.success(request, "Election end date extended.")
-                    return redirect("election-edit", election_id=election.id)
-                for msg in result.errors:
-                    details_form.add_error("end_datetime", msg)
-                    messages.error(request, msg)
 
         email_save_mode = str(request.POST.get("email_save_mode") or "").strip()
         if email_save_mode == "keep_existing":
@@ -507,13 +465,6 @@ def election_edit(request, election_id: int):
         messages.error(request, "Please correct the errors below.")
     else:
         details_form = ElectionDetailsForm(instance=election)
-        if election_locked:
-            for field_name in (
-                "name", "description", "url", "start_datetime", "number_of_seats", "quorum",
-            ):
-                details_form.fields[field_name].disabled = True
-            if election.status != Election.Status.open:
-                details_form.fields["end_datetime"].disabled = True
 
         selected_template = default_template
         if election is not None and election.voting_email_template_id is not None:
@@ -550,12 +501,6 @@ def election_edit(request, election_id: int):
             queryset=group_queryset, prefix="groups",
         )
 
-        if election_locked:
-            for formset in (candidate_formset, group_formset):
-                for form in formset.forms:
-                    for field in form.fields.values():
-                        field.disabled = True
-
         _configure_candidate_choices(request, election, candidate_formset)
         _configure_group_choices_for_formset(request, election, candidate_formset, group_formset)
 
@@ -580,7 +525,9 @@ def election_edit(request, election_id: int):
         "core/election_edit.html",
         {
             "is_create": is_create,
-            "election": election,
+            # A failed first save leaves an unsaved instance here; the template's
+            # start/delete controls need a persisted election (they reverse URLs by id).
+            "election": election if election is not None and election.pk is not None else None,
             "details_form": details_form,
             "email_form": email_form,
             "candidate_formset": candidate_formset,

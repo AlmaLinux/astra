@@ -55,7 +55,6 @@ describe("initElectionEditController", () => {
         <input type="hidden" id="election-edit-action" value="save_draft" />
         <input type="hidden" id="election-edit-email-save-mode" value="" />
         <input type="hidden" id="election-edit-has-election" value="1" />
-        <input type="hidden" id="election-edit-election-status" value="draft" />
         <input type="hidden" id="election-edit-original-email-template-id" value="1" />
       </form>
       <button type="button" id="edit-keep-existing-email-btn">Keep</button>
@@ -183,7 +182,6 @@ describe("initElectionEditController", () => {
         <input type="hidden" id="election-edit-action" value="save_draft" />
         <input type="hidden" id="election-edit-email-save-mode" value="" />
         <input type="hidden" id="election-edit-has-election" value="1" />
-        <input type="hidden" id="election-edit-election-status" value="draft" />
         <input type="hidden" id="election-edit-original-email-template-id" value="17" />
       </form>
       <button type="button" id="edit-keep-existing-email-btn">Keep</button>

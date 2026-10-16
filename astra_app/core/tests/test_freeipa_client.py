@@ -1,13 +1,15 @@
 import threading
 from unittest.mock import Mock, patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from core.freeipa.client import (
     _annotate_freeipa_response_span,
     _FreeIPATimeoutSession,
+    _get_freeipa_service_client_cached,
     clear_freeipa_service_client_cache,
 )
+from core.freeipa.e2e_registry import E2EFreeIPAClient
 
 
 class FreeIPAClientTests(SimpleTestCase):
@@ -87,3 +89,14 @@ class FreeIPAClientTests(SimpleTestCase):
             reset_freeipa_client()
 
             self.assertFalse(hasattr(patched_service_client_local, "client"))
+
+    def test_toggling_fake_freeipa_mode_drops_the_cached_service_client(self) -> None:
+        with patch("core.freeipa.client._service_client_local", new=threading.local()) as service_client_local:
+            real_client = Mock()
+            service_client_local.client = real_client
+
+            with override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True):
+                fake_client = _get_freeipa_service_client_cached()
+                self.assertIsInstance(fake_client, E2EFreeIPAClient)
+
+            self.assertFalse(hasattr(service_client_local, "client"))

@@ -177,8 +177,8 @@ class ElectionQuorumAuditTests(TestCase):
 
             new_end = now + datetime.timedelta(days=2)
             resp = self.client.post(
-                reverse("election-edit", args=[election.id]),
-                {"action": "extend_end", "end_datetime": new_end.strftime("%Y-%m-%dT%H:%M")},
+                reverse("election-extend-end", args=[election.id]),
+                {"confirm": election.name, "end_datetime": new_end.strftime("%Y-%m-%dT%H:%M")},
             )
         self.assertEqual(resp.status_code, 302)
 

@@ -270,7 +270,7 @@ class OrganizationClaimFlowTests(TestCase):
         organization.refresh_from_db()
         self.assertEqual(organization.representative, "carol")
 
-    def test_claim_page_displays_em_dash_for_empty_contact_email(self) -> None:
+    def test_claim_page_displays_not_provided_for_empty_contact_email(self) -> None:
         organization = Organization.objects.create(name="No Contact Org")
         token = make_organization_claim_token(organization)
 
@@ -286,7 +286,7 @@ class OrganizationClaimFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Contact email")
-        self.assertContains(response, "<dd class=\"col-sm-8\">\n                    —\n                </dd>", html=True)
+        self.assertContains(response, '<dd class="col-sm-8">Not provided.</dd>', html=True)
 
     def test_claim_requires_country_and_redirects_to_profile_when_missing(self) -> None:
         organization = Organization.objects.create(name="Country Gate Org")

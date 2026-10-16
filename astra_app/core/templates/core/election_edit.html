@@ -36,7 +36,6 @@
     <input type="hidden" name="action" id="election-edit-action" value="" />
     <input type="hidden" name="email_save_mode" id="election-edit-email-save-mode" value="" />
     <input type="hidden" id="election-edit-has-election" value="{% if election %}1{% else %}0{% endif %}" />
-    <input type="hidden" id="election-edit-election-status" value="{% if election %}{{ election.status }}{% else %}draft{% endif %}" />
     <input type="hidden" id="election-edit-original-email-template-id" value="{{ original_email_template_id }}" />
 
     <div class="row">
@@ -44,9 +43,7 @@
         <div class="card card-outline card-primary">
           <div class="card-header d-flex align-items-center">
             <h3 class="card-title mb-0">Election details</h3>
-            {% if not election or election.status == "draft" %}
-              <span class="badge badge-warning ml-auto">draft</span>
-            {% endif %}
+            <span class="badge badge-warning ml-auto">draft</span>
           </div>
           <div class="card-body">
             {% include 'core/_form_field.html' with field=details_form.name %}
@@ -105,30 +102,24 @@
                 Save the draft to enable starting the election.
               </div>
             {% else %}
-              {% if election.status == 'draft' %}
-                <button
-                  type="button"
-                  class="btn btn-outline-danger btn-block"
-                  data-toggle="modal"
-                  data-target="#delete-draft-election-modal"
-                  title="Delete this draft election"
-                >
-                  Delete Draft
-                </button>
-              {% endif %}
+              <button
+                type="button"
+                class="btn btn-outline-danger btn-block"
+                data-toggle="modal"
+                data-target="#delete-draft-election-modal"
+                title="Delete this draft election"
+              >
+                Delete Draft
+              </button>
 
-              {% if election.status == 'draft' %}
-                <div
-                  data-election-start-automation-root
-                  data-election-start-api-url="{% url 'api-election-start' election.id %}"
-                  data-election-start-preview-api-url="{% url 'api-election-start-preview' election.id %}"
-                  data-election-start-progress-api-url="{% url 'api-election-mail-progress' election.id %}?kind=start"
-                  data-election-auto-start-api-url="{% url 'api-election-auto-start' election.id %}"
-                  data-election-auto-start-enabled="{% if election.auto_start_enabled %}true{% else %}false{% endif %}"
-                ></div>
-              {% else %}
-                <button type="button" class="btn btn-success btn-block" disabled title="Open the election and send credentials">Start Election</button>
-              {% endif %}
+              <div
+                data-election-start-automation-root
+                data-election-start-api-url="{% url 'api-election-start' election.id %}"
+                data-election-start-preview-api-url="{% url 'api-election-start-preview' election.id %}"
+                data-election-start-progress-api-url="{% url 'api-election-mail-progress' election.id %}?kind=start"
+                data-election-auto-start-api-url="{% url 'api-election-auto-start' election.id %}"
+                data-election-auto-start-enabled="{% if election.auto_start_enabled %}true{% else %}false{% endif %}"
+              ></div>
 
               <div class="text-muted small mt-2">
                 Starting an election sends credential emails to all eligible voters and locks settings.
@@ -287,7 +278,7 @@
     {% include "core/_modal_base.html" with modal_id="edit-template-changed-modal" title="Email template changed" body="You changed the email template selection. Do you want to save the new template + contents to this election, or keep the previously saved email configuration?" render_default_footer=1 cancel_title="Close dialog without saving" secondary_button_label="Keep previously saved email" secondary_button_id="edit-keep-existing-email-btn" secondary_button_title="Keep the existing email content" submit_label="Save template + contents" submit_button_id="edit-save-email-btn" submit_button_title="Save the new template and contents" %}
   </form>
 
-  {% if election and election.status == 'draft' %}
+  {% if election %}
     {% include "core/_modal_confirm.html" with modal_id="delete-draft-election-modal" title="Delete draft election?" body="Delete this draft election?" action_url="" submit_label="Delete draft" submit_class="btn-danger" form_fields_template="core/_modal_confirm_fields.html" confirm_action="delete_draft" %}
   {% endif %}
 

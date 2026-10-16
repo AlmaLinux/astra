@@ -642,8 +642,7 @@ export function initElectionEditController(): void {
     }
 
     const hasElection = String((byId("election-edit-has-election") as HTMLInputElement | null)?.value || "") === "1";
-    const status = String((byId("election-edit-election-status") as HTMLInputElement | null)?.value || "");
-    if (!hasElection || status !== "draft") {
+    if (!hasElection) {
       return;
     }
 

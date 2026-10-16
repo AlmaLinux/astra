@@ -69,7 +69,9 @@ class MembershipHelperTests(TestCase):
             {"target_organization": org},
         )
 
-    def test_compute_membership_requestability_context_blocks_exact_held_types_not_categories(self) -> None:
+    def test_compute_membership_requestability_context_blocks_held_types_and_hides_request_any_for_held_categories(
+        self,
+    ) -> None:
         MembershipType.objects.update(enabled=False)
 
         MembershipType.objects.update_or_create(
@@ -136,7 +138,9 @@ class MembershipHelperTests(TestCase):
             eligibility=SimpleNamespace(**eligibility),
             held_category_ids={"sponsorship", "mirror"},
         )
-        self.assertTrue(context.membership_can_request_any)
+        # Other tiers stay requestable (the tier-change CTA uses them), but every one sits in a
+        # held category, so there is nothing for the generic "Request membership" button to offer.
+        self.assertFalse(context.membership_can_request_any)
         self.assertEqual(
             context.requestable_codes_by_category,
             {

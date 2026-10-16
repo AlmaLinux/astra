@@ -4,6 +4,8 @@ from typing import cast
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
+from django.core.signals import setting_changed
+from django.dispatch import receiver
 from python_freeipa import ClientMeta, exceptions
 
 from core.freeipa.utils import (
@@ -223,6 +225,21 @@ def _write_e2e_agreement_registry(registry: dict[str, dict[str, object]]) -> Non
 
     _E2E_AGREEMENT_REGISTRY = cast(dict[str, dict[str, object]], deepcopy(registry))
     cache.set(_E2E_AGREEMENT_REGISTRY_CACHE_KEY, deepcopy(registry), timeout=None)
+
+
+@receiver(setting_changed)
+def _drop_in_process_registries_on_fake_freeipa_toggle(*, setting: str, **kwargs: object) -> None:
+    # The cache is the shared copy; the module globals only shadow it for this
+    # process. Re-read it whenever override_settings flips the mode, so state left
+    # by an earlier test (whose cache rows were rolled back) does not leak in.
+    if setting not in {"ASTRA_E2E_MODE", "ASTRA_E2E_FAKE_FREEIPA_ENABLED"}:
+        return
+
+    global _E2E_USER_REGISTRY, _E2E_STAGEUSER_REGISTRY, _E2E_GROUP_REGISTRY, _E2E_AGREEMENT_REGISTRY
+    _E2E_USER_REGISTRY = None
+    _E2E_STAGEUSER_REGISTRY = None
+    _E2E_GROUP_REGISTRY = None
+    _E2E_AGREEMENT_REGISTRY = None
 
 
 def reset_e2e_fake_freeipa_state() -> None:

@@ -355,8 +355,12 @@ class AdminMembershipCRUDTests(TestCase):
             },
         )
 
-        original_start = datetime.datetime(2025, 1, 1, 0, 0, tzinfo=datetime.UTC)
-        original_end = datetime.datetime(2026, 7, 1, 23, 59, 59, tzinfo=datetime.UTC)
+        # Relative to today: an already-expired membership starts a new term on any change.
+        today = datetime.datetime.now(datetime.UTC).date()
+        original_start = datetime.datetime.combine(today - datetime.timedelta(days=400), datetime.time.min, tzinfo=datetime.UTC)
+        original_end = datetime.datetime.combine(today + datetime.timedelta(days=200), datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+        new_start = original_start + datetime.timedelta(days=35)
+        new_end = original_end - datetime.timedelta(days=11)
         approved_log = MembershipLog.create_for_approval_at(
             actor_username="reviewer",
             membership_type=membership_type,
@@ -378,8 +382,8 @@ class AdminMembershipCRUDTests(TestCase):
                     "target_username": "bob",
                     "target_organization": "",
                     "membership_type": "individual-basic",
-                    "starts_on": "2025-02-05",
-                    "expires_on": "2026-06-20",
+                    "starts_on": new_start.date().isoformat(),
+                    "expires_on": new_end.date().isoformat(),
                     "_save": "Save",
                 },
                 follow=False,
@@ -388,18 +392,18 @@ class AdminMembershipCRUDTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         membership.refresh_from_db()
-        self.assertEqual(membership.created_at, datetime.datetime(2025, 2, 5, 0, 0, tzinfo=datetime.UTC))
-        self.assertEqual(membership.expires_at, datetime.datetime(2026, 6, 20, 23, 59, 59, tzinfo=datetime.UTC))
+        self.assertEqual(membership.created_at, new_start)
+        self.assertEqual(membership.expires_at, new_end)
 
         approved_log.refresh_from_db()
-        self.assertEqual(approved_log.created_at, datetime.datetime(2025, 2, 5, 0, 0, tzinfo=datetime.UTC))
+        self.assertEqual(approved_log.created_at, new_start)
 
         expiry_log = MembershipLog.objects.filter(
             target_username="bob",
             membership_type=membership_type,
             action=MembershipLog.Action.expiry_changed,
         ).latest("created_at")
-        self.assertEqual(expiry_log.expires_at, datetime.datetime(2026, 6, 20, 23, 59, 59, tzinfo=datetime.UTC))
+        self.assertEqual(expiry_log.expires_at, new_end)
 
         ContentType.objects.clear_cache()
         ContentType.objects.get_for_model(Membership)
@@ -493,8 +497,12 @@ class AdminMembershipCRUDTests(TestCase):
         )
         organization = self._create_organization(name="Date Edit Org")
 
-        original_start = datetime.datetime(2025, 3, 1, 0, 0, tzinfo=datetime.UTC)
-        original_end = datetime.datetime(2026, 9, 30, 23, 59, 59, tzinfo=datetime.UTC)
+        # Relative to today: an already-expired membership starts a new term on any change.
+        today = datetime.datetime.now(datetime.UTC).date()
+        original_start = datetime.datetime.combine(today - datetime.timedelta(days=400), datetime.time.min, tzinfo=datetime.UTC)
+        original_end = datetime.datetime.combine(today + datetime.timedelta(days=200), datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+        new_start = original_start + datetime.timedelta(days=40)
+        new_end = original_end + datetime.timedelta(days=20)
         approved_log = MembershipLog.create_for_approval_at(
             actor_username="reviewer",
             membership_type=membership_type,
@@ -517,8 +525,8 @@ class AdminMembershipCRUDTests(TestCase):
                     "target_username": "",
                     "target_organization": str(organization.pk),
                     "membership_type": membership_type.pk,
-                    "starts_on": "2025-04-10",
-                    "expires_on": "2026-10-20",
+                    "starts_on": new_start.date().isoformat(),
+                    "expires_on": new_end.date().isoformat(),
                     "_save": "Save",
                 },
                 follow=False,
@@ -527,19 +535,19 @@ class AdminMembershipCRUDTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         membership = Membership.objects.get(target_organization=organization, membership_type=membership_type)
-        self.assertEqual(membership.created_at, datetime.datetime(2025, 4, 10, 0, 0, tzinfo=datetime.UTC))
-        self.assertEqual(membership.expires_at, datetime.datetime(2026, 10, 20, 23, 59, 59, tzinfo=datetime.UTC))
+        self.assertEqual(membership.created_at, new_start)
+        self.assertEqual(membership.expires_at, new_end)
         self.assertFalse(Membership.objects.filter(pk=original_membership_pk).exists())
 
         approved_log.refresh_from_db()
-        self.assertEqual(approved_log.created_at, datetime.datetime(2025, 4, 10, 0, 0, tzinfo=datetime.UTC))
+        self.assertEqual(approved_log.created_at, new_start)
 
         expiry_log = MembershipLog.objects.filter(
             target_organization=organization,
             membership_type=membership_type,
             action=MembershipLog.Action.expiry_changed,
         ).latest("created_at")
-        self.assertEqual(expiry_log.expires_at, datetime.datetime(2026, 10, 20, 23, 59, 59, tzinfo=datetime.UTC))
+        self.assertEqual(expiry_log.expires_at, new_end)
 
         ContentType.objects.clear_cache()
         ContentType.objects.get_for_model(Membership)

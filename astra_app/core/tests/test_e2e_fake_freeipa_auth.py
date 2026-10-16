@@ -1,6 +1,7 @@
 from unittest.mock import Mock, patch
 
 from django.contrib.sessions.middleware import SessionMiddleware
+from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, override_settings
@@ -176,6 +177,14 @@ class E2EFakeFreeIPAAuthTests(TestCase):
 
         self.assertEqual(refreshed_before_reset.get("c"), ["US"])
         self.assertEqual(refreshed_after_reset.get("c"), ["US"])
+
+    def test_toggling_fake_freeipa_mode_reloads_registries_from_the_cache(self) -> None:
+        FreeIPAFASAgreement.create("Leaked agreement", description="From an earlier test")
+        # A TestCase rollback reverts the DB-backed cache but not the in-process copies.
+        cache.delete(e2e_registry._E2E_AGREEMENT_REGISTRY_CACHE_KEY)
+
+        with override_settings(ASTRA_E2E_FAKE_FREEIPA_ENABLED=True):
+            self.assertEqual(FreeIPAFASAgreement.all(), [])
 
     def test_reset_e2e_fake_freeipa_state_restores_mutable_registries_to_baseline(self) -> None:
         client = get_e2e_service_client()

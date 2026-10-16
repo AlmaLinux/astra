@@ -9,6 +9,8 @@ function makeGroupDetailRoot(): HTMLDivElement {
   root.dataset.groupDetailLeadersApiUrl = "/api/v1/groups/infra/leaders";
   root.dataset.groupDetailMembersApiUrl = "/api/v1/groups/infra/members";
   root.dataset.groupDetailActionUrl = "/api/v1/groups/infra/action";
+  root.dataset.groupDetailUserSearchApiUrl = "/api/v1/groups/infra/user-search";
+  root.dataset.groupDetailGroupSearchApiUrl = "/api/v1/groups/infra/group-search";
   root.dataset.groupDetailChatIrcDefaultServer = "irc.libera.chat";
   root.dataset.groupDetailChatMatrixDefaultServer = "matrix.org";
   root.dataset.groupDetailChatMattermostDefaultServer = "chat.almalinux.org";

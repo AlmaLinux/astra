@@ -19,7 +19,7 @@ test("elections-ballot-verify-closed-public-state shows the recorded-and-locked 
   await page.getByRole("button", { name: "Verify", exact: true }).click();
   await closedResponse;
 
-  await expect(page.getByText("Yes — a ballot with this receipt code is recorded for this election.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Yes: a ballot with this receipt code is recorded for this election.", { exact: true })).toBeVisible();
   await expect(page.getByText("This ballot is recorded and locked and will be included in the upcoming tally.", { exact: true })).toBeVisible();
   await expect(page.locator(`a[href="/elections/${electionId}/public/ballots.json"]`)).toBeVisible();
   await expect(page.locator(`a[href="/elections/${electionId}/audit/"]`)).toBeVisible();

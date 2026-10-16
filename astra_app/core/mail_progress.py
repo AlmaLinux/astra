@@ -25,6 +25,7 @@ from enum import StrEnum
 from django.core.cache import cache
 from django.db import connection
 
+from core.logging_extras import current_exception_log_fields
 from core.mail_delivery import MailDelivery
 
 logger = logging.getLogger(__name__)
@@ -153,7 +154,12 @@ def _run(
     try:
         delivery = deliver(report)
     except Exception:
-        logger.exception("mail run: %s delivery failed scope=%s", kind, scope)
+        logger.exception(
+            "mail run: %s delivery failed scope=%s",
+            kind,
+            scope,
+            extra=current_exception_log_fields(),
+        )
         failed = read(scope=scope, kind=kind) or MailRunProgress()
         failed.state = MailRunState.failed
         failed.message = FAILED_MESSAGE

@@ -6,6 +6,8 @@ from typing import override
 
 import requests
 from django.conf import settings
+from django.core.signals import setting_changed
+from django.dispatch import receiver
 from python_freeipa import ClientMeta, exceptions
 
 from core.freeipa.circuit_breaker import (
@@ -162,6 +164,14 @@ def _get_freeipa_service_client_cached() -> ClientMeta:
 def clear_freeipa_service_client_cache() -> None:
     if hasattr(_service_client_local, "client"):
         delattr(_service_client_local, "client")
+
+
+@receiver(setting_changed)
+def _clear_service_client_on_fake_freeipa_toggle(*, setting: str, **kwargs: object) -> None:
+    # The cached client is either real or fake; override_settings flipping the
+    # mode must not keep handing out the other kind (it would hit live FreeIPA).
+    if setting in {"ASTRA_E2E_MODE", "ASTRA_E2E_FAKE_FREEIPA_ENABLED"}:
+        clear_freeipa_service_client_cache()
 
 
 def reset_freeipa_client() -> None:

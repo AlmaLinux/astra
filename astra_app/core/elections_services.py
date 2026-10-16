@@ -1269,7 +1269,11 @@ def resolve_election_email_recipients(
         try:
             user = FreeIPAUser.get(username, respect_privacy=False)
         except Exception:
-            logger.exception("election email: user lookup failed username=%s", username)
+            logger.exception(
+                "election email: user lookup failed username=%s",
+                username,
+                extra=current_exception_log_fields(),
+            )
             user = None
         if user is None or not user.email:
             skipped += 1

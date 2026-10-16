@@ -182,7 +182,7 @@ class MembershipCommitteeResetCommandTests(TestCase):
         reviewer = client.user_show("regular01")["result"]
 
         self.assertIn(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP, reviewer.get("memberof_group", []))
-        self.assertEqual(reviewer.get("c"), ["US"])
+        self.assertEqual(reviewer.get(country_attr_name()), ["US"])
 
         agreement = FreeIPAFASAgreement.get("AlmaLinux Community Code of Conduct")
         self.assertIsNotNone(agreement)

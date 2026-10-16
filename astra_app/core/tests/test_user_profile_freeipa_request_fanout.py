@@ -320,7 +320,7 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_user_profile_detail_committee_fallback_fetches_viewer_once_when_groups_are_missing(self) -> None:
+    def test_user_profile_detail_does_not_fetch_viewer_when_groups_are_missing(self) -> None:
         reviewer = self._reviewer_user()
         request_user = SimpleNamespace(
             username="reviewer",
@@ -347,4 +347,5 @@ class UserProfileFreeIPARequestFanoutTests(TestCase):
             response = views_users.user_profile_detail_api(request, "alice")
 
         self.assertEqual(response.status_code, 200)
-        get_mock.assert_called_once_with("reviewer")
+        # Committee visibility comes from membership_review_permissions, not a viewer lookup.
+        get_mock.assert_not_called()

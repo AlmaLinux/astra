@@ -212,6 +212,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         # The CTA must pre-fill a tier the user does not already hold.
         self.assertEqual(entry["tierChangeMembershipTypeCode"], "individual_plus")
         self.assertNotEqual(entry["tierChangeMembershipTypeCode"], entry["membershipType"]["code"])
+        # The only other option is a tier in the held category, which the tier-change CTA covers.
         self.assertFalse(membership["canRequestAny"])
 
     def test_membership_request_prefills_mirror_type(self) -> None:
@@ -253,7 +254,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, 'data-membership-request-form-root=""')
         self.assertContains(
             resp,
-            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}?membership_type=mirror"',
         )
         self.assertEqual(api_resp.status_code, 200)
         self.assertEqual(api_resp.json()["form"]["fields"][0]["value"], "mirror")
@@ -1449,7 +1450,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, 'data-membership-request-form-root=""')
         self.assertContains(
             resp,
-            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}?membership_type=individual"',
         )
         self.assertEqual(api_resp.status_code, 200)
         self.assertEqual(api_resp.json()["form"]["fields"][0]["value"], "individual")
@@ -1505,7 +1506,7 @@ class MembershipProfileSidebarAndRequestsTests(TestCase):
         self.assertContains(resp, 'data-membership-request-form-root=""')
         self.assertContains(
             resp,
-            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}"',
+            f'data-membership-request-form-api-url="{reverse("api-membership-request-form-detail")}?membership_type=individual"',
         )
         self.assertEqual(api_resp.status_code, 200)
         payload = api_resp.json()

@@ -8,6 +8,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from core.elections_services import close_election, election_quorum_status, start_scheduled_election
+from core.logging_extras import current_exception_log_fields
 from core.models import AuditLogEntry, Election, ElectionAutoEndDeferral
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,11 @@ class Command(BaseCommand):
                             f"start {result['status']}{suffix}."
                         )
             except Exception:
-                logger.exception("election_lifecycle_automation: start failed election_id=%s", election_id)
+                logger.exception(
+                    "election_lifecycle_automation: start failed election_id=%s",
+                    election_id,
+                    extra=current_exception_log_fields(),
+                )
                 self.stderr.write(
                     f"Election {election_id} ({name}): scheduled start: {scheduled_for.isoformat()}; "
                     "automatic start failed; see logs."
@@ -82,7 +87,11 @@ class Command(BaseCommand):
                         f"Election {election_id} ({name}): scheduled end: {scheduled_for.isoformat()}; {outcome}."
                     )
             except Exception:
-                logger.exception("election_lifecycle_automation: end failed election_id=%s", election_id)
+                logger.exception(
+                    "election_lifecycle_automation: end failed election_id=%s",
+                    election_id,
+                    extra=current_exception_log_fields(),
+                )
                 self.stderr.write(
                     f"Election {election_id} ({name}): scheduled end: {scheduled_for.isoformat()}; "
                     "automatic end failed; see logs."

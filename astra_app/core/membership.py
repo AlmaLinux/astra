@@ -213,10 +213,20 @@ def compute_membership_requestability_context(
     for category_id, code in requestable_rows:
         requestable_codes_by_category.setdefault(category_id, set()).add(code)
 
-    membership_can_request_any = membership_request_can_request_any(
-        username=username,
-        organization=organization,
-        eligibility=resolved_eligibility,
+    resolved_held_category_ids = (
+        held_category_ids
+        if held_category_ids is not None
+        else {
+            membership.membership_type.category_id
+            for membership in get_valid_memberships(username=username, organization=organization)
+        }
+    )
+
+    # Other tiers of a held category are offered by the tier-change CTA, so the generic
+    # "Request membership" action only counts categories the target does not hold yet.
+    membership_can_request_any = any(
+        category_id not in resolved_held_category_ids
+        for category_id, _code in requestable_rows
     )
 
     return MembershipRequestabilityContext(
@@ -995,21 +1005,6 @@ def get_membership_request_eligibility(
         blocked_membership_type_codes=blocked_membership_type_codes,
         pending_membership_category_ids=pending_membership_category_ids,
     )
-
-
-def membership_request_can_request_any(
-    *,
-    username: str | None = None,
-    organization: Organization | None = None,
-    eligibility: MembershipRequestEligibility | None = None,
-) -> bool:
-    """Return whether the selected target can submit at least one membership request."""
-
-    return requestable_membership_types_for_target(
-        username=username,
-        organization=organization,
-        eligibility=eligibility,
-    ).exists()
 
 
 def requestable_membership_types_for_target(

@@ -196,9 +196,14 @@ test("committee-request-detail covers compliance warning notes contact and reope
   await expect(page.getByRole("link", { name: "Contact", exact: true })).toHaveAttribute("href", /email-tools\/send-mail/);
   await expect(page.getByRole("alert").filter({ hasText: "Compliance warning:" })).toContainText(complianceWarningText);
 
+  // The detail page opens the notes card by default; the toggle collapses and re-expands it.
+  const notesForm = page.locator(`[data-membership-notes-form="${detailRequestId}"]`);
   const notesToggle = page.locator(`[data-membership-notes-toggle="${detailRequestId}"]`);
+  await expect(notesForm).toBeVisible();
   await notesToggle.click();
-  await expect(page.locator(`[data-membership-notes-form="${detailRequestId}"]`)).toBeVisible();
+  await expect(notesForm).toHaveCount(0);
+  await notesToggle.click();
+  await expect(notesForm).toBeVisible();
   await expect(page.locator(`[data-membership-notes-messages="${detailRequestId}"]`)).toContainText(complianceWarningText);
 
   await page.locator(`[data-membership-notes-form="${detailRequestId}"] textarea[name="message"]`).fill(

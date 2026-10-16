@@ -32,7 +32,12 @@ class AdminAccountDeletionRequestTests(TestCase):
         session.save()
 
     def _admin_user(self, username: str = "alice") -> FreeIPAUser:
-        return FreeIPAUser(username, {"uid": [username], "memberof_group": ["admins"]})
+        # Tests patch FreeIPAUser.get to return this user for every lookup, including the deletion
+        # target, and approval refuses to proceed without an address for the approval email.
+        return FreeIPAUser(
+            username,
+            {"uid": [username], "memberof_group": ["admins"], "mail": [f"{username}@example.com"]},
+        )
 
     def _non_admin_user(self, username: str = "alice") -> FreeIPAUser:
         return FreeIPAUser(username, {"uid": [username], "memberof_group": []})

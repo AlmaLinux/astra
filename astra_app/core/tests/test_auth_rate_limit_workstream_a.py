@@ -10,12 +10,13 @@ from django.test.utils import override_settings
 from django.urls import reverse
 from python_freeipa import exceptions
 
-from core.rate_limit import allow_request
+from core.rate_limit import _rate_limit_cache_key, allow_request
 
 
 @dataclass
 class _Entry:
-    value: int
+    # Counters are ints; the per-subject key index is a list of counter keys.
+    value: int | list[str]
     expires_at: float | None
 
 
@@ -38,10 +39,16 @@ class _RaceyCache:
         self._entries[key] = _Entry(value=value, expires_at=self._now + float(timeout))
         return True
 
+    def get(self, key: str) -> int | list[str] | None:
+        if self._is_expired(key):
+            return None
+        return self._entries[key].value
+
     def incr(self, key: str) -> int:
         if self._is_expired(key):
             raise ValueError("Key does not exist")
         entry = self._entries[key]
+        assert isinstance(entry.value, int)
         entry.value += 1
         entry.expires_at = None
         return entry.value
@@ -52,7 +59,7 @@ class _RaceyCache:
         self._entries[key].expires_at = self._now + float(timeout)
         return True
 
-    def set(self, key: str, value: int, timeout: int) -> None:
+    def set(self, key: str, value: int | list[str], timeout: int) -> None:
         self._entries[key] = _Entry(value=value, expires_at=self._now + float(timeout))
 
     def get_expiry(self, key: str) -> float | None:
@@ -85,7 +92,7 @@ class RateLimitTtlBehaviorTests(TestCase):
         self.assertTrue(first_allowed)
         self.assertTrue(second_allowed)
 
-        cache_key = next(iter(cache_backend._entries.keys()))
+        cache_key = _rate_limit_cache_key("auth.login", ["198.51.100.10", "alice"])
         self.assertIsNotNone(cache_backend.get_expiry(cache_key))
 
     def test_allow_request_allows_again_after_window_expires(self) -> None:
