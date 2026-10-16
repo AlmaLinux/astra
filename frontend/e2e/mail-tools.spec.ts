@@ -155,6 +155,16 @@ test("mail-tools-send-mail-workflow", async ({ page }) => {
   await expectMailProgressToComplete(page, 2);
 });
 
+// As a send-mail operator, I can read the start of every line in the HTML editor (the lint gutter doesn't cover it).
+test("mail-tools-send-mail-html-editor-gutter", async ({ page }) => {
+  await openSendMailWorkflow(page);
+
+  const htmlEditor = page.locator(".CodeMirror").first();
+  const gutterWidth = await htmlEditor.locator(".CodeMirror-gutters").evaluate((el) => el.getBoundingClientRect().width);
+  expect(gutterWidth).toBeGreaterThan(0);
+  await expect(htmlEditor.locator(".CodeMirror-sizer")).toHaveCSS("margin-left", `${gutterWidth}px`);
+});
+
 // As a send-mail operator, I can queue a templated message to all members of a selected group.
 test("mail-tools-send-mail-group-workflow", async ({ page }) => {
   await openSendMailWorkflow(page);

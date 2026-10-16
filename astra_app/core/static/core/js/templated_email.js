@@ -373,6 +373,9 @@
         autocorrect: cmSpellcheckOpts.autocorrect,
         autocapitalize: cmSpellcheckOpts.autocapitalize,
       });
+      // CodeMirror 5 measures the gutter before applying the theme class, so it
+      // misses mdn-like's 6px gutter border and the gutter overlaps the text.
+      htmlEditor.refresh();
 
       // The CodeMirror html-lint addon depends on a global HTMLHint.
       // If it's missing, lint.js will silently do nothing (and html-lint.js logs
