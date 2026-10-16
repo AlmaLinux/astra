@@ -437,6 +437,8 @@ def account_invitations_bulk_api(request: HttpRequest) -> JsonResponse:
             selected_ids = [int(id_) for id_ in selected_ids]
         except (ValueError, TypeError):
             return _bad_request_response("Invalid invitation IDs")
+        if not selected_ids:
+            return _bad_request_response("Select at least one invitation.")
 
         username = get_username(request)
 

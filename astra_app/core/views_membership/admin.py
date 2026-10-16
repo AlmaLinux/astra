@@ -48,6 +48,7 @@ from core.views_utils import (
     normalize_freeipa_username,
     parse_datatables_request_base,
     post_only_404,
+    typed_confirmation_matches,
 )
 
 logger = logging.getLogger(__name__)
@@ -537,6 +538,9 @@ def membership_terminate(
             return result
         organization, membership_type, _active_membership = result
         resolved_redirect = redirect_to or reverse("organization-detail", kwargs={"organization_id": organization.pk})
+        if not typed_confirmation_matches(request.POST.get("confirm"), organization.name):
+            messages.error(request, "Type the organization name to confirm the termination.")
+            return redirect(resolved_redirect)
 
         error_redirect = _remove_organization_representative_group_membership_if_present(
             request=request,
@@ -566,6 +570,9 @@ def membership_terminate(
         return result
     username, membership_type, target = result
     resolved_redirect = redirect_to or reverse("user-profile", kwargs={"username": username})
+    if not typed_confirmation_matches(request.POST.get("confirm"), username):
+        messages.error(request, "Type the username to confirm the termination.")
+        return redirect(resolved_redirect)
 
     group_cn = _membership_group_cn(membership_type)
     error_redirect = _remove_group_membership_if_present(

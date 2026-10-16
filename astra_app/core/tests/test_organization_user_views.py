@@ -3961,7 +3961,11 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.post(reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]), follow=False)
+            resp = self.client.post(
+                reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]),
+                data={"confirm": org.name},
+                follow=False,
+            )
         self.assertEqual(resp.status_code, 302)
 
         org.refresh_from_db()

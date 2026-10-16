@@ -1901,8 +1901,11 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self.assertEqual(qs.get("to"), ["alice"])
         self.assertEqual(qs.get("template"), [settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME])
 
-    def test_rfi_without_message_still_sends_email_and_puts_on_hold(self) -> None:
-        from core.models import MembershipLog, MembershipType, Note
+    def test_rfi_without_message_is_rejected_on_both_routes(self) -> None:
+        """The standard RFI email needs a message; only the custom-email path may leave it empty."""
+        from django.contrib.messages import get_messages
+
+        from core.models import MembershipLog, MembershipType
 
         MembershipType.objects.update_or_create(
             code="individual",
@@ -1936,38 +1939,28 @@ class MembershipRequestOnHoldAndRescindTests(TestCase):
         self._login_as_freeipa_user("reviewer")
 
         with patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock:
-            resp = self.client.post(
+            form_resp = self.client.post(
                 reverse("membership-request-rfi", args=[req.pk]),
-                data={"rfi_message": ""},
+                data={"rfi_message": "   "},
                 follow=False,
             )
+            api_resp = self.client.post(
+                reverse("api-membership-request-rfi", args=[req.pk]),
+                data={"rfi_message": ""},
+            )
 
-        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(form_resp.status_code, 302)
+        self.assertIn(
+            "Enter the message for the request for information.",
+            [str(message) for message in get_messages(form_resp.wsgi_request)],
+        )
+        self.assertEqual(api_resp.status_code, 400)
+        self.assertEqual(api_resp.json()["error"], "Enter the message for the request for information.")
+
         req.refresh_from_db()
-        self.assertEqual(req.status, MembershipRequest.Status.on_hold)
-        self.assertIsNotNone(req.on_hold_at)
-
-        self.assertTrue(
-            MembershipLog.objects.filter(
-                membership_request=req,
-                actor_username="reviewer",
-                action=MembershipLog.Action.on_hold,
-            ).exists()
-        )
-        self.assertTrue(
-            Note.objects.filter(
-                membership_request=req,
-                username="reviewer",
-                action__type="request_on_hold",
-            ).exists()
-        )
-
-        send_mock.assert_called_once()
-        _, kwargs = send_mock.call_args
-        self.assertEqual(kwargs["recipients"], ["alice@example.com"])
-        self.assertEqual(kwargs["template_name"], settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME)
-        self.assertIn("rfi_message", kwargs["context"])
-        self.assertEqual(kwargs["context"]["rfi_message"], "")
+        self.assertEqual(req.status, MembershipRequest.Status.pending)
+        self.assertFalse(MembershipLog.objects.filter(membership_request=req, action=MembershipLog.Action.on_hold).exists())
+        send_mock.assert_not_called()
 
     def test_user_can_rescind_pending_request(self) -> None:
         from core.models import MembershipLog, MembershipType, Note

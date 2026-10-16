@@ -81,7 +81,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": ["sponsor-group"]},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -123,7 +123,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
-            terminate_response = self.client.post(legacy_terminate_args, follow=False)
+            terminate_response = self.client.post(legacy_terminate_args, data={"confirm": org.name}, follow=False)
         self.assertEqual(terminate_response.status_code, 302)
         self.assertEqual(
             terminate_response["Location"],
@@ -160,7 +160,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -225,7 +225,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": ["sponsor-group"]},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -296,7 +296,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -357,7 +357,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": ["sponsor-group"]},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -424,7 +424,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -449,6 +449,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             )
             retry_terminate = self.client.post(
                 reverse("membership-terminate", args=["alice", "individual"]),
+                data={"confirm": "alice"},
                 follow=False,
             )
 
@@ -489,7 +490,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             {"uid": ["bob"], "mail": ["bob@example.com"], "memberof_group": ["sponsor-group"]},
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -514,6 +515,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             )
             retry_terminate = self.client.post(
                 reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]),
+                data={"confirm": org.name},
                 follow=False,
             )
 

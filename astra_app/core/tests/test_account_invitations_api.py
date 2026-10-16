@@ -813,6 +813,20 @@ class AccountInvitationsApiTests(TestCase):
         self.assertTrue(payload.get("ok"))
         self.assertIn("message", payload)
 
+    def test_bulk_endpoint_rejects_an_empty_selection(self) -> None:
+        """The server checks the selection itself; the disabled Apply button is only a convenience."""
+        self._login_as_freeipa_user("committee")
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._committee_user()):
+            response = self.client.post(
+                "/api/v1/membership/invitations/bulk",
+                data={"bulk_action": "dismiss", "bulk_scope": "pending"},
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"ok": False, "error": "Select at least one invitation."})
+
     def test_bulk_resend_preserves_current_no_acceptance_precheck_behavior(self) -> None:
         """Bulk resend must not introduce an email-match acceptance precheck in this slice."""
         self._login_as_freeipa_user("committee")

@@ -106,7 +106,8 @@ describe("MembershipRequestActionModal", () => {
     }
   });
 
-  it("still requires the RFI message before handing off to a custom email", async () => {
+  it("requires the RFI message for the standard email but not for a custom one", async () => {
+    const submit = vi.spyOn(HTMLFormElement.prototype, "submit").mockImplementation(() => undefined);
     const wrapper = mount(MembershipRequestActionModal, {
       props: {
         action: { ...rejectAction, actionKind: "rfi", customEmailUrl: "/membership/requests/42/rfi/" },
@@ -114,12 +115,18 @@ describe("MembershipRequestActionModal", () => {
       },
     });
 
+    // The standard email needs something to ask; a custom email is written in Send Mail.
     expectBlocked(wrapper, "Send RFI", "Enter the RFI message first.");
-    expectBlocked(wrapper, "Send RFI with custom email", "Enter the RFI message first.");
-
+    expectEnabled(wrapper, "Send RFI with custom email");
     await wrapper.get("#membership-request-action-text").setValue("Please share your mirror URL.");
     expectEnabled(wrapper, "Send RFI");
-    expectEnabled(wrapper, "Send RFI with custom email");
+
+    // Submitting disables every button, so the custom-email path is checked last.
+    await wrapper.get("#membership-request-action-text").setValue("");
+    await buttonByText(wrapper, "Send RFI with custom email")!.trigger("click");
+    expect(submit).toHaveBeenCalledTimes(1);
+    const fields = wrapper.get('form[action="/membership/requests/42/rfi/"]').findAll("input").map((input) => input.attributes("name"));
+    expect(fields).not.toContain("rfi_message");
   });
 
   it("offers no custom email without a custom-email URL or for bulk actions", () => {

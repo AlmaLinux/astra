@@ -210,7 +210,9 @@ const helpText = computed(() => {
     return "If filled in, this text will be sent in the rejection email.";
   }
   if (props.action.actionKind === "rfi") {
-    return "This text will be sent in the Request for Information email and the request will be put on hold.";
+    return props.action.customEmailUrl
+      ? "This text will be sent in the Request for Information email and the request will be put on hold. Optional with a custom email, which you write next."
+      : "This text will be sent in the Request for Information email and the request will be put on hold.";
   }
   return "";
 });
@@ -250,9 +252,11 @@ const currentDiscountText = computed(() => {
   return `${inKindDuesSummary(dues)} under an in-kind agreement, which renewing keeps. Confirm the agreement is still valid.`;
 });
 
-// Why the action can't be submitted yet, or "" when it can.
-const blockedReason = computed(() => {
-  if (requiresMessage.value && !message.value.trim()) {
+// Why the action can't be submitted yet, or "" when it can. A custom RFI email is written in
+// Send Mail, so only the standard one needs the message here (the server applies the same rule).
+function blockedReasonFor(customEmail: boolean): string {
+  const messageRequired = requiresMessage.value && !(customEmail && props.action?.actionKind === "rfi");
+  if (messageRequired && !message.value.trim()) {
     return props.action?.actionKind === "rfi" ? "Enter the RFI message first." : "Enter a justification for the override first.";
   }
   const dues = props.action?.dues;
@@ -264,7 +268,10 @@ const blockedReason = computed(() => {
     return "Give a reason for the dues change first.";
   }
   return "";
-});
+}
+
+const blockedReason = computed(() => blockedReasonFor(false));
+const customEmailBlockedReason = computed(() => blockedReasonFor(true));
 
 function onPresetChange(): void {
   message.value = selectedPreset.value;
@@ -286,7 +293,7 @@ function buildRequestBody(trimmedMessage: string): FormData {
 }
 
 async function submitCustomEmail(): Promise<void> {
-  if (!customEmailForm.value || isSubmitting.value || blockedReason.value) {
+  if (!customEmailForm.value || isSubmitting.value || customEmailBlockedReason.value) {
     return;
   }
 
@@ -438,7 +445,7 @@ async function submitAction(): Promise<void> {
                   v-if="customEmailLabel"
                   type="button"
                   class="btn btn-outline-secondary"
-                  :blocked-reason="blockedReason"
+                  :blocked-reason="customEmailBlockedReason"
                   :busy="isSubmitting"
                   title="Skip the standard email and write a custom one in Send Mail"
                   @click="submitCustomEmail"

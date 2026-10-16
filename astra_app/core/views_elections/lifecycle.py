@@ -26,7 +26,7 @@ from core.views_elections._helpers import (
     _extend_election_end_from_post,
     _get_active_election,
 )
-from core.views_utils import get_username
+from core.views_utils import get_username, typed_confirmation_matches
 
 
 @dataclass(frozen=True)
@@ -257,13 +257,7 @@ def _request_data(request: HttpRequest) -> Mapping[str, object]:
 
 
 def _confirm_election_action(*, data: Mapping[str, object], election: Election) -> bool:
-    raw = str(data.get("confirm") or "").strip()
-    if not raw:
-        return False
-    expected = str(election.name or "").strip()
-    if not expected:
-        return False
-    return raw.casefold() == expected.casefold()
+    return typed_confirmation_matches(data.get("confirm"), election.name)
 
 
 def _conclude_election(*, request: HttpRequest, election: Election, skip_tally: bool) -> ElectionConcludeResult:

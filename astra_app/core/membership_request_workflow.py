@@ -1457,6 +1457,9 @@ def put_membership_request_on_hold(
         raise ValidationError("Only pending requests can be put on hold")
 
     message = str(rfi_message or "").strip()
+    # The standard RFI email exists to ask something; a custom email is written separately in Send Mail.
+    if send_rfi_email and not message:
+        raise ValidationError("Enter the message for the request for information.")
 
     membership_request.status = MembershipRequest.Status.on_hold
     membership_request.on_hold_at = now

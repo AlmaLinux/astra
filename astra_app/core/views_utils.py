@@ -326,6 +326,15 @@ def _normalize_str(value: object) -> str:
     return str(value).strip()
 
 
+def typed_confirmation_matches(typed: object, expected: str) -> bool:
+    """Whether a "type the name to confirm" value matches, ignoring case and surrounding spaces.
+
+    Destructive actions check this server-side too: the disabled button is only a convenience.
+    """
+    expected = _normalize_str(expected)
+    return bool(expected) and _normalize_str(typed).casefold() == expected.casefold()
+
+
 _DATATABLES_BASE_ALLOWED_PARAMS: frozenset[str] = frozenset(
     {
         "draw",

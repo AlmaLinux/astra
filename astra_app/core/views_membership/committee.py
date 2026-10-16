@@ -1262,13 +1262,17 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
         custom_email = bool(str(request.POST.get("custom_email") or "").strip())
         rfi_message = str(request.POST.get("rfi_message") or "").strip()
 
-        application_url, email_error = _execute_rfi_membership_request(
-            request=request,
-            membership_request=req,
-            actor_username=get_username(request),
-            rfi_message=rfi_message,
-            send_rfi_email=not custom_email,
-        )
+        try:
+            application_url, email_error = _execute_rfi_membership_request(
+                request=request,
+                membership_request=req,
+                actor_username=get_username(request),
+                rfi_message=rfi_message,
+                send_rfi_email=not custom_email,
+            )
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0])
+            return redirect(redirect_to)
 
         rfi_extras = {
             "rfi_message": rfi_message,
@@ -1439,13 +1443,16 @@ def membership_request_rfi_api(request: HttpRequest, pk: int) -> JsonResponse:
 
     req = req_or_error
     rfi_message = str(request.POST.get("rfi_message") or "").strip()
-    _application_url, email_error = _execute_rfi_membership_request(
-        request=request,
-        membership_request=req,
-        actor_username=get_username(request),
-        rfi_message=rfi_message,
-        send_rfi_email=True,
-    )
+    try:
+        _application_url, email_error = _execute_rfi_membership_request(
+            request=request,
+            membership_request=req,
+            actor_username=get_username(request),
+            rfi_message=rfi_message,
+            send_rfi_email=True,
+        )
+    except ValidationError as exc:
+        return _membership_action_json_error(exc.messages[0], status=400)
 
     payload: dict[str, str | bool] = {
         "ok": True,

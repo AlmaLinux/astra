@@ -75,7 +75,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "alice":
@@ -88,6 +88,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                 resp = self.client.post(
                     reverse("membership-terminate", args=["alice", "individual"]),
+                    data={"confirm": "alice"},
                     follow=False,
                 )
 
@@ -134,7 +135,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
@@ -147,6 +148,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                 resp = self.client.post(
                     reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]),
+                    data={"confirm": org.name},
                     follow=False,
                 )
 
@@ -200,7 +202,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             },
         )
 
-        def _get_user(username: str) -> FreeIPAUser | None:
+        def _get_user(username: str, **_kwargs: object) -> FreeIPAUser | None:
             if username == "reviewer":
                 return reviewer
             if username == "bob":
