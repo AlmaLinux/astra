@@ -1,0 +1,82 @@
+{% extends "admin/base_site.html" %}
+{% load admin_urls jazzmin %}
+{% get_jazzmin_ui_tweaks as jazzmin_ui %}
+
+{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }}{% endblock %}
+
+{% block breadcrumbs %}
+  {% url opts|admin_urlname:'change' original.pk|admin_urlquote as group_change_url %}
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{% url 'admin:index' %}">Home</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a></li>
+    <li class="breadcrumb-item"><a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a></li>
+    <li class="breadcrumb-item"><a href="{{ group_change_url }}">{{ original }}</a></li>
+    <li class="breadcrumb-item active">Rename</li>
+  </ol>
+{% endblock %}
+
+{% block content_title %}Rename group{% endblock %}
+
+{% block content %}
+  {% url opts|admin_urlname:'change' original.pk|admin_urlquote as group_change_url %}
+  <div class="col-12">
+    <div class="card card-primary card-outline">
+      <div class="card-header with-border">
+        <h4 class="card-title">Rename <code>{{ original }}</code></h4>
+      </div>
+
+      <div class="card-body">
+        {% if blocked_reason %}
+          <div class="alert alert-danger">{{ blocked_reason }}</div>
+          <a href="{{ group_change_url }}" class="btn {{ jazzmin_ui.button_classes.secondary }}">Back to group</a>
+        {% else %}
+          <div class="row">
+            <div class="col-12 col-md-8">
+              <p>FreeIPA keeps the group's members, sponsors, nested groups and agreements.</p>
+
+              <h5>Also updated in Astra</h5>
+              <ul class="list-group mb-3">
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  Membership types
+                  <span class="badge badge-pill {% if reference_counts.membership_types %}badge-primary{% else %}badge-light{% endif %}">{{ reference_counts.membership_types }}</span>
+                </li>
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  Elections, including past ones
+                  <span class="badge badge-pill {% if reference_counts.elections %}badge-primary{% else %}badge-light{% endif %}">{{ reference_counts.elections }}</span>
+                </li>
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  Permission grants
+                  <span class="badge badge-pill {% if reference_counts.permission_grants %}badge-primary{% else %}badge-light{% endif %}">{{ reference_counts.permission_grants }}</span>
+                </li>
+              </ul>
+
+              <div class="callout callout-warning">
+                <h5>Not updated outside Astra</h5>
+                <p class="mb-0">
+                  Anything that refers to the group by name, such as links to the group page,
+                  single sign-on group claims and mailing list automation.
+                </p>
+              </div>
+            </div>
+
+            <div class="col-12 col-md-4">
+              <form method="post" novalidate>
+                {% csrf_token %}
+                {% for error in form.non_field_errors %}
+                  <div class="alert alert-danger">{{ error }}</div>
+                {% endfor %}
+                {% include 'core/_form_field.html' with field=form.new_cn %}
+                <div class="form-group">
+                  <input type="submit" class="btn {{ jazzmin_ui.button_classes.primary }} btn-block" value="Rename group">
+                </div>
+                <div class="form-group">
+                  <a href="{{ group_change_url }}" class="btn {{ jazzmin_ui.button_classes.secondary }} btn-block">Cancel</a>
+                </div>
+              </form>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

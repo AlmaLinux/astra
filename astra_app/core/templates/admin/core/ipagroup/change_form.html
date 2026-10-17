@@ -18,6 +18,30 @@
     >
       Download member/sponsor emails (CSV)
     </a>
+    {% if rename_blocked_reason %}
+      {# Disabled buttons swallow hover events, so the tooltip lives on a focusable wrapper. #}
+      {# The wrapper carries btn-block so Bootstrap's .btn-block + .btn-block spacing still applies. #}
+      <span class="btn-block" tabindex="0" title="{{ rename_blocked_reason }}">
+        <button
+          type="button"
+          class="btn btn-outline-secondary btn-sm w-100"
+          style="pointer-events: none;"
+          disabled
+          aria-disabled="true"
+        >
+          Rename group
+        </button>
+      </span>
+    {% else %}
+      {% url 'admin:auth_ipagroup_rename' original.pk as admin_rename_url %}
+      <a
+        class="btn btn-block btn-outline-secondary btn-sm"
+        href="{{ admin_rename_url }}"
+        title="Rename this group in FreeIPA and update references in Astra"
+      >
+        Rename group
+      </a>
+    {% endif %}
   {% endif %}
   {{ block.super }}
 {% endblock %}

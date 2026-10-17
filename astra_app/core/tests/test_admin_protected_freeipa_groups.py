@@ -47,6 +47,35 @@ class AdminProtectedIPAGroupTests(TestCase):
         delete_mock.assert_not_called()
         self.assertContains(resp, "cannot be deleted")
 
+    def test_cannot_delete_committee_group_configured_in_settings(self) -> None:
+        self._login_as_freeipa_admin("alice")
+
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+        committee_group = FreeIPAGroup(
+            "membership-committee",
+            {"cn": ["membership-committee"], "description": ["d"], "member": []},
+        )
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=admin_user),
+            patch("core.freeipa.group.FreeIPAGroup.all", return_value=[committee_group]),
+            patch("core.freeipa.group.FreeIPAGroup.get", return_value=committee_group),
+            patch.object(committee_group, "delete") as delete_mock,
+        ):
+            resp = self.client.post(
+                reverse("admin:auth_ipagroup_changelist"),
+                data={
+                    "action": "delete_selected",
+                    "_selected_action": ["membership-committee"],
+                    "post": "yes",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        delete_mock.assert_not_called()
+        self.assertContains(resp, "cannot be deleted")
+
     def test_cannot_delete_group_referenced_by_membership_type(self) -> None:
         self._login_as_freeipa_admin("alice")
 

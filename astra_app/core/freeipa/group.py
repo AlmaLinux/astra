@@ -25,6 +25,7 @@ from core.freeipa.utils import (
     _invalidate_group_cache,
     _invalidate_groups_list_cache,
     _invalidate_user_cache,
+    _invalidate_users_list_cache,
     _raise_if_freeipa_failed,
 )
 from core.logging_extras import current_exception_log_fields
@@ -378,6 +379,35 @@ class FreeIPAGroup(_FreeIPAClientMixin):
                 extra=current_exception_log_fields(),
             )
             raise
+
+    def rename(self, new_cn: str) -> None:
+        """Rename the group in FreeIPA.
+
+        FreeIPA rewrites DN-based references (members, sponsors, agreements),
+        but our cached users and groups embed the old name, so drop them.
+        """
+        old_cn = self.cn
+        # Resolve members while the old name still exists in FreeIPA.
+        affected_usernames = self.member_usernames_recursive() | set(self.sponsors)
+        _with_freeipa_service_client_retry(
+            self.get_client,
+            lambda client: client.group_mod(old_cn, o_rename=new_cn),
+        )
+        # Callers rely on cn changing only once FreeIPA has accepted the rename.
+        self.cn = new_cn
+
+        _invalidate_groups_list_cache()
+        _invalidate_users_list_cache()
+        # Child groups list the old name in memberof; parents and groups this one
+        # sponsors are found in a fresh listing by the new name.
+        affected_groups = {old_cn, new_cn, *self.member_groups}
+        for group in FreeIPAGroup.all():
+            if new_cn in group.member_groups or new_cn in group.sponsor_groups:
+                affected_groups.add(group.cn)
+        for cn in affected_groups:
+            _invalidate_group_cache(cn)
+        for username in affected_usernames:
+            _invalidate_user_cache(username)
 
     def delete(self):
         """

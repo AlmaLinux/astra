@@ -58,9 +58,11 @@ from core.form_validators import (
     clean_fas_mailing_list_value,
     clean_fas_url_value,
 )
+from core.forms_base import StyledForm
 from core.forms_organizations import clean_representative_username
 from core.forms_selfservice import FasProfileCleanMixin
 from core.freeipa.agreement import FreeIPAFASAgreement
+from core.freeipa.circuit_breaker import _is_freeipa_availability_error
 from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
 from core.freeipa.exceptions import FreeIPAOperationFailed
 from core.freeipa.group import FreeIPAGroup
@@ -110,7 +112,11 @@ from core.organization_membership_csv_import import (
     required_organization_membership_csv_columns,
 )
 from core.organization_representative_transition import apply_organization_representative_transition
-from core.protected_resources import protected_freeipa_group_cns
+from core.protected_resources import (
+    freeipa_group_references,
+    protected_freeipa_group_cns,
+    settings_freeipa_group_cns,
+)
 from core.signals import CANONICAL_SIGNALS
 from core.templated_email import queue_templated_email
 from core.user_labels import user_choice, user_choice_from_freeipa, user_choice_with_fallback, user_choices_from_users
@@ -975,6 +981,36 @@ class IPAUserChangeForm(IPAUserBaseForm):
     pass
 
 
+class IPAGroupRenameForm(StyledForm):
+    new_cn = forms.CharField(
+        label="New group name",
+        max_length=255,
+        help_text="FreeIPA stores group names in lowercase.",
+        widget=forms.TextInput(attrs={"autofocus": True, "autocomplete": "off"}),
+    )
+
+    @override
+    def __init__(self, *args: Any, current_cn: str, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.current_cn = current_cn
+
+    def clean_new_cn(self) -> str:
+        # Normalize like FreeIPA does so local references match the stored name.
+        new_cn = self.cleaned_data["new_cn"].lower()
+        if new_cn == self.current_cn.lower():
+            raise ValidationError("The new name must be different from the current name.")
+        # FreeIPA rejects names of existing groups, but Astra may still refer to a
+        # missing group by name; taking it over would hand this group that role.
+        if new_cn in settings_freeipa_group_cns():
+            raise ValidationError("This name is configured in settings for another group.")
+        if any(queryset.exists() for queryset, _ in freeipa_group_references(new_cn).values()):
+            raise ValidationError(
+                "Astra already has membership types, elections or permission grants for this name. "
+                "Remove them first."
+            )
+        return new_cn
+
+
 class IPAGroupForm(FreeIPAFormMixin, forms.ModelForm):
     members = forms.MultipleChoiceField(
         required=False,
@@ -1046,7 +1082,7 @@ class IPAGroupForm(FreeIPAFormMixin, forms.ModelForm):
         self.fields["member_groups"].choices = [(g, g) for g in group_names]
         self.fields["sponsor_groups"].choices = [(g, g) for g in group_names]
 
-        # Group name is immutable in FreeIPA.
+        # Renames rewrite local references too, so they go through the dedicated rename view.
         if self.instance and getattr(self.instance, "cn", None):
             self.fields["cn"].disabled = True
 
@@ -1596,7 +1632,18 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
     def changeform_view(self, request: HttpRequest, object_id: str | None = None, form_url: str = "", extra_context: dict[str, object] | None = None):
         extra = extra_context or {}
         extra["chat_networks"] = settings.CHAT_NETWORKS
+        if object_id:
+            extra["rename_blocked_reason"] = self._rename_blocked_reason(unquote(object_id))
         return super().changeform_view(request, object_id=object_id, form_url=form_url, extra_context=extra)
+
+    @staticmethod
+    def _rename_blocked_reason(cn: str) -> str:
+        if cn.lower() not in settings_freeipa_group_cns():
+            return ""
+        return (
+            f"Group {cn!r} is configured in settings and cannot be renamed here. "
+            "Rename it in FreeIPA and update the setting at the same time."
+        )
 
     @override
     def get_urls(self):
@@ -1607,8 +1654,106 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
                 self.admin_site.admin_view(self.download_emails_view),
                 name="auth_ipagroup_download_emails",
             ),
+            path(
+                "<path:object_id>/rename/",
+                self.admin_site.admin_view(self.rename_view),
+                name="auth_ipagroup_rename",
+            ),
         ]
         return custom + urls
+
+    def rename_view(self, request: HttpRequest, object_id: str) -> HttpResponse:
+        obj = self.get_object(request, object_id)
+        if obj is None:
+            raise Http404
+        if not self.has_change_permission(request, obj=obj):
+            raise PermissionDenied
+
+        group = FreeIPAGroup.get(obj.cn)
+        if group is None:
+            raise Http404
+
+        old_cn = group.cn
+        references = freeipa_group_references(old_cn)
+        form = IPAGroupRenameForm(request.POST or None, current_cn=old_cn)
+        # The change form disables the rename button for these; this guards direct requests.
+        blocked_reason = self._rename_blocked_reason(old_cn)
+        if not blocked_reason and request.method == "POST" and form.is_valid():
+            new_cn = form.cleaned_data["new_cn"]
+            try:
+                # Rewrite local references before calling FreeIPA so a rejected
+                # rename rolls them back.
+                with transaction.atomic():
+                    for queryset, field in references.values():
+                        queryset.update(**{field: new_cn})
+                    group.rename(new_cn)
+            except Exception as e:
+                logger.exception(
+                    "Group rename failed old_cn=%s new_cn=%s",
+                    old_cn,
+                    new_cn,
+                    extra=exception_log_fields(e),
+                )
+                form.add_error(None, self._revert_failed_rename(group, old_cn=old_cn, new_cn=new_cn, error=e))
+            else:
+                obj.cn = new_cn
+                self.log_change(request, obj, f"Renamed group from {old_cn!r} to {new_cn!r}.")
+                self.message_user(request, f"Group {old_cn!r} renamed to {new_cn!r}.", level=messages.SUCCESS)
+                return HttpResponseRedirect(reverse("admin:auth_ipagroup_change", args=[new_cn]))
+
+        request.current_app = self.admin_site.name
+        return TemplateResponse(
+            request,
+            "admin/core/ipagroup/rename.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Rename group {old_cn}",
+                "opts": self.opts,
+                "original": obj,
+                "form": form,
+                "blocked_reason": blocked_reason,
+                "reference_counts": {kind: queryset.count() for kind, (queryset, _) in references.items()},
+            },
+        )
+
+    @staticmethod
+    def _revert_failed_rename(group: FreeIPAGroup, *, old_cn: str, new_cn: str, error: Exception) -> str:
+        """Undo the FreeIPA side of a failed rename and return the message to show.
+
+        Local references always roll back with the transaction. If the failure
+        came after FreeIPA accepted the rename (cache writes, the commit), FreeIPA
+        has to be renamed back to match them.
+        """
+        if group.cn != new_cn:
+            if _is_freeipa_availability_error(error):
+                # The request may have reached FreeIPA before the connection failed.
+                return (
+                    f"FreeIPA did not respond, so the group may or may not have been renamed. "
+                    f"Astra still refers to {old_cn!r}. Check FreeIPA for {new_cn!r}; if it exists, "
+                    f"rename it back there before retrying. Error: {error}"
+                )
+            return str(error)
+        try:
+            group.rename(old_cn)
+        except Exception as revert_error:
+            logger.exception(
+                "Reverting group rename failed old_cn=%s new_cn=%s",
+                old_cn,
+                new_cn,
+                extra=exception_log_fields(revert_error),
+            )
+        # rename() switches cn as soon as FreeIPA accepts it, even if cache cleanup fails.
+        if group.cn == old_cn:
+            return f"Rename failed and was reverted in FreeIPA: {error}"
+        logger.critical(
+            "Group rename left FreeIPA and Astra out of sync: FreeIPA has %r, Astra references %r",
+            new_cn,
+            old_cn,
+        )
+        return (
+            f"Rename failed and could not be reverted. FreeIPA now calls the group {new_cn!r} "
+            f"but Astra still refers to {old_cn!r}. Rename it back in FreeIPA manually. Error: {error}"
+        )
 
     def download_emails_view(self, request: HttpRequest, object_id: str) -> HttpResponse:
         obj = self.get_object(request, object_id)

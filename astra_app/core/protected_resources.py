@@ -1,6 +1,7 @@
 from django.conf import settings
+from django.db.models import QuerySet
 
-from core.models import MembershipType
+from core.models import Election, FreeIPAPermissionGrant, MembershipType
 
 
 def membership_type_group_cns() -> frozenset[str]:
@@ -14,24 +15,50 @@ def membership_type_group_cns() -> frozenset[str]:
     return frozenset(group_cns)
 
 
+def settings_freeipa_group_cns() -> frozenset[str]:
+    """Return FreeIPA group CNs named in settings, lowercased like FreeIPA stores them.
+
+    The app cannot rewrite its own configuration, so these groups must not be
+    deleted or renamed from the UI.
+    """
+
+    group_cns = {
+        settings.FREEIPA_ADMIN_GROUP,
+        settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP,
+        settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
+        settings.MATERIALIZED_TEAM_LEADS_SOURCE_GROUP_CN,
+        settings.MATERIALIZED_TEAM_LEADS_DESTINATION_GROUP_CN,
+        *settings.FREEIPA_GROUP_PERMISSIONS,
+    }
+    return frozenset(cn.strip().lower() for cn in group_cns if cn and cn.strip())
+
+
 def protected_freeipa_group_cns() -> frozenset[str]:
     """Return FreeIPA group CNs that must not be deleted.
 
-    These groups are part of the app's security configuration (settings) or are
-    used as membership-type groups.
+    These groups are part of the app's configuration (settings) or are used as
+    membership-type groups.
     """
 
-    protected: set[str] = set()
+    return settings_freeipa_group_cns() | membership_type_group_cns()
 
-    admin_group = settings.FREEIPA_ADMIN_GROUP
-    if admin_group:
-        protected.add(admin_group)
 
-    for name in (settings.FREEIPA_GROUP_PERMISSIONS or {}).keys():
-        group_cn = str(name or "").strip()
-        if group_cn:
-            protected.add(group_cn)
+def freeipa_group_references(cn: str) -> dict[str, tuple[QuerySet, str]]:
+    """Return local rows that store a FreeIPA group CN as text, keyed by kind.
 
-    protected.update(membership_type_group_cns())
+    Each value is (queryset, field name) so callers can count or rewrite the
+    references when the group is renamed. FreeIPA group names are
+    case-insensitive.
+    """
 
-    return frozenset(protected)
+    return {
+        "membership_types": (MembershipType.objects.filter(group_cn__iexact=cn), "group_cn"),
+        "elections": (Election.objects.filter(eligible_group_cn__iexact=cn), "eligible_group_cn"),
+        "permission_grants": (
+            FreeIPAPermissionGrant.objects.filter(
+                principal_type=FreeIPAPermissionGrant.PrincipalType.group,
+                principal_name=cn.lower(),
+            ),
+            "principal_name",
+        ),
+    }
