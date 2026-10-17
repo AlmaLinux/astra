@@ -5,8 +5,8 @@ Markdown==3.11.1
 PyOTP==2.10.0
 asgiref==3.12.1
 bleach==6.4.0
-boto3==1.43.113
-botocore==1.43.113
+boto3==1.43.114
+botocore==1.43.114
 brotli==1.2.0
 certifi==2026.7.22
 cffi==2.1.1
@@ -17,7 +17,7 @@ cssselect2==0.10.1
 diff-match-patch==20241021
 django-appconf==1.2.0
 django-avatar==9.0.0
-django-import-export==4.4.1
+django-import-export==4.4.2
 django-jazzmin==3.0.1
 django-logentry-admin==1.1.0
 django-markdownify==0.9.7
@@ -26,7 +26,7 @@ django-ses==4.8.2
 django-storages==1.14.6
 django-vite==3.2.0
 dnspython==2.9.0
-fonttools==4.66.1
+fonttools==4.67.0
 gunicorn==26.2.0
 idna==3.20
 jmespath==1.1.0
@@ -34,7 +34,7 @@ joblib==1.6.0
 narwhals==2.27.1
 nh3==0.3.7
 numpy==2.5.4
-pillow==12.3.0
+pillow==13.0.0
 psycopg2-binary==2.9.13
 pycountry==26.2.16
 pycparser==3.11
@@ -44,7 +44,7 @@ python-dateutil==2.9.0.post0
 python-freeipa==1.0.10
 qrcode==8.2
 requests==2.34.2
-ruff==0.17.0
+ruff==0.17.1
 s3transfer==0.19.2
 scikit-learn==1.9.1
 scipy==1.18.1

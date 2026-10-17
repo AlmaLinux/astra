@@ -910,7 +910,10 @@ class MembershipCSVImportResource(MembershipCSVImportLoggingMixin, resources.Mod
         # must also ensure that preview does not persist MembershipRequest rows.
         if bool(kwargs.get("dry_run")):
             return
-        super().save_instance(instance, is_create, row, **kwargs)
+        # Without import_id_fields import-export treats every row as new and saves
+        # with force_insert, but import_instance() may have pointed the instance at
+        # an existing open request by assigning its pk; that must be an UPDATE.
+        super().save_instance(instance, instance.pk is None, row, **kwargs)
 
     @override
     def import_instance(self, instance: MembershipRequest, row: Any, **kwargs: Any) -> None:

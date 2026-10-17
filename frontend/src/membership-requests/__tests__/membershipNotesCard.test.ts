@@ -482,7 +482,7 @@ describe("MembershipNotesCard", () => {
                 avatar_kind: "user",
                 avatar_url: "",
                 timestamp: "2026-04-21T13:45:00+00:00",
-                timestamp_display: "2026-04-21 13:45",
+                timestamp_display: "April 21, 2026, 1:45 p.m.",
                 entries: [
                   {
                     kind: "action",
@@ -504,7 +504,7 @@ describe("MembershipNotesCard", () => {
                       logs: [
                         {
                           date: "2026-04-21T13:45:00+00:00",
-                          date_display: "2026-04-21 13:45",
+                          date_display: "April 21, 2026, 1:45 p.m.",
                           status: "sent",
                           message: "sent",
                           exception_type: "",
@@ -551,7 +551,7 @@ describe("MembershipNotesCard", () => {
 
     expect(wrapper.find(".direct-chat-infos .direct-chat-timestamp.float-left").text()).toContain(expectedTimestamp);
     expect(wrapper.text()).toContain(expectedTimestamp);
-    expect(wrapper.text()).not.toContain("2026-04-21 13:45");
+    expect(wrapper.text()).not.toContain("April 21, 2026, 1:45 p.m.");
     expect(wrapper.find('iframe[title="Email HTML preview"]').attributes("srcdoc")).toContain("<img src=x onerror=alert('boom')><p>HTML body</p>");
     expect(wrapper.find('.modal-body img').exists()).toBe(false);
     expect(wrapper.find('.modal-body script').exists()).toBe(false);
