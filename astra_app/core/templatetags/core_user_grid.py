@@ -110,9 +110,7 @@ def user_grid(context: Context, **kwargs: Any) -> str:
                     limit=max(100, len(members_by_username)),
                 )
                 display_name_match_usernames = {
-                    str(user.username).strip()
-                    for user in directory_matches
-                    if str(user.username).strip() in members_by_username
+                    user.username for user in directory_matches if user.username in members_by_username
                 }
 
             members_matching_query: list[str] = []

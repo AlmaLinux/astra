@@ -17,7 +17,15 @@ from core.mattermost_webhooks import (
     _render_template,
     dispatch_mattermost_event,
 )
-from core.models import AccountInvitation, MattermostWebhookEndpoint, MembershipLog, Organization
+from core.models import (
+    AccountInvitation,
+    Election,
+    MattermostWebhookEndpoint,
+    MembershipLog,
+    MembershipRequest,
+    MembershipType,
+    Organization,
+)
 from core.signals import CANONICAL_SIGNALS
 from core.tokens import election_genesis_chain_hash
 
@@ -141,13 +149,10 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertTrue(str(payload["text"]).strip())
 
     def test_build_payload_exposes_membership_request_details_in_template_context(self) -> None:
-        membership_request = SimpleNamespace(
+        membership_request = MembershipRequest(
             pk=42,
             requested_username="carol",
-            requested_organization_id=None,
-            organization_display_name="",
-            membership_type=SimpleNamespace(code="sponsorship", name="Sponsorship"),
-            target_kind=SimpleNamespace(value="user"),
+            membership_type=MembershipType(code="sponsorship", name="Sponsorship"),
         )
         endpoint = MattermostWebhookEndpoint(
             label="Ops",
@@ -165,11 +170,10 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertEqual(payload["text"], "type=sponsorship name=Sponsorship target=user")
 
     def test_membership_request_related_events_link_to_request_detail_page(self) -> None:
-        membership_request = SimpleNamespace(
+        membership_request = MembershipRequest(
             pk=42,
-            membership_type_id="sponsorship",
             requested_username="carol",
-            organization_display_name="Example Org",
+            membership_type=MembershipType(code="sponsorship", name="Sponsorship"),
         )
         expected_suffix = reverse("membership-request-detail", kwargs={"pk": membership_request.pk})
         event_keys = [
@@ -203,11 +207,10 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
                 self.assertTrue(str(payload["attachments"][0]["title_link"]).endswith(expected_suffix))
 
     def test_membership_request_payload_attachments_override_cannot_change_detail_link(self) -> None:
-        membership_request = SimpleNamespace(
+        membership_request = MembershipRequest(
             pk=42,
-            membership_type_id="sponsorship",
             requested_username="carol",
-            organization_display_name="Example Org",
+            membership_type=MembershipType(code="sponsorship", name="Sponsorship"),
         )
         endpoint = MattermostWebhookEndpoint(
             label="Ops",
@@ -231,11 +234,10 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertTrue(str(payload["attachments"][0]["title_link"]).endswith(expected_suffix))
 
     def test_membership_request_payload_multi_attachments_override_all_keep_detail_link(self) -> None:
-        membership_request = SimpleNamespace(
+        membership_request = MembershipRequest(
             pk=42,
-            membership_type_id="sponsorship",
             requested_username="carol",
-            organization_display_name="Example Org",
+            membership_type=MembershipType(code="sponsorship", name="Sponsorship"),
         )
         endpoint = MattermostWebhookEndpoint(
             label="Ops",
@@ -265,7 +267,7 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
             self.assertTrue(str(attachment["title_link"]).endswith(expected_suffix))
 
     def test_build_payload_exposes_election_opened_genesis_and_end_datetime(self) -> None:
-        election = SimpleNamespace(
+        election = Election(
             pk=7,
             name="Board 2026",
             end_datetime=datetime.datetime(2026, 5, 1, 12, 0, tzinfo=datetime.UTC),
@@ -285,7 +287,7 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
 
     @patch("core.mattermost_webhooks.Ballot.objects.latest_chain_head_hash_for_election", return_value="deadbeef")
     def test_build_payload_exposes_election_closed_final_chain_hash(self, _chain_hash_mock: Mock) -> None:
-        election = SimpleNamespace(
+        election = Election(
             pk=8,
             name="Board 2026",
             end_datetime=datetime.datetime(2026, 5, 1, 12, 0, tzinfo=datetime.UTC),
@@ -303,7 +305,7 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertEqual(payload["text"], "final=deadbeef")
 
     def test_build_payload_exposes_election_tallied_winners(self) -> None:
-        election = SimpleNamespace(
+        election = Election(
             pk=9,
             name="Board 2026",
             end_datetime=datetime.datetime(2026, 5, 1, 12, 0, tzinfo=datetime.UTC),
@@ -426,14 +428,13 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertEqual(by_title.get("Actor"), "alice")
 
     def test_build_payload_account_invitation_accepted_exposes_invitation_context_and_link(self) -> None:
-        invitation = SimpleNamespace(
+        invitation = AccountInvitation(
             pk=42,
             email="invitee@example.com",
             full_name="Invitee",
             accepted_username="alice",
             freeipa_matched_usernames=["alice", "ally"],
-            organization_id=7,
-            organization=SimpleNamespace(pk=7, name="Example Org"),
+            organization=Organization(pk=7, name="Example Org"),
         )
         endpoint = MattermostWebhookEndpoint(
             label="Ops",
@@ -788,6 +789,20 @@ class MattermostWebhookDispatchTests(TestCase):
         post_mock.assert_called_once()
         endpoint_arg = post_mock.call_args.args[0]
         self.assertEqual(endpoint_arg.pk, enabled_match.pk)
+
+    def test_dispatch_accepts_signal_kwargs_that_include_event_key(self) -> None:
+        # The debug signal sender adds event_key to the signal kwargs the receiver forwards.
+        MattermostWebhookEndpoint.objects.create(
+            label="Enabled match",
+            url="https://hooks.example.invalid/match",
+            enabled=True,
+            events=["election_opened"],
+        )
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            dispatch_mattermost_event("election_opened", event_key="election_opened", actor="alice")
+
+        post_mock.assert_called_once()
 
     def test_dispatch_logs_error_and_skips_when_events_field_is_malformed(self) -> None:
         MattermostWebhookEndpoint.objects.create(

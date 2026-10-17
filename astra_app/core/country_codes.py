@@ -16,11 +16,6 @@ class EmbargoedCountryMatch:
     label: str
 
 
-def country_attr_name() -> str:
-    name = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR or "").strip()
-    return name or "c"
-
-
 def _first_value(value: object) -> str:
     if value is None:
         return ""
@@ -44,7 +39,7 @@ def country_code_status_from_user_data(user_data: dict | None) -> CountryCodeSta
     if not isinstance(user_data, dict):
         return CountryCodeStatus(code=None, is_valid=False)
 
-    attr = country_attr_name()
+    attr = settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR
     raw = user_data.get(attr)
     if raw is None:
         raw = user_data.get(attr.lower())

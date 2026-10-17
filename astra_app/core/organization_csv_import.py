@@ -6,18 +6,17 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.urls import reverse
 from import_export import fields, resources
-from import_export.forms import ConfirmImportForm, ImportForm
+from import_export.forms import ConfirmImportForm
 from tablib import Dataset
 
 from core.address_geocoding import decompose_full_address_with_photon
 from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
 from core.csv_import_utils import (
+    CSVColumnImportForm,
     attach_unmatched_csv_to_result,
-    extract_csv_headers_from_uploaded_file,
     norm_csv_header,
     normalize_csv_email,
     sanitize_csv_cell,
-    set_form_column_field_choices,
 )
 from core.freeipa.user import FreeIPAUser
 from core.models import Organization
@@ -102,7 +101,9 @@ def _is_phone_value_valid(value: str) -> bool:
     return all(ch in allowed for ch in raw)
 
 
-class OrganizationCSVImportForm(ImportForm):
+class OrganizationCSVImportForm(CSVColumnImportForm):
+    column_field_names = _ORG_COLUMN_FIELDS
+
     name_column = forms.ChoiceField(required=False, choices=[("", "Auto-detect")])
     business_contact_name_column = forms.ChoiceField(required=False, choices=[("", "Auto-detect")])
     business_contact_email_column = forms.ChoiceField(required=False, choices=[("", "Auto-detect")])
@@ -123,34 +124,16 @@ class OrganizationCSVImportForm(ImportForm):
     state_column = forms.ChoiceField(required=False, choices=[("", "Auto-detect")])
     postal_code_column = forms.ChoiceField(required=False, choices=[("", "Auto-detect")])
 
-    representative_username_column = forms.ChoiceField(required=False, choices=[("", "Auto-detect")])
-    representative_email_column = forms.ChoiceField(required=False, choices=[("", "Auto-detect")])
-
-    @override
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-
-        format_field = self.fields.get("format")
-        if format_field is not None:
-            format_choices = list(format_field.choices)
-            if len(format_choices) == 1:
-                format_field.initial = format_choices[0][0]
-                format_field.widget = forms.HiddenInput()
-
-        self.fields["representative_username_column"].help_text = (
+    representative_username_column = forms.ChoiceField(
+        required=False,
+        choices=[("", "Auto-detect")],
+        help_text=(
             "Organizations are unclaimed by default. Provide representative_username or representative_email "
             "to suggest matches; you can select a representative during preview."
-        )
+        ),
+    )
+    representative_email_column = forms.ChoiceField(required=False, choices=[("", "Auto-detect")])
 
-        uploaded = self.files.get("import_file")
-        if uploaded is None:
-            return
-
-        headers = extract_csv_headers_from_uploaded_file(uploaded)
-        if not headers:
-            return
-
-        set_form_column_field_choices(form=self, field_names=_ORG_COLUMN_FIELDS, headers=headers)
 
 
 class OrganizationCSVConfirmImportForm(ConfirmImportForm):

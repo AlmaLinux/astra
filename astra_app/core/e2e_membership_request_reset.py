@@ -17,6 +17,21 @@ type WorkflowReviewNote = tuple[str, WorkflowReviewNoteAction, str, datetime.dat
 type WorkflowFinalState = str
 
 
+def ensure_individual_and_mirror_types(*, with_votes: bool = False) -> None:
+    """Seed the tiers most E2E slices share; *with_votes* also sets their election weights."""
+    for sort_order, (code, name, votes) in enumerate((("individual", "Individual", 1), ("mirror", "Mirror", 2))):
+        defaults: dict[str, object] = {
+            "name": name,
+            "group_cn": f"almalinux-{code}",
+            "category_id": code,
+            "sort_order": sort_order,
+            "enabled": True,
+        }
+        if with_votes:
+            defaults["votes"] = votes
+        MembershipType.objects.update_or_create(code=code, defaults=defaults)
+
+
 def seed_membership_request_workflow(
     *,
     requested_username: str,

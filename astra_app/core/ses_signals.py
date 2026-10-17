@@ -456,7 +456,7 @@ def _persist_ses_correlation_attempt(message: DjangoEmailMessage) -> None:
         )
         return
 
-    existing_request_id = str(ses_attempt.ses_request_id or "").strip() or None
+    existing_request_id = ses_attempt.ses_request_id or None
     if not created:
         if existing_request_id is None and request_id is not None:
             ses_attempt.ses_request_id = request_id

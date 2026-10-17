@@ -1,10 +1,10 @@
 import datetime
 import json
 import logging
+from functools import partial
 from smtplib import SMTPRecipientsRefused
 from urllib.parse import quote
 
-from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.core import signing
@@ -20,6 +20,7 @@ from core.account_invitation_reconcile import (
     reconcile_account_invitation_for_username,
 )
 from core.email_context import system_email_context
+from core.form_payloads import TEXT_INPUT_ATTRS, form_field_payload, form_payload
 from core.freeipa.circuit_breaker import _is_freeipa_availability_error
 from core.freeipa.client import _build_freeipa_client, _with_freeipa_service_client_retry
 from core.freeipa.exceptions import FreeIPAUnavailableError
@@ -38,18 +39,6 @@ from .forms_registration import PasswordSetForm, RegistrationForm, ResendRegistr
 from .tokens import make_registration_activation_token, read_registration_activation_token
 
 logger = logging.getLogger(__name__)
-
-_REGISTRATION_ALLOWED_FIELD_ATTRS = {
-    "autocomplete",
-    "autocapitalize",
-    "autocorrect",
-    "inputmode",
-    "maxlength",
-    "minlength",
-    "pattern",
-    "placeholder",
-    "spellcheck",
-}
 
 REGISTRATION_TEMPORARILY_UNAVAILABLE_MESSAGE = (
     "Registration is temporarily unavailable. Please try again in a few minutes. "
@@ -247,48 +236,8 @@ def _load_registration_invitation_token(request: HttpRequest) -> str:
     return invitation_token
 
 
-def _registration_field_widget_type(widget: forms.Widget) -> str:
-    if isinstance(widget, forms.HiddenInput):
-        return "hidden"
-    if isinstance(widget, forms.CheckboxInput):
-        return "checkbox"
-    if isinstance(widget, forms.EmailInput):
-        return "email"
-    if isinstance(widget, forms.PasswordInput):
-        return "password"
-    return "text"
-
-
-def _serialize_registration_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
-    widget = bound_field.field.widget
-    widget_attrs = bound_field.build_widget_attrs(widget.attrs)
-    widget_context = widget.get_context(bound_field.html_name, bound_field.value(), widget_attrs)["widget"]
-    attrs = {
-        name: str(value)
-        for name, value in widget_context["attrs"].items()
-        if value is not None and name in _REGISTRATION_ALLOWED_FIELD_ATTRS
-    }
-    payload: dict[str, object] = {
-        "name": bound_field.name,
-        "id": bound_field.id_for_label,
-        "widget": _registration_field_widget_type(widget),
-        "value": "" if widget_context.get("value") is None else str(widget_context.get("value")),
-        "required": bool(bound_field.field.required),
-        "disabled": bool(bound_field.field.disabled),
-        "errors": [str(error) for error in bound_field.errors],
-        "attrs": attrs,
-    }
-    if isinstance(widget, forms.CheckboxInput):
-        payload["checked"] = bool(widget_context["attrs"].get("checked"))
-    return payload
-
-
 def _serialize_registration_form(*, form: RegistrationForm | ResendRegistrationEmailForm | PasswordSetForm) -> dict[str, object]:
-    return {
-        "is_bound": form.is_bound,
-        "non_field_errors": [str(error) for error in form.non_field_errors()],
-        "fields": [_serialize_registration_form_field(bound_field=field) for field in form],
-    }
+    return form_payload(form, partial(form_field_payload, allowed_attrs=TEXT_INPUT_ATTRS))
 
 
 def _build_register_payload(*, form: RegistrationForm, registration_open: bool) -> dict[str, object]:

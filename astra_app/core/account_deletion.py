@@ -72,7 +72,7 @@ def execute_account_deletion_request(
     *,
     actor_username: str | None = None,
 ) -> int:
-    username = str(account_deletion_request.username or "").strip()
+    username = account_deletion_request.username
     blocker_codes, warnings = get_account_deletion_blockers(username)
     if blocker_codes:
         raise RuntimeError(" ".join(warnings) or f"Manual review required: {', '.join(blocker_codes)}")

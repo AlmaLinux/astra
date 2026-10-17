@@ -41,7 +41,7 @@ def bulk_invitation_template_names() -> list[str]:
 
 
 def _build_invitation_email_context(*, invitation: AccountInvitation, actor_username: str) -> dict[str, object]:
-    invitation_token = str(invitation.invitation_token or "").strip()
+    invitation_token = invitation.invitation_token
     register_path = reverse("register")
     if not register_path:
         raise PublicBaseUrlConfigurationError("Register URL path is unavailable.")
@@ -171,7 +171,7 @@ def build_freeipa_email_lookup() -> dict[str, set[str]]:
     mapping: dict[str, set[str]] = {}
     for user in users:
         email = normalize_invitation_email(user.email)
-        username = str(user.username or "").strip().lower()
+        username = user.username.lower()
         if not email or not username:
             continue
         mapping.setdefault(email, set()).add(username)

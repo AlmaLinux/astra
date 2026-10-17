@@ -8,23 +8,21 @@ from django import forms
 from django.db import transaction
 from django.utils import timezone
 from import_export import fields, resources
-from import_export.forms import ConfirmImportForm, ImportForm
 from tablib import Dataset
 
 from core import signals as astra_signals
 from core.csv_import_utils import (
+    TERM_COLUMN_ALIASES,
+    CSVColumnImportForm,
+    MembershipCSVImportLoggingMixin,
+    QuestionColumnsConfirmImportForm,
     attach_unmatched_csv_to_result,
-    extract_csv_headers_from_uploaded_file,
-    get_result_row_errors,
-    get_result_totals,
     norm_csv_header,
     parse_csv_date,
     resolve_column_header,
     sanitize_csv_cell,
-    set_form_column_field_choices,
 )
 from core.forms_membership import MembershipRequestForm
-from core.logging_extras import current_exception_log_fields
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAMissingUserPolicy,
@@ -121,7 +119,10 @@ def optional_organization_membership_csv_columns() -> tuple[str, ...]:
     return _display_names_for_specs(required=False)
 
 
-class OrganizationMembershipCSVImportForm(ImportForm):
+class OrganizationMembershipCSVImportForm(CSVColumnImportForm):
+    column_field_names = _ORG_MEMBERSHIP_COLUMN_FIELDS
+    with_question_columns = True
+
     membership_type = forms.ModelChoiceField(
         queryset=MembershipType.objects.filter(enabled=True, category__is_organization=True).order_by(
             "category__sort_order",
@@ -165,75 +166,8 @@ class OrganizationMembershipCSVImportForm(ImportForm):
         ),
     )
 
-    @override
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
 
-        format_field = self.fields.get("format")
-        if format_field is not None:
-            format_choices = list(format_field.choices)
-            if len(format_choices) == 1:
-                format_field.initial = format_choices[0][0]
-                format_field.widget = forms.HiddenInput()
-
-        for spec in MembershipRequestForm.all_question_specs():
-            field_name = f"{spec.field_name}_column"
-            if field_name not in self.fields:
-                self.fields[field_name] = forms.ChoiceField(
-                    required=False,
-                    choices=[("", "Auto-detect")],
-                    label=f"{spec.name} answer column",
-                    help_text=(
-                        "Optional: select which CSV column contains the answer for this membership question. "
-                        "Leave as Auto-detect to infer."
-                    ),
-                )
-            self.fields[field_name].widget.attrs["data-preferred-norms"] = "|".join(
-                filter(
-                    None,
-                    (
-                        norm_csv_header(spec.title),
-                        norm_csv_header(spec.name),
-                        *(norm_csv_header(alias) for alias in spec.csv_header_aliases),
-                        norm_csv_header(spec.field_name),
-                        norm_csv_header(spec.field_name.removeprefix("q_")),
-                    ),
-                )
-            )
-
-        uploaded = self.files.get("import_file")
-        if uploaded is None:
-            return
-
-        try:
-            headers = extract_csv_headers_from_uploaded_file(uploaded)
-        except Exception:
-            logger.exception(
-                "Unable to read CSV headers for organization membership import form",
-                extra=current_exception_log_fields(),
-            )
-            return
-
-        if not headers:
-            return
-
-        set_form_column_field_choices(
-            form=self,
-            field_names=_ORG_MEMBERSHIP_COLUMN_FIELDS,
-            headers=headers,
-        )
-
-        question_field_names = tuple(
-            f"{spec.field_name}_column" for spec in MembershipRequestForm.all_question_specs()
-        )
-        set_form_column_field_choices(
-            form=self,
-            field_names=question_field_names,
-            headers=headers,
-        )
-
-
-class OrganizationMembershipCSVConfirmImportForm(ConfirmImportForm):
+class OrganizationMembershipCSVConfirmImportForm(QuestionColumnsConfirmImportForm):
     membership_type = forms.ModelChoiceField(
         queryset=MembershipType.objects.filter(enabled=True, category__is_organization=True).order_by(
             "category__sort_order",
@@ -252,18 +186,10 @@ class OrganizationMembershipCSVConfirmImportForm(ConfirmImportForm):
     skip_existing_active_membership = forms.CharField(required=False, widget=forms.HiddenInput)
     selected_row_numbers = forms.CharField(required=False, widget=forms.HiddenInput)
 
-    @override
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
 
-        for spec in MembershipRequestForm.all_question_specs():
-            field_name = f"{spec.field_name}_column"
-            if field_name in self.fields:
-                continue
-            self.fields[field_name] = forms.CharField(required=False, widget=forms.HiddenInput)
+class OrganizationMembershipCSVImportResource(MembershipCSVImportLoggingMixin, resources.ModelResource):
+    log_label = "Organization membership CSV import"
 
-
-class OrganizationMembershipCSVImportResource(resources.ModelResource):
     organization_id = fields.Field(attribute="csv_organization_id", column_name="Organization ID", readonly=True)
     organization_name = fields.Field(attribute="csv_organization_name", column_name="Organization Name", readonly=True)
     membership_start_date = fields.Field(
@@ -334,60 +260,11 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
         self._import_batch_id: uuid.UUID | None = None
 
     @override
-    def import_data(self, dataset: Dataset, dry_run: bool = False, raise_errors: bool = False, **kwargs: Any) -> Any:
-        if not dry_run:
-            self._import_batch_id = uuid.uuid4()
-        try:
-            rows_total = len(dataset)
-        except Exception:
-            rows_total = 0
-
-        result: Any | None = None
-        outcome = "applied"
-        try:
-            result = super().import_data(dataset, dry_run=dry_run, raise_errors=raise_errors, **kwargs)
-            return result
-        except Exception:
-            outcome = "failed"
-            raise
-        finally:
-            if not dry_run:
-                rows_applied = 0
-                rows_failed = rows_total if outcome == "failed" else 0
-
-                if result is not None:
-                    try:
-                        totals = dict(getattr(result, "totals", {}) or {})
-                    except Exception:
-                        totals = {}
-
-                    rows_applied = (
-                        int(totals.get("new", 0))
-                        + int(totals.get("update", 0))
-                        + int(totals.get("delete", 0))
-                    )
-                    rows_failed = int(totals.get("error", 0)) + int(totals.get("invalid", 0))
-
-                correlation_id = str(self._import_batch_id)
-                logger.info(
-                    (
-                        "event=astra.membership.csv_import.batch_applied "
-                        f"component=membership outcome={outcome} "
-                        f"correlation_id={correlation_id} batch_id={self._import_batch_id} "
-                        f"rows_total={rows_total} rows_applied={rows_applied} rows_failed={rows_failed}"
-                    ),
-                    extra={
-                        "event": "astra.membership.csv_import.batch_applied",
-                        "component": "membership",
-                        "outcome": outcome,
-                        "correlation_id": correlation_id,
-                        "batch_id": self._import_batch_id,
-                        "rows_total": rows_total,
-                        "rows_applied": rows_applied,
-                        "rows_failed": rows_failed,
-                    },
-                )
-            self._import_batch_id = None
+    def _row_error_identity(self, row: Any) -> str:
+        return (
+            f"organization_id={self._row_value(row, 'organization_id')!r} "
+            f"organization_name={self._row_value(row, 'organization_name')!r}"
+        )
 
     @override
     def before_import(self, dataset: Dataset, **kwargs: Any) -> None:
@@ -401,54 +278,13 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
         header_by_norm = {norm_csv_header(header): header for header in headers if header}
 
         self._resolved_headers = {
-            "organization_id": resolve_column_header(
-                "organization_id",
-                headers,
-                header_by_norm,
-                self._column_overrides,
-                "organizationid",
-                "orgid",
-                "id",
-            ),
-            "organization_name": resolve_column_header(
-                "organization_name",
-                headers,
-                header_by_norm,
-                self._column_overrides,
-                "organizationname",
-                "orgname",
-                "name",
-            ),
-            "membership_start_date": resolve_column_header(
-                "membership_start_date",
-                headers,
-                header_by_norm,
-                self._column_overrides,
-                "membershipstartdate",
-                "startdate",
-            ),
-            "membership_end_date": resolve_column_header(
-                "membership_end_date",
-                headers,
-                header_by_norm,
-                self._column_overrides,
-                "membershipenddate",
-                "enddate",
-                "membershipexpirydate",
-                "membershipexpirationdate",
-                "expirydate",
-                "expirationdate",
-            ),
-            "committee_notes": resolve_column_header(
-                "committee_notes",
-                headers,
-                header_by_norm,
-                self._column_overrides,
-                "committeenotes",
-                "committeenote",
-                "note",
-                "notes",
-            ),
+            name: resolve_column_header(name, headers, header_by_norm, self._column_overrides, *aliases)
+            for name, aliases in {
+                "organization_id": ("organizationid", "orgid", "id"),
+                "organization_name": ("organizationname", "orgname", "name"),
+                **TERM_COLUMN_ALIASES,
+                "committee_notes": ("committeenotes", "committeenote", "note", "notes"),
+            }.items()
         }
 
         if self._resolved_headers["organization_id"] is None and self._resolved_headers["organization_name"] is None:
@@ -478,7 +314,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
         self._organizations_by_name = {}
         for organization in Organization.objects.all().only("id", "name"):
             self._organizations_by_id[organization.pk] = organization
-            key = str(organization.name).strip().casefold()
+            key = organization.name.strip().casefold()
             if key:
                 self._organizations_by_name.setdefault(key, []).append(organization)
 
@@ -685,7 +521,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
         approved_at = timezone.now().astimezone(datetime.UTC)
         representative_sync_payload: tuple[str, tuple[str, ...], str | None] | None = None
 
-        new_group_cn = str(membership_type.group_cn or "").strip()
+        new_group_cn = membership_type.group_cn
 
         if new_group_cn and organization.representative:
             old_membership = (
@@ -698,8 +534,8 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             )
             old_group_cn_for_cleanup: str | None = None
             if old_membership is not None and old_membership.membership_type.group_cn:
-                old_group_cn = str(old_membership.membership_type.group_cn or "").strip()
-                if old_group_cn and old_group_cn != new_group_cn:
+                old_group_cn = old_membership.membership_type.group_cn
+                if old_group_cn != new_group_cn:
                     old_group_cn_for_cleanup = old_group_cn
             representative_sync_payload = (
                 organization.representative,
@@ -729,10 +565,10 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
             approved_at=approved_at,
         )
 
-        # `create_for_approval_at()` persists the MembershipLog row and applies
+        # `create_for_approval()` persists the MembershipLog row and applies
         # DB membership side effects through the membership log service; any
         # FreeIPA representative-group sync still belongs to the caller.
-        approval_log = MembershipLog.create_for_approval_at(
+        approval_log = MembershipLog.create_for_approval(
             actor_username=self._actor_username,
             membership_type=membership_type,
             approved_at=approved_at,
@@ -830,97 +666,7 @@ class OrganizationMembershipCSVImportResource(resources.ModelResource):
     def after_import(self, dataset: Dataset, result: Any, **kwargs: Any) -> None:
         super().after_import(dataset, result, **kwargs)
 
-        totals = get_result_totals(result)
-
-        if totals:
-            logger.info(
-                "Organization membership CSV import result totals: %s",
-                " ".join(f"{key}={totals[key]}" for key in sorted(totals)),
-            )
-
-        row_errors_pairs, row_errors_flat = get_result_row_errors(result)
-
-        if row_errors_pairs:
-            limit = 25
-            shown = 0
-            for row_number, errors in row_errors_pairs:
-                for err in errors:
-                    shown += 1
-                    if shown > limit:
-                        break
-
-                    err_row = getattr(err, "row", None)
-                    try:
-                        org_id = self._row_value(err_row, "organization_id")
-                        org_name = self._row_value(err_row, "organization_name")
-                    except Exception:
-                        org_id = ""
-                        org_name = ""
-
-                    logger.error(
-                        "Organization membership CSV import: row exception row=%s organization_id=%r organization_name=%r exc=%r\n%s",
-                        row_number,
-                        org_id,
-                        org_name,
-                        getattr(err, "error", None),
-                        getattr(err, "traceback", ""),
-                    )
-
-                if shown > limit:
-                    break
-
-            total = sum(len(errors) for _row_number, errors in row_errors_pairs)
-            if total > limit:
-                logger.error(
-                    "Organization membership CSV import: %d more row exceptions not shown",
-                    total - limit,
-                )
-        elif row_errors_flat:
-            limit = 25
-            for err in row_errors_flat[:limit]:
-                err_row = getattr(err, "row", None)
-                row_number = getattr(err, "number", None)
-                try:
-                    org_id = self._row_value(err_row, "organization_id")
-                    org_name = self._row_value(err_row, "organization_name")
-                except Exception:
-                    org_id = ""
-                    org_name = ""
-
-                logger.error(
-                    "Organization membership CSV import: row exception row=%s organization_id=%r organization_name=%r exc=%r\n%s",
-                    row_number,
-                    org_id,
-                    org_name,
-                    getattr(err, "error", None),
-                    getattr(err, "traceback", ""),
-                )
-
-            if len(row_errors_flat) > limit:
-                logger.error(
-                    "Organization membership CSV import: %d more row exceptions not shown",
-                    len(row_errors_flat) - limit,
-                )
-
-        decision_summary = " ".join(
-            f"{decision}={self._decision_counts[decision]}" for decision in sorted(self._decision_counts)
-        )
-        if decision_summary:
-            logger.info(
-                "Organization membership CSV import summary: %s unmatched=%d dry_run=%s",
-                decision_summary,
-                len(self._unmatched),
-                bool(kwargs.get("dry_run")),
-            )
-
-        if self._skip_reason_counts:
-            top = sorted(self._skip_reason_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
-            logger.info(
-                "Organization membership CSV import skip reasons (top %d): %s",
-                len(top),
-                "; ".join(f"{reason} ({count})" for reason, count in top),
-            )
-
+        self._log_import_result(result, dry_run=bool(kwargs.get("dry_run")))
         if not self._unmatched:
             return
 

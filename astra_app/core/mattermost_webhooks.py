@@ -117,6 +117,32 @@ _ACCOUNT_DELETION_EVENT_TEXT = {
     "account_deletion_completed": "Account deletion completed",
 }
 
+_ELECTION_EVENT_TEXT = {
+    "election_opened": "Election opened",
+    "election_closed": "Election closed",
+    "election_tallied": "Election tallied",
+    "election_deadline_extended": "Election deadline extended",
+    "election_quorum_met": "Election quorum reached",
+}
+
+# Events whose fields describe a membership request (or, for the count-only ones, a batch).
+_MEMBERSHIP_EVENT_TEXT = {
+    "membership_request_submitted": "Membership request submitted",
+    "membership_request_approved": "Membership request approved",
+    "membership_request_rejected": "Membership request rejected",
+    "membership_request_rescinded": "Membership request rescinded",
+    "membership_rfi_sent": "Membership request RFI sent",
+    "membership_rfi_replied": "Membership request RFI replied",
+    "membership_expiring_soon": "Memberships expiring soon",
+    "membership_expired": "Memberships expired",
+    "organization_membership_request_submitted": "Organization membership request submitted",
+    "organization_membership_request_approved": "Organization membership request approved",
+    "organization_membership_request_rejected": "Organization membership request rejected",
+    "organization_membership_request_rescinded": "Organization membership request rescinded",
+    "organization_membership_rfi_sent": "Organization membership request RFI sent",
+    "organization_membership_rfi_replied": "Organization membership request RFI replied",
+}
+
 _COMMON_TEMPLATE_VARIABLES: dict[str, str] = {
     "actor": "Username that triggered the event (often empty for scheduled tasks).",
 }
@@ -426,22 +452,16 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
     if event_key.startswith("election_"):
         election = kwargs.get("election")
         if election is not None:
-            try:
-                return build_public_absolute_url(reverse("election-detail", args=[election.pk]), on_missing="relative")
-            except Exception:
-                return build_public_absolute_url(reverse("elections"), on_missing="relative")
+            return build_public_absolute_url(reverse("election-detail", args=[election.pk]), on_missing="relative")
         return build_public_absolute_url(reverse("elections"), on_missing="relative")
 
     if event_key in {"organization_claimed", "organization_created"}:
         organization = kwargs.get("organization")
         if organization is not None:
-            try:
-                return build_public_absolute_url(
-                    reverse("organization-detail", kwargs={"organization_id": organization.pk}),
-                    on_missing="relative",
-                )
-            except Exception:
-                return build_public_absolute_url(reverse("organizations"), on_missing="relative")
+            return build_public_absolute_url(
+                reverse("organization-detail", kwargs={"organization_id": organization.pk}),
+                on_missing="relative",
+            )
         return build_public_absolute_url(reverse("organizations"), on_missing="relative")
 
     if event_key in {"membership_expiring_soon", "membership_expired"}:
@@ -457,24 +477,13 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
         )
 
     if event_key in _ACCOUNT_DELETION_EVENTS:
-        account_deletion_request = kwargs.get("account_deletion_request")
-        if account_deletion_request is not None:
-            try:
-                return build_public_absolute_url(
-                    reverse("admin:core_accountdeletionrequest_change", args=[account_deletion_request.pk]),
-                    on_missing="relative",
-                )
-            except Exception:
-                pass
+        # Scheduled signals carry only the id; the template context fills it in from the object.
         account_deletion_request_id = kwargs.get("account_deletion_request_id")
-        if account_deletion_request_id is not None and str(account_deletion_request_id).strip():
-            try:
-                return build_public_absolute_url(
-                    reverse("admin:core_accountdeletionrequest_change", args=[account_deletion_request_id]),
-                    on_missing="relative",
-                )
-            except Exception:
-                pass
+        if account_deletion_request_id:
+            return build_public_absolute_url(
+                reverse("admin:core_accountdeletionrequest_change", args=[account_deletion_request_id]),
+                on_missing="relative",
+            )
         return build_public_absolute_url(
             reverse("admin:core_accountdeletionrequest_changelist"),
             on_missing="relative",
@@ -491,13 +500,10 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
 
     membership_request = kwargs.get("membership_request")
     if membership_request is not None:
-        try:
-            return build_public_absolute_url(
-                reverse("membership-request-detail", kwargs={"pk": membership_request.pk}),
-                on_missing="relative",
-            )
-        except Exception:
-            return membership_requests_url()
+        return build_public_absolute_url(
+            reverse("membership-request-detail", kwargs={"pk": membership_request.pk}),
+            on_missing="relative",
+        )
 
     return membership_requests_url()
 
@@ -505,14 +511,11 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
 def _election_fields(kwargs: dict[str, object]) -> list[dict[str, object]]:
     fields: list[dict[str, object]] = []
     election = kwargs.get("election")
-    actor = str(kwargs.get("actor") or "system").strip() or "system"
+    actor = kwargs.get("actor") or "system"
     if election is not None:
-        try:
-            fields.append({"title": "Election", "value": str(election.name), "short": True})
-            fields.append({"title": "Election ID", "value": str(election.pk), "short": True})
-            fields.append({"title": "Vote URL", "value": election_vote_url(request=None, election=election), "short": False})
-        except Exception:
-            fields.append({"title": "Election", "value": str(election), "short": True})
+        fields.append({"title": "Election", "value": election.name, "short": True})
+        fields.append({"title": "Election ID", "value": str(election.pk), "short": True})
+        fields.append({"title": "Vote URL", "value": election_vote_url(request=None, election=election), "short": False})
     fields.append({"title": "Actor", "value": actor, "short": True})
 
     if "previous_end_datetime" in kwargs:
@@ -526,24 +529,16 @@ def _election_fields(kwargs: dict[str, object]) -> list[dict[str, object]]:
 def _membership_fields(kwargs: dict[str, object], *, org_targeted: bool) -> list[dict[str, object]]:
     fields: list[dict[str, object]] = []
     membership_request = kwargs.get("membership_request")
-    actor = str(kwargs.get("actor") or "system").strip() or "system"
+    actor = kwargs.get("actor") or "system"
 
     if membership_request is not None:
-        try:
-            fields.append({"title": "Request ID", "value": str(membership_request.pk), "short": True})
-            fields.append({"title": "Membership type", "value": str(membership_request.membership_type_id), "short": True})
-            if org_targeted:
-                fields.append(
-                    {
-                        "title": "Organization",
-                        "value": str(kwargs.get("organization_display_name") or membership_request.organization_display_name),
-                        "short": True,
-                    }
-                )
-            else:
-                fields.append({"title": "Username", "value": str(membership_request.requested_username), "short": True})
-        except Exception:
-            fields.append({"title": "Membership request", "value": str(membership_request), "short": False})
+        fields.append({"title": "Request ID", "value": str(membership_request.pk), "short": True})
+        fields.append({"title": "Membership type", "value": membership_request.membership_type_id, "short": True})
+        if org_targeted:
+            organization_name = kwargs.get("organization_display_name") or membership_request.organization_display_name
+            fields.append({"title": "Organization", "value": organization_name, "short": True})
+        else:
+            fields.append({"title": "Username", "value": membership_request.requested_username, "short": True})
     else:
         count = kwargs.get("count")
         membership_type = kwargs.get("membership_type")
@@ -558,14 +553,11 @@ def _membership_fields(kwargs: dict[str, object], *, org_targeted: bool) -> list
 
 def _organization_fields(kwargs: dict[str, object]) -> list[dict[str, object]]:
     fields: list[dict[str, object]] = []
-    actor = str(kwargs.get("actor") or "system").strip() or "system"
+    actor = kwargs.get("actor") or "system"
     organization = kwargs.get("organization")
     if organization is not None:
-        try:
-            fields.append({"title": "Organization", "value": str(organization.name), "short": True})
-            fields.append({"title": "Organization ID", "value": str(organization.pk), "short": True})
-        except Exception:
-            fields.append({"title": "Organization", "value": str(organization), "short": True})
+        fields.append({"title": "Organization", "value": organization.name, "short": True})
+        fields.append({"title": "Organization ID", "value": str(organization.pk), "short": True})
     fields.append({"title": "Actor", "value": actor, "short": True})
     return fields
 
@@ -577,87 +569,30 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
 
     if event_key == "account_invitation_accepted":
         text = "Account invitation accepted"
-        actor = str(kwargs.get("actor") or "system").strip() or "system"
+        actor = kwargs.get("actor") or "system"
         fields: list[dict[str, object]] = []
         account_invitation = kwargs.get("account_invitation")
         if account_invitation is not None:
-            try:
-                fields.append({"title": "Invitation ID", "value": str(account_invitation.pk), "short": True})
-            except Exception:
-                pass
-            try:
-                invitation_email = str(account_invitation.email or "").strip()
-            except Exception:
-                invitation_email = ""
-            if invitation_email:
-                fields.append({"title": "Email", "value": invitation_email, "short": True})
-                title = f"Account invitation {invitation_email}"
-            try:
-                accepted_username = str(account_invitation.accepted_username or "").strip()
-            except Exception:
-                accepted_username = ""
-            if accepted_username:
-                fields.append({"title": "Accepted username", "value": accepted_username, "short": True})
-            try:
-                matched_usernames = list(account_invitation.freeipa_matched_usernames or [])
-            except Exception:
-                matched_usernames = []
-            if matched_usernames:
-                fields.append({"title": "Matched usernames", "value": ", ".join(map(str, matched_usernames)), "short": False})
-            try:
-                organization = account_invitation.organization
-            except Exception:
-                organization = None
-            if organization is not None:
-                try:
-                    organization_name = str(organization.name or "").strip()
-                except Exception:
-                    organization_name = ""
-                if organization_name:
-                    fields.append({"title": "Organization", "value": organization_name, "short": True})
+            fields.append({"title": "Invitation ID", "value": str(account_invitation.pk), "short": True})
+            if account_invitation.email:
+                fields.append({"title": "Email", "value": account_invitation.email, "short": True})
+            if account_invitation.accepted_username:
+                fields.append({"title": "Accepted username", "value": account_invitation.accepted_username, "short": True})
+            if account_invitation.freeipa_matched_usernames:
+                matched_usernames = ", ".join(account_invitation.freeipa_matched_usernames)
+                fields.append({"title": "Matched usernames", "value": matched_usernames, "short": False})
+            if account_invitation.organization is not None:
+                fields.append({"title": "Organization", "value": account_invitation.organization.name, "short": True})
         fields.append({"title": "Actor", "value": actor, "short": True})
-    elif event_key == "election_opened":
-        text = "Election opened"
+    elif event_key in _ELECTION_EVENT_TEXT:
+        text = _ELECTION_EVENT_TEXT[event_key]
         fields = _election_fields(kwargs)
-    elif event_key == "election_closed":
-        text = "Election closed"
-        fields = _election_fields(kwargs)
-    elif event_key == "election_tallied":
-        text = "Election tallied"
-        fields = _election_fields(kwargs)
-    elif event_key == "election_deadline_extended":
-        text = "Election deadline extended"
-        fields = _election_fields(kwargs)
-    elif event_key == "election_quorum_met":
-        text = "Election quorum reached"
-        fields = _election_fields(kwargs)
-    elif event_key == "membership_request_submitted":
-        text = "Membership request submitted"
-        fields = _membership_fields(kwargs, org_targeted=False)
-    elif event_key == "membership_request_approved":
-        text = "Membership request approved"
-        fields = _membership_fields(kwargs, org_targeted=False)
-    elif event_key == "membership_request_rejected":
-        text = "Membership request rejected"
-        fields = _membership_fields(kwargs, org_targeted=False)
-    elif event_key == "membership_request_rescinded":
-        text = "Membership request rescinded"
-        fields = _membership_fields(kwargs, org_targeted=False)
-    elif event_key == "membership_rfi_sent":
-        text = "Membership request RFI sent"
-        fields = _membership_fields(kwargs, org_targeted=False)
-    elif event_key == "membership_rfi_replied":
-        text = "Membership request RFI replied"
-        fields = _membership_fields(kwargs, org_targeted=False)
-    elif event_key == "membership_expiring_soon":
-        text = "Memberships expiring soon"
-        fields = _membership_fields(kwargs, org_targeted=False)
-    elif event_key == "membership_expired":
-        text = "Memberships expired"
-        fields = _membership_fields(kwargs, org_targeted=False)
+    elif event_key in _MEMBERSHIP_EVENT_TEXT:
+        text = _MEMBERSHIP_EVENT_TEXT[event_key]
+        fields = _membership_fields(kwargs, org_targeted=event_key.startswith("organization_"))
     elif event_key == "membership_self_terminated":
         text = "Membership self-terminated"
-        actor = str(kwargs.get("actor") or "system").strip() or "system"
+        actor = kwargs.get("actor") or "system"
         disp_username = str(kwargs.get("username") or "").strip()
         membership_type_code = str(kwargs.get("membership_type_code") or "").strip()
         membership_type_name = str(kwargs.get("membership_type_name") or "").strip()
@@ -673,7 +608,7 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
         fields.append({"title": "Actor", "value": actor, "short": True})
     elif event_key in _ACCOUNT_DELETION_EVENTS:
         text = _ACCOUNT_DELETION_EVENT_TEXT.get(event_key, _event_title(event_key))
-        actor = str(kwargs.get("actor") or "system").strip() or "system"
+        actor = kwargs.get("actor") or "system"
         request_id = str(kwargs.get("account_deletion_request_id") or "").strip()
         disp_username = str(kwargs.get("account_deletion_username") or "").strip()
         status = str(kwargs.get("account_deletion_status") or "").strip()
@@ -691,29 +626,8 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
         if blocker_codes_csv:
             fields.append({"title": "Blockers", "value": blocker_codes_csv, "short": False})
         fields.append({"title": "Actor", "value": actor, "short": True})
-    elif event_key == "organization_membership_request_submitted":
-        text = "Organization membership request submitted"
-        fields = _membership_fields(kwargs, org_targeted=True)
-    elif event_key == "organization_membership_request_approved":
-        text = "Organization membership request approved"
-        fields = _membership_fields(kwargs, org_targeted=True)
-    elif event_key == "organization_membership_request_rejected":
-        text = "Organization membership request rejected"
-        fields = _membership_fields(kwargs, org_targeted=True)
-    elif event_key == "organization_membership_request_rescinded":
-        text = "Organization membership request rescinded"
-        fields = _membership_fields(kwargs, org_targeted=True)
-    elif event_key == "organization_membership_rfi_sent":
-        text = "Organization membership request RFI sent"
-        fields = _membership_fields(kwargs, org_targeted=True)
-    elif event_key == "organization_membership_rfi_replied":
-        text = "Organization membership request RFI replied"
-        fields = _membership_fields(kwargs, org_targeted=True)
-    elif event_key == "organization_claimed":
-        text = "Organization claimed"
-        fields = _organization_fields(kwargs)
-    elif event_key == "organization_created":
-        text = "Organization created"
+    elif event_key in {"organization_claimed", "organization_created"}:
+        text = "Organization claimed" if event_key == "organization_claimed" else "Organization created"
         fields = _organization_fields(kwargs)
     elif event_key in {"organization_country_changed", "organization_embargoed_country_changed"}:
         text = (
@@ -734,7 +648,7 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
             if event_key == "user_embargoed_country_changed"
             else "User country changed"
         )
-        actor = str(kwargs.get("actor") or "system").strip() or "system"
+        actor = kwargs.get("actor") or "system"
         disp_username = str(kwargs.get("username") or "").strip()
         old_country = str(kwargs.get("old_country") or "").strip()
         new_country = str(kwargs.get("new_country") or "").strip()
@@ -750,16 +664,15 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
         text = title
         fields = [{"title": "Event", "value": event_key, "short": True}]
 
+    election = kwargs.get("election")
+    account_invitation = kwargs.get("account_invitation")
+    membership_request = kwargs.get("membership_request")
     if event_key.startswith("election_"):
-        try:
-            title = f"Election {kwargs.get('election').name}"
-        except Exception:
-            pass
+        if election is not None:
+            title = f"Election {election.name}"
     elif event_key == "account_invitation_accepted":
-        try:
-            title = f"Account invitation {kwargs.get('account_invitation').email}"
-        except Exception:
-            pass
+        if account_invitation is not None and account_invitation.email:
+            title = f"Account invitation {account_invitation.email}"
     elif event_key == "membership_self_terminated":
         membership_type_name = str(kwargs.get("membership_type_name") or "").strip()
         if membership_type_name:
@@ -768,11 +681,9 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
         request_id = str(kwargs.get("account_deletion_request_id") or "").strip()
         if request_id:
             title = f"Deletion request {request_id}"
-    elif event_key.startswith("membership_") or event_key.startswith("organization_membership_"):
-        try:
-            title = f"Membership request {kwargs.get('membership_request').pk}"
-        except Exception:
-            pass
+    elif event_key.startswith(("membership_", "organization_membership_")):
+        if membership_request is not None:
+            title = f"Membership request {membership_request.pk}"
 
     return {
         "text": text,
@@ -856,126 +767,50 @@ def _extract_tallied_winner_usernames(tally_result: object) -> list[str]:
     return list(dict.fromkeys(winners))
 
 
+def _non_empty(values: dict[str, object]) -> dict[str, object]:
+    """Drop empty values, so templates see them as missing rather than rendering "None"."""
+    return {key: value for key, value in values.items() if value not in (None, "", [])}
+
+
 def _membership_request_template_context(kwargs: dict[str, object]) -> dict[str, object]:
-    context: dict[str, object] = {}
     membership_request = kwargs.get("membership_request")
     if membership_request is None:
-        return context
+        return {}
 
-    try:
-        context["membership_request_id"] = membership_request.pk
-    except Exception:
-        pass
-
-    try:
-        membership_type = membership_request.membership_type
-    except Exception:
-        membership_type = None
-
-    if membership_type is not None:
-        try:
-            membership_type_code = str(membership_type.code or "").strip()
-            if membership_type_code:
-                context["membership_type_code"] = membership_type_code
-        except Exception:
-            pass
-
-        try:
-            membership_type_name = str(membership_type.name or "").strip()
-            if membership_type_name:
-                context["membership_type_name"] = membership_type_name
-        except Exception:
-            pass
-
-    try:
-        target_kind = membership_request.target_kind
-        kind_value = target_kind.value
-    except Exception:
-        try:
-            kind_value = str(membership_request.target_kind or "").strip()
-        except Exception:
-            kind_value = ""
-    if kind_value:
-        context["membership_target_kind"] = kind_value
-
-    try:
-        requested_username = str(membership_request.requested_username or "").strip()
-    except Exception:
-        requested_username = ""
-    if requested_username:
-        context["requested_username"] = requested_username
-
-    try:
-        requested_organization_id = membership_request.requested_organization_id
-    except Exception:
-        requested_organization_id = None
-    if requested_organization_id is not None:
-        context["requested_organization_id"] = requested_organization_id
-
-    try:
-        requested_organization_name = str(membership_request.organization_display_name or "").strip()
-    except Exception:
-        requested_organization_name = ""
-    if requested_organization_name:
-        context["requested_organization_name"] = requested_organization_name
-
-    return context
+    return _non_empty(
+        {
+            "membership_request_id": membership_request.pk,
+            "membership_type_code": membership_request.membership_type.code,
+            "membership_type_name": membership_request.membership_type.name,
+            "membership_target_kind": membership_request.target_kind.value,
+            "requested_username": membership_request.requested_username,
+            "requested_organization_id": membership_request.requested_organization_id,
+            "requested_organization_name": membership_request.organization_display_name,
+        }
+    )
 
 
 def _election_template_context(event_key: str, kwargs: dict[str, object]) -> dict[str, object]:
-    context: dict[str, object] = {}
     election = kwargs.get("election")
     if election is None:
-        return context
+        return {}
 
-    try:
-        election_id = election.pk
-    except Exception:
-        election_id = None
-
-    if election_id is not None:
-        context["election_id"] = election_id
-        context["election_genesis_hash"] = election_genesis_chain_hash(election_id)
-
-    try:
-        election_name = str(election.name or "").strip()
-    except Exception:
-        election_name = ""
-    if election_name:
-        context["election_name"] = election_name
-
-    try:
-        election_end_datetime = election.end_datetime
-    except Exception:
-        election_end_datetime = None
-    if isinstance(election_end_datetime, datetime.datetime):
-        context["election_end_datetime"] = election_end_datetime
-        context["election_end_datetime_iso"] = election_end_datetime.isoformat()
-
+    genesis_hash = election_genesis_chain_hash(election.pk)
+    context: dict[str, object] = {
+        "election_id": election.pk,
+        "election_genesis_hash": genesis_hash,
+        "election_name": election.name,
+        "election_end_datetime": election.end_datetime,
+        "election_end_datetime_iso": election.end_datetime.isoformat(),
+    }
     if event_key == "election_closed":
-        final_chain_hash: str | None = None
-        try:
-            latest_chain_hash = Ballot.objects.latest_chain_head_hash_for_election(election=election)
-            if latest_chain_hash:
-                final_chain_hash = str(latest_chain_hash)
-        except Exception:
-            final_chain_hash = None
-
-        if not final_chain_hash and "election_genesis_hash" in context:
-            final_chain_hash = str(context["election_genesis_hash"])
-
-        if final_chain_hash:
-            context["election_final_chain_hash"] = final_chain_hash
-
+        context["election_final_chain_hash"] = (
+            Ballot.objects.latest_chain_head_hash_for_election(election=election) or genesis_hash
+        )
     if event_key == "election_tallied":
-        try:
-            winners = _extract_tallied_winner_usernames(election.tally_result)
-        except Exception:
-            winners = []
-
+        winners = _extract_tallied_winner_usernames(election.tally_result)
         context["election_winners"] = winners
         context["election_winners_csv"] = ", ".join(winners)
-
     return context
 
 
@@ -986,116 +821,40 @@ def _build_template_context(event_key: str, kwargs: dict[str, object]) -> dict[s
 
     account_invitation = kwargs.get("account_invitation")
     if account_invitation is not None:
-        try:
-            context["account_invitation_id"] = account_invitation.pk
-        except Exception:
-            pass
+        accepted_at = account_invitation.accepted_at
+        organization = account_invitation.organization
+        context |= _non_empty(
+            {
+                "account_invitation_id": account_invitation.pk,
+                "account_invitation_email": account_invitation.email,
+                "account_invitation_full_name": account_invitation.full_name,
+                "account_invitation_accepted_username": account_invitation.accepted_username,
+                "account_invitation_accepted_at": accepted_at,
+                "account_invitation_accepted_at_iso": accepted_at.isoformat() if accepted_at else None,
+                "account_invitation_matched_usernames": account_invitation.freeipa_matched_usernames,
+                "account_invitation_matched_usernames_csv": ", ".join(account_invitation.freeipa_matched_usernames),
+                "account_invitation_organization_id": account_invitation.organization_id,
+                "account_invitation_organization_name": organization.name if organization is not None else None,
+            }
+        )
 
-        try:
-            invitation_email = str(account_invitation.email or "").strip()
-        except Exception:
-            invitation_email = ""
-        if invitation_email:
-            context["account_invitation_email"] = invitation_email
-
-        try:
-            invitation_full_name = str(account_invitation.full_name or "").strip()
-        except Exception:
-            invitation_full_name = ""
-        if invitation_full_name:
-            context["account_invitation_full_name"] = invitation_full_name
-
-        try:
-            accepted_username = str(account_invitation.accepted_username or "").strip()
-        except Exception:
-            accepted_username = ""
-        if accepted_username:
-            context["account_invitation_accepted_username"] = accepted_username
-
-        try:
-            accepted_at = account_invitation.accepted_at
-        except Exception:
-            accepted_at = None
-        if isinstance(accepted_at, datetime.datetime):
-            context["account_invitation_accepted_at"] = accepted_at
-            context["account_invitation_accepted_at_iso"] = accepted_at.isoformat()
-
-        try:
-            matched_usernames = list(account_invitation.freeipa_matched_usernames or [])
-        except Exception:
-            matched_usernames = []
-        if matched_usernames:
-            context["account_invitation_matched_usernames"] = matched_usernames
-            context["account_invitation_matched_usernames_csv"] = ", ".join(map(str, matched_usernames))
-
-        try:
-            organization_id = account_invitation.organization_id
-        except Exception:
-            organization_id = None
-        if organization_id is not None:
-            context["account_invitation_organization_id"] = organization_id
-
-        try:
-            organization = account_invitation.organization
-        except Exception:
-            organization = None
-        if organization is not None:
-            try:
-                organization_name = str(organization.name or "").strip()
-            except Exception:
-                organization_name = ""
-            if organization_name:
-                context["account_invitation_organization_name"] = organization_name
-
+    # Count-only events (expiring soon, expired) pass a type code string rather than the model.
     membership_type = kwargs.get("membership_type")
-    if membership_type is not None:
-        try:
-            membership_type_code = str(membership_type.code or "").strip()
-        except Exception:
-            membership_type_code = ""
-        if membership_type_code:
-            context["membership_type_code"] = membership_type_code
-
-        try:
-            membership_type_name = str(membership_type.name or "").strip()
-        except Exception:
-            membership_type_name = ""
-        if membership_type_name:
-            context["membership_type_name"] = membership_type_name
+    if membership_type is not None and not isinstance(membership_type, str):
+        context |= _non_empty({"membership_type_code": membership_type.code, "membership_type_name": membership_type.name})
 
     account_deletion_request = kwargs.get("account_deletion_request")
     if account_deletion_request is not None:
-        try:
-            context["account_deletion_request_id"] = account_deletion_request.pk
-        except Exception:
-            pass
-
-        try:
-            deletion_username = str(account_deletion_request.username or "").strip()
-        except Exception:
-            deletion_username = ""
-        if deletion_username:
-            context["account_deletion_username"] = deletion_username
-
-        try:
-            deletion_status = str(account_deletion_request.status or "").strip()
-        except Exception:
-            deletion_status = ""
-        if deletion_status:
-            context["account_deletion_status"] = deletion_status
-
-        try:
-            manual_review_required = bool(account_deletion_request.manual_review_required)
-        except Exception:
-            manual_review_required = False
-        context["account_deletion_manual_review_required"] = manual_review_required
-
-        try:
-            blocker_codes = list(account_deletion_request.blocker_codes or [])
-        except Exception:
-            blocker_codes = []
-        context["account_deletion_blocker_codes"] = blocker_codes
-        context["account_deletion_blocker_codes_csv"] = ", ".join(map(str, blocker_codes))
+        context |= _non_empty(
+            {
+                "account_deletion_request_id": account_deletion_request.pk,
+                "account_deletion_username": account_deletion_request.username,
+                "account_deletion_status": account_deletion_request.status,
+            }
+        )
+        context["account_deletion_manual_review_required"] = account_deletion_request.manual_review_required
+        context["account_deletion_blocker_codes"] = account_deletion_request.blocker_codes
+        context["account_deletion_blocker_codes_csv"] = ", ".join(account_deletion_request.blocker_codes)
 
     # Expose only the id and category: the object's free-text reason must not reach
     # Mattermost, which would keep it past the privacy cleanup window.
@@ -1212,7 +971,7 @@ def _sanitize_response_excerpt(body_text: str, *, max_chars: int = 280) -> str:
 
 
 def _default_icon_url() -> str | None:
-    configured_icon = str(settings.MATTERMOST_WEBHOOK_DEFAULT_ICON_URL or "").strip()
+    configured_icon = settings.MATTERMOST_WEBHOOK_DEFAULT_ICON_URL
     if not configured_icon:
         return None
     if configured_icon.startswith("http://") or configured_icon.startswith("https://"):
@@ -1223,7 +982,7 @@ def _default_icon_url() -> str | None:
 def _apply_default_identity(payload: dict[str, object]) -> dict[str, object]:
     outbound_payload = dict(payload)
 
-    default_username = str(settings.MATTERMOST_WEBHOOK_DEFAULT_USERNAME or "").strip()
+    default_username = settings.MATTERMOST_WEBHOOK_DEFAULT_USERNAME
     current_username = str(outbound_payload.get("username") or "").strip()
     if default_username and not current_username:
         outbound_payload["username"] = default_username
@@ -1284,7 +1043,8 @@ def _post_to_endpoint(endpoint: MattermostWebhookEndpoint, payload: dict[str, ob
     )
 
 
-def dispatch_mattermost_event(event_key: str, **kwargs: object) -> None:
+# Positional-only: the forwarded signal kwargs may carry their own event_key (the debug sender adds one).
+def dispatch_mattermost_event(event_key: str, /, **kwargs: object) -> None:
     try:
         if event_key not in CANONICAL_SIGNALS:
             logger.warning("mattermost.unknown_event_key", extra={"event_key": event_key})

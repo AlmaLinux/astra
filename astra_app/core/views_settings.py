@@ -5,6 +5,7 @@ import io
 import logging
 import os
 from base64 import b32encode
+from functools import partial
 from types import SimpleNamespace
 from typing import Any, Final
 from urllib.parse import quote
@@ -42,6 +43,7 @@ from core.agreements import (
 from core.avatar_storage import avatar_path_handler
 from core.country_codes import is_valid_country_alpha2, normalize_country_alpha2
 from core.email_context import system_email_context, user_email_context
+from core.form_payloads import TEXT_INPUT_ATTRS, form_field_payload, form_payload
 from core.forms_selfservice import (
     AccountDeletionRequestForm,
     EmailsForm,
@@ -842,26 +844,15 @@ def _active_account_deletion_request(username: str) -> AccountDeletionRequest | 
     )
 
 
-_SETTINGS_ALLOWED_WIDGET_ATTRS: Final[frozenset[str]] = frozenset(
-    {
-        "accept",
-        "autocomplete",
-        "autocapitalize",
-        "autocorrect",
-        "class",
-        "inputmode",
-        "list",
-        "maxlength",
-        "minlength",
-        "multiple",
-        "pattern",
-        "placeholder",
-        "readonly",
-        "rows",
-        "spellcheck",
-        "step",
-    }
-)
+_SETTINGS_ALLOWED_WIDGET_ATTRS: Final[frozenset[str]] = TEXT_INPUT_ATTRS | {
+    "accept",
+    "class",
+    "list",
+    "multiple",
+    "readonly",
+    "rows",
+    "step",
+}
 
 
 def _settings_json_response(payload: dict[str, object], *, status: int = 200) -> JsonResponse:
@@ -962,59 +953,8 @@ def _load_settings_email_validation_state(
     }
 
 
-def _settings_form_widget_type(widget: forms.Widget) -> str:
-    if isinstance(widget, forms.HiddenInput):
-        return "hidden"
-    if isinstance(widget, forms.PasswordInput):
-        return "password"
-    if isinstance(widget, forms.EmailInput):
-        return "email"
-    if isinstance(widget, forms.Textarea):
-        return "textarea"
-    if isinstance(widget, forms.Select):
-        return "select"
-    if isinstance(widget, forms.CheckboxInput):
-        return "checkbox"
-    if isinstance(widget, forms.ClearableFileInput):
-        return "file"
-    return "text"
-
-
-def _serialize_settings_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
-    widget = bound_field.field.widget
-    widget_attrs = bound_field.build_widget_attrs(widget.attrs)
-    widget_context = widget.get_context(bound_field.html_name, bound_field.value(), widget_attrs)["widget"]
-    attrs = {
-        key: str(value)
-        for key, value in widget_context["attrs"].items()
-        if value is not None and key in _SETTINGS_ALLOWED_WIDGET_ATTRS
-    }
-    payload: dict[str, object] = {
-        "name": bound_field.name,
-        "id": bound_field.id_for_label,
-        "widget": _settings_form_widget_type(widget),
-        "value": widget_context.get("value") if widget_context.get("value") is not None else "",
-        "required": bool(bound_field.field.required),
-        "disabled": bool(bound_field.field.disabled),
-        "errors": [str(error) for error in bound_field.errors],
-        "attrs": attrs,
-    }
-    if isinstance(widget, forms.CheckboxInput):
-        payload["checked"] = bool(bound_field.value())
-    if isinstance(widget, forms.Select):
-        payload["options"] = [
-            {"value": str(option_value), "label": str(option_label)}
-            for option_value, option_label in bound_field.field.choices
-        ]
-    return payload
-
-
 def _serialize_settings_form(*, form: forms.Form) -> dict[str, object]:
-    return {
-        "is_bound": form.is_bound,
-        "non_field_errors": [str(error) for error in form.non_field_errors()],
-        "fields": [_serialize_settings_form_field(bound_field=field) for field in form],
-    }
+    return form_payload(form, partial(form_field_payload, allowed_attrs=_SETTINGS_ALLOWED_WIDGET_ATTRS))
 
 
 def _serialize_settings_profile_tab(context: dict[str, object]) -> dict[str, object]:

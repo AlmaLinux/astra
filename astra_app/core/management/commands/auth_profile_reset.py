@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.account_deletion import invalidate_sessions_for_freeipa_username
+from core.e2e_membership_request_reset import ensure_individual_and_mirror_types
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.client import clear_freeipa_service_client_cache
 from core.freeipa.e2e_registry import (
@@ -26,7 +27,6 @@ from core.models import (
     Membership,
     MembershipLog,
     MembershipRequest,
-    MembershipType,
 )
 from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 from core.rate_limit import clear_subject_rate_limit
@@ -74,32 +74,10 @@ class Command(BaseCommand):
         clear_freeipa_service_client_cache()
 
         with transaction.atomic():
-            self._ensure_membership_types()
+            ensure_individual_and_mirror_types()
             self._clear_profile_membership_slice()
             payload = self._seed_playwright_state()
         self.stdout.write(json.dumps(payload))
-
-    def _ensure_membership_types(self) -> None:
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="mirror",
-            defaults={
-                "name": "Mirror",
-                "group_cn": "almalinux-mirror",
-                "category_id": "mirror",
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
 
     def _clear_profile_membership_slice(self) -> None:
         target_usernames = [PROFILE_OWNER_USERNAME, PRIVATE_PROFILE_USERNAME, MEMBERSHIP_REVIEWER_USERNAME]

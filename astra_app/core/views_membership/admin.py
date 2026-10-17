@@ -70,12 +70,7 @@ def _load_representative_full_names(usernames: set[str]) -> dict[str, str]:
     use_bulk_lookup = len(usernames_to_lookup) > 1
     if use_bulk_lookup:
         all_freeipa_users = FreeIPAUser.all()
-        users_by_username = {
-            username: user
-            for user in all_freeipa_users
-            for username in [str(user.username or "").strip()]
-            if username
-        }
+        users_by_username = {user.username: user for user in all_freeipa_users if user.username}
         if not users_by_username:
             # FreeIPAUser.all() can return [] when the backend is unavailable.
             # Fall back to per-user lookups to preserve existing behavior.
@@ -99,9 +94,8 @@ def _load_representative_full_names(usernames: set[str]) -> dict[str, str]:
         if representative is None:
             continue
 
-        full_name = str(representative.full_name or "").strip()
-        if full_name:
-            representative_full_names[username] = full_name
+        if representative.full_name:
+            representative_full_names[username] = representative.full_name
 
     return representative_full_names
 
@@ -109,9 +103,9 @@ def _load_representative_full_names(usernames: set[str]) -> dict[str, str]:
 def _build_membership_sponsor_rows(*, q: str) -> list[dict[str, object]]:
     active_sponsorships = _load_active_sponsorship_memberships()
     representative_usernames = {
-        str(membership.target_organization.representative or "").strip()
+        membership.target_organization.representative
         for membership in active_sponsorships
-        if membership.target_organization is not None and str(membership.target_organization.representative or "").strip()
+        if membership.target_organization is not None and membership.target_organization.representative
     }
     representative_full_names = _load_representative_full_names(representative_usernames)
 
@@ -124,7 +118,7 @@ def _build_membership_sponsor_rows(*, q: str) -> list[dict[str, object]]:
         if organization is None:
             continue
 
-        rep_username = str(organization.representative or "").strip()
+        rep_username = organization.representative
         rep_fullname = representative_full_names.get(rep_username, "")
 
         days_left = (membership.expires_at - now).days
@@ -274,10 +268,6 @@ def _load_active_membership_or_redirect(
     return active_membership
 
 
-def _membership_group_cn(membership_type: MembershipType) -> str:
-    return str(membership_type.group_cn or "").strip()
-
-
 def _remove_freeipa_group_membership(
     *,
     request: HttpRequest,
@@ -411,8 +401,8 @@ def _remove_organization_representative_group_membership_if_present(
     error_message: str,
     log_message: str,
 ) -> HttpResponse | None:
-    group_cn = _membership_group_cn(membership_type)
-    rep_username = str(organization.representative or "").strip()
+    group_cn = membership_type.group_cn
+    rep_username = organization.representative
     if not group_cn or not rep_username:
         return None
 
@@ -567,7 +557,7 @@ def membership_terminate(
         messages.error(request, "Type the username to confirm the termination.")
         return redirect(resolved_redirect)
 
-    group_cn = _membership_group_cn(membership_type)
+    group_cn = membership_type.group_cn
     error_redirect = _remove_group_membership_if_present(
         request=request,
         user=target,

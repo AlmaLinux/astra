@@ -626,9 +626,7 @@ def _build_organizations_page_context(request: HttpRequest) -> dict[str, object]
         }
         for search_query in search_queries:
             representative_matches_by_query[search_query] = {
-                str(user.username).strip()
-                for user in search_freeipa_users(query=search_query, limit=100)
-                if str(user.username).strip()
+                user.username for user in search_freeipa_users(query=search_query, limit=100) if user.username
             }
 
     sponsor_card_context = _build_organization_membership_card_context(
@@ -1152,7 +1150,7 @@ def organization_representatives_search(request: HttpRequest) -> HttpResponse:
     if organization_id and organization_id.isdigit():
         org = Organization.objects.filter(pk=int(organization_id)).only("representative").first()
         if org is not None:
-            current_rep = str(org.representative or "").strip()
+            current_rep = org.representative
             if current_rep:
                 taken_representatives.discard(current_rep)
 
@@ -1255,7 +1253,7 @@ def organization_delete(request: HttpRequest, organization_id: int) -> HttpRespo
 
     # Remove representative from ALL active membership FreeIPA groups before
     # deleting. CASCADE on Membership.target_organization handles DB cleanup.
-    rep_username = str(organization.representative or "").strip()
+    rep_username = organization.representative
     active_memberships = list(
         Membership.objects.select_related("membership_type")
         .filter(target_organization=organization)
@@ -1265,7 +1263,7 @@ def organization_delete(request: HttpRequest, organization_id: int) -> HttpRespo
         rep = FreeIPAUser.get(rep_username)
         if rep is not None:
             for membership in active_memberships:
-                group_cn = str(membership.membership_type.group_cn or "").strip()
+                group_cn = membership.membership_type.group_cn
                 if group_cn and group_cn in rep.groups_list:
                     outcome = remove_organization_representative_from_group_if_present(
                         representative_username=rep_username,

@@ -65,7 +65,7 @@ def parse_chat_identity(value: str, *, scheme_override: str | None = None) -> Pa
         return None
 
     parsed = urlparse(raw)
-    parsed_scheme = (parsed.scheme or "").lower()
+    parsed_scheme = parsed.scheme.lower()
 
     if scheme_override:
         try:
@@ -88,7 +88,7 @@ def parse_chat_identity(value: str, *, scheme_override: str | None = None) -> Pa
     team: str
 
     if parsed_scheme:
-        path = (parsed.path or "").lstrip("/")
+        path = parsed.path.lstrip("/")
         team = ""
         server_from_url = _normalize_str(parsed.netloc) or ""
 
@@ -295,7 +295,7 @@ def parse_chat_channel(value: str, *, scheme_override: str | None = None) -> Par
         return None
 
     parsed = urlparse(raw)
-    parsed_scheme = (parsed.scheme or "").lower()
+    parsed_scheme = parsed.scheme.lower()
 
     if scheme_override:
         try:
@@ -330,7 +330,7 @@ def parse_chat_channel(value: str, *, scheme_override: str | None = None) -> Par
             if server_from_url == "channels":
                 server = default_server
 
-            path = (parsed.path or "").lstrip("/")
+            path = parsed.path.lstrip("/")
             parts = [p for p in path.split("/") if p]
             # Stored forms:
             # - mattermost://channels/<channel>
@@ -354,7 +354,7 @@ def parse_chat_channel(value: str, *, scheme_override: str | None = None) -> Par
         if parsed.fragment:
             channel = f"#{parsed.fragment.strip()}"
         else:
-            path = (parsed.path or "").lstrip("/")
+            path = parsed.path.lstrip("/")
             channel = path.strip()
             if channel and not channel.startswith("#"):
                 channel = f"#{channel}"
@@ -485,7 +485,7 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
             raise ValueError(f"Each value must be at most {max_item_len} characters")
 
         parsed = urlparse(compact)
-        scheme_raw = (parsed.scheme or "").lower()
+        scheme_raw = parsed.scheme.lower()
 
         if scheme_raw in {"irc", "ircs", "matrix", "mattermost"}:
             scheme = ChatScheme.irc if scheme_raw == "ircs" else ChatScheme(scheme_raw)
@@ -496,7 +496,7 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
             team = ""
 
             if scheme == ChatScheme.mattermost:
-                path = (parsed.path or "").lstrip("/")
+                path = parsed.path.lstrip("/")
                 parts = [p for p in path.split("/") if p]
                 channel = ""
                 if server == "channels":
@@ -544,7 +544,7 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
             if parsed.fragment:
                 channel = f"#{parsed.fragment.strip()}"
             else:
-                path = (parsed.path or "").lstrip("/").strip()
+                path = parsed.path.lstrip("/").strip()
                 channel = path if path.startswith("#") else f"#{path}" if path else ""
 
             _validate_channel_name(scheme=scheme, channel=channel)
@@ -634,7 +634,7 @@ def normalize_chat_nicknames_text(value: str, *, max_item_len: int = 64, allow_i
             raise ValueError(f"Each value must be at most {max_item_len} characters")
 
         parsed = urlparse(compact)
-        scheme_raw = (parsed.scheme or "").lower()
+        scheme_raw = parsed.scheme.lower()
 
         nick = ""
         server = ""
@@ -642,7 +642,7 @@ def normalize_chat_nicknames_text(value: str, *, max_item_len: int = 64, allow_i
 
         if scheme_raw in {s.value for s in ChatScheme}:
             scheme = ChatScheme(scheme_raw)
-            path = (parsed.path or "").lstrip("/")
+            path = parsed.path.lstrip("/")
             netloc = _normalize_str(parsed.netloc)
             if scheme == ChatScheme.mattermost:
                 parts = [p for p in path.split("/") if p]

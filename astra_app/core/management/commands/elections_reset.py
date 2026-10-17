@@ -9,6 +9,7 @@ from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 
+from core.e2e_membership_request_reset import ensure_individual_and_mirror_types
 from core.elections_services import (
     BallotReceipt,
     close_election,
@@ -31,7 +32,6 @@ from core.models import (
     ExclusionGroup,
     FreeIPAPermissionGrant,
     Membership,
-    MembershipType,
     VotingCredential,
 )
 from core.permissions import ASTRA_ADD_ELECTION
@@ -166,7 +166,7 @@ class Command(BaseCommand):
             )
 
         with transaction.atomic():
-            self._ensure_membership_types()
+            ensure_individual_and_mirror_types(with_votes=True)
             self._clear_slice_memberships()
             self._ensure_large_electorate()
             elections_by_alias = self._upsert_slice_elections()
@@ -175,30 +175,6 @@ class Command(BaseCommand):
             payload = self._seed_slice(elections_by_alias=elections_by_alias)
 
         self.stdout.write(json.dumps(payload))
-
-    def _ensure_membership_types(self) -> None:
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-                "votes": 1,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="mirror",
-            defaults={
-                "name": "Mirror",
-                "group_cn": "almalinux-mirror",
-                "category_id": "mirror",
-                "sort_order": 1,
-                "enabled": True,
-                "votes": 2,
-            },
-        )
 
     def _clear_slice_memberships(self) -> None:
         Membership.objects.filter(
@@ -1184,7 +1160,7 @@ class Command(BaseCommand):
     ) -> None:
         """Queue the credential emails a real start would have sent for these voters."""
         for credential in credentials:
-            username = str(credential.freeipa_username or "").strip()
+            username = credential.freeipa_username
             if not username:
                 continue
             send_voting_credential_email(

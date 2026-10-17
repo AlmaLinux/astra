@@ -104,9 +104,8 @@ def locked_email_template_names() -> frozenset[str]:
         .exclude(acceptance_template__isnull=True)
         .only("acceptance_template__name")
     ):
-        name = str(membership_type.acceptance_template.name or "").strip()
-        if name:
-            locked.add(name)
+        if membership_type.acceptance_template.name:
+            locked.add(membership_type.acceptance_template.name)
 
     return frozenset(locked)
 
@@ -127,25 +126,25 @@ def _storage_key_from_inline_image_arg(raw: str) -> str:
     if not value:
         raise ValueError("inline_image requires a non-empty path or URL")
 
-    bucket = str(settings.AWS_STORAGE_BUCKET_NAME or "").strip()
+    bucket = settings.AWS_STORAGE_BUCKET_NAME
 
     if "://" in value:
         parts = urlsplit(value)
-        path = str(parts.path or "").lstrip("/")
+        path = parts.path.lstrip("/")
 
         # Path-style URL: /<bucket>/<key>
         if bucket and path.startswith(f"{bucket}/"):
             return path[len(bucket) + 1 :]
 
         # Virtual-host style: <bucket>.<domain>/<key>
-        if bucket and str(parts.netloc or "").startswith(f"{bucket}."):
+        if bucket and parts.netloc.startswith(f"{bucket}."):
             return path
 
-        custom_domain = str(settings.AWS_S3_CUSTOM_DOMAIN or "").strip()
+        custom_domain = settings.AWS_S3_CUSTOM_DOMAIN
         if custom_domain:
             custom_parts = urlsplit(custom_domain) if "://" in custom_domain else urlsplit(f"https://{custom_domain}")
-            if str(parts.netloc or "") == str(custom_parts.netloc or ""):
-                custom_path = str(custom_parts.path or "").strip("/")
+            if parts.netloc == custom_parts.netloc:
+                custom_path = custom_parts.path.strip("/")
                 if custom_path:
                     if path.startswith(f"{custom_path}/"):
                         return path[len(custom_path) + 1 :]

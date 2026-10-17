@@ -15,11 +15,7 @@ def global_search(request: HttpRequest) -> JsonResponse:
     q_lower = q.lower()
     has_directory_access = can_view_user_directory(request.user)
     matched_users = search_freeipa_users(query=q, limit=100) if has_directory_access else []
-    matched_usernames = {
-        str(user.username)
-        for user in matched_users
-        if str(user.username).strip()
-    }
+    matched_usernames = {user.username for user in matched_users if user.username}
 
     groups_out: list[dict[str, str]] = []
     for g in FreeIPAGroup.all():

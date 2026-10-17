@@ -36,7 +36,7 @@ def user_email_context(*, username: str) -> dict[str, str]:
     try:
         user = FreeIPAUser.get(normalized_username)
     except Exception as exc:
-        reason_code = str(exc.__class__.__name__ or "").strip() or "freeipa_unavailable"
+        reason_code = exc.__class__.__name__
         logger.warning(
             "Email context degraded due to FreeIPA lookup failure",
             extra={
@@ -64,11 +64,11 @@ def user_email_context(*, username: str) -> dict[str, str]:
 
 def user_email_context_from_user(*, user: FreeIPAUser) -> dict[str, str]:
     return {
-        "username": str(user.username or ""),
-        "first_name": str(user.first_name or ""),
-        "last_name": str(user.last_name or ""),
-        "full_name": str(user.full_name or ""),
-        "email": str(user.email or ""),
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "full_name": user.full_name,
+        "email": user.email,
     }
 
 
@@ -86,7 +86,7 @@ def user_email_delivery_context(*, username: str) -> dict[str, str]:
     try:
         user = FreeIPAUser.get(normalized_username, respect_privacy=False)
     except Exception as exc:
-        reason_code = str(exc.__class__.__name__ or "").strip() or "freeipa_unavailable"
+        reason_code = exc.__class__.__name__
         logger.warning(
             "Delivery email context degraded due to FreeIPA lookup failure",
             extra={
@@ -122,19 +122,19 @@ def organization_email_context_from_organization(*, organization: Organization) 
     """
 
     return {
-        "business_contact_name": str(organization.business_contact_name or ""),
-        "business_contact_email": str(organization.business_contact_email or ""),
-        "pr_marketing_contact_name": str(organization.pr_marketing_contact_name or ""),
-        "pr_marketing_contact_email": str(organization.pr_marketing_contact_email or ""),
-        "technical_contact_name": str(organization.technical_contact_name or ""),
-        "technical_contact_email": str(organization.technical_contact_email or ""),
+        "business_contact_name": organization.business_contact_name,
+        "business_contact_email": organization.business_contact_email,
+        "pr_marketing_contact_name": organization.pr_marketing_contact_name,
+        "pr_marketing_contact_email": organization.pr_marketing_contact_email,
+        "technical_contact_name": organization.technical_contact_name,
+        "technical_contact_email": organization.technical_contact_email,
     }
 
 
 def organization_sponsor_email_context(*, organization: Organization) -> dict[str, str]:
     """Return sponsor email context: org contact fields + representative user variables."""
 
-    representative_username = str(organization.representative or "").strip()
+    representative_username = organization.representative
     if representative_username:
         try:
             representative = FreeIPAUser.get(representative_username, respect_privacy=False)
@@ -153,13 +153,13 @@ def organization_sponsor_email_context(*, organization: Organization) -> dict[st
 
 def membership_committee_email_context() -> dict[str, str]:
     return {
-        "membership_committee_email": str(settings.MEMBERSHIP_COMMITTEE_EMAIL or "").strip(),
+        "membership_committee_email": settings.MEMBERSHIP_COMMITTEE_EMAIL,
     }
 
 
 def election_committee_email_context() -> dict[str, str]:
     return {
-        "election_committee_email": str(settings.ELECTION_COMMITTEE_EMAIL or "").strip(),
+        "election_committee_email": settings.ELECTION_COMMITTEE_EMAIL,
     }
 
 

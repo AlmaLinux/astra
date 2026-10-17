@@ -59,7 +59,7 @@ def _build_organization_search_results(
 
     results: list[dict[str, str]] = []
     for organization in organizations:
-        organization_name = str(organization.name or "").strip()
+        organization_name = organization.name
         organization_identifier = organization_nominator_identifier(organization_id=organization.id)
 
         if q_lower and q_lower not in organization_name.lower() and q_lower not in organization_identifier.lower():

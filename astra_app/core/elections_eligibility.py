@@ -157,7 +157,7 @@ def _compute_eligibility_facts_by_username(*, election: Election) -> dict[str, E
         )
     )
     for membership in org_memberships:
-        username = str(membership.target_organization.representative or "").strip().lower()
+        username = membership.target_organization.representative.lower()
         if not username:
             continue
 
@@ -314,8 +314,7 @@ def eligible_voters_from_memberships(
         require_fresh=require_fresh,
     )
 
-    group_cn = str(eligible_group_cn) if eligible_group_cn is not None else str(election.eligible_group_cn or "")
-    group_cn = group_cn.strip()
+    group_cn = (election.eligible_group_cn if eligible_group_cn is None else eligible_group_cn).strip()
     if not group_cn:
         return eligible
 
@@ -336,7 +335,7 @@ def eligible_vote_weight_for_username(*, election: Election, username: str) -> i
     if not username:
         return 0
 
-    group_cn = str(election.eligible_group_cn or "").strip()
+    group_cn = election.eligible_group_cn
     if group_cn:
         eligible_usernames = _freeipa_group_recursive_member_usernames(
             group_cn=group_cn,
@@ -445,8 +444,9 @@ def vote_weight_breakdown_for_username(*, election: Election, username: str) -> 
         if not _membership_is_old_enough(created_at=membership.created_at, cutoff=cutoff):
             continue
 
-        org_name = str(membership.target_organization.name or "").strip()
-        lines.append(VoteWeightLine(label=membership.membership_type.name, org_name=org_name, votes=votes))
+        lines.append(
+            VoteWeightLine(label=membership.membership_type.name, org_name=membership.target_organization.name, votes=votes)
+        )
 
     return lines
 
@@ -457,7 +457,7 @@ def election_committee_disqualification(
     nominator_usernames: Iterable[str],
     require_fresh: bool = False,
 ) -> tuple[set[str], set[str]]:
-    committee_group = str(settings.FREEIPA_ELECTION_COMMITTEE_GROUP or "").strip()
+    committee_group = settings.FREEIPA_ELECTION_COMMITTEE_GROUP
     if not committee_group:
         _raise_misconfigured(COMMITTEE_GROUP_MISSING_MESSAGE)
 
@@ -647,7 +647,7 @@ def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, obje
     facts_by_username = _eligibility_facts_by_username(election=election)
 
     # Determine the electorate: group members if eligible_group_cn is set, else all FreeIPA users.
-    group_cn = str(election.eligible_group_cn or "").strip()
+    group_cn = election.eligible_group_cn
     if group_cn:
         electorate = {
             u.lower()
@@ -658,11 +658,7 @@ def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, obje
             )
         }
     else:
-        electorate = {
-            str(u.username).strip().lower()
-            for u in snapshot_freeipa_users()
-            if str(u.username).strip()
-        }
+        electorate = {u.username.lower() for u in snapshot_freeipa_users() if u.username}
 
     # Apply the group filter to the eligible set (same as eligible_voters_from_memberships).
     if group_cn:

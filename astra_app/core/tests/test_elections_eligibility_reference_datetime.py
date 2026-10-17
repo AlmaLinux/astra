@@ -198,7 +198,7 @@ class ElectionEligibilityRenewalPreservesCreatedAtTests(TestCase):
         )
 
         with patch("django.utils.timezone.now", autospec=True, return_value=start_at):
-            first_log = MembershipLog.create_for_approval_at(
+            first_log = MembershipLog.create_for_approval(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type=voter_type,
@@ -211,7 +211,7 @@ class ElectionEligibilityRenewalPreservesCreatedAtTests(TestCase):
         assert previous_expires_at is not None
 
         with patch("django.utils.timezone.now", autospec=True, return_value=extend_at):
-            MembershipLog.create_for_approval_at(
+            MembershipLog.create_for_approval(
                 actor_username="reviewer",
                 target_username="alice",
                 membership_type=voter_type,

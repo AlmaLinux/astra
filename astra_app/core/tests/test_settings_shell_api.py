@@ -59,6 +59,21 @@ class SettingsShellApiTests(TestCase):
         self.assertNotIn("tab_labels", payload)
         self.assertEqual(api_response["Cache-Control"], "private, no-cache")
 
+    def test_settings_profile_select_value_is_the_selected_option(self) -> None:
+        # The Vue page preselects the option whose value equals field.value, so it must be a string.
+        self._login_as_freeipa_user()
+
+        with (
+            patch("core.views_settings._get_full_user", autospec=True, return_value=self._fake_user()),
+            patch("core.views_settings.has_enabled_agreements", autospec=True, return_value=False),
+        ):
+            response = self.client.get(f'{reverse("api-settings-detail")}?tab=profile')
+
+        self.assertEqual(response.status_code, 200)
+        fields = {field["name"]: field for field in response.json()["profile"]["form"]["fields"]}
+        self.assertEqual(fields["country_code"]["widget"], "select")
+        self.assertEqual(fields["country_code"]["value"], "US")
+
     def test_settings_detail_api_rejects_non_get(self) -> None:
         self._login_as_freeipa_user()
 

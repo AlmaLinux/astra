@@ -201,11 +201,7 @@ def _election_email_context(*, election: Election, tz_name: str | None = None) -
 
 def candidate_username_by_id_map(candidates: Iterable[Candidate]) -> dict[int, str]:
     """Build {candidate_id: username} from a candidate queryset, skipping blanks."""
-    return {
-        int(c.id): str(c.freeipa_username or "").strip()
-        for c in candidates
-        if str(c.freeipa_username or "").strip()
-    }
+    return {int(c.id): c.freeipa_username for c in candidates if c.freeipa_username}
 
 
 def build_public_ballots_export(*, election: Election) -> dict[str, object]:
@@ -242,10 +238,10 @@ def build_public_ballots_export(*, election: Election) -> dict[str, object]:
             {
                 "ranking": ranking_usernames,
                 "weight": int(ballot.weight or 0),
-                "ballot_hash": str(ballot.ballot_hash or ""),
-                "is_counted": bool(ballot.is_counted),
-                "chain_hash": str(ballot.chain_hash or ""),
-                "previous_chain_hash": str(ballot.previous_chain_hash or ""),
+                "ballot_hash": ballot.ballot_hash,
+                "is_counted": ballot.is_counted,
+                "chain_hash": ballot.chain_hash,
+                "previous_chain_hash": ballot.previous_chain_hash,
                 "superseded_by": (
                     str(ballot.superseded_by.ballot_hash)
                     if ballot.superseded_by and ballot.superseded_by.ballot_hash
@@ -412,14 +408,12 @@ def send_vote_receipt_email(
     if user is None:
         recipient_context = user_email_context(username=username)
     else:
-        normalized_username = str(user.username or "").strip()
-        full_name = str(user.get_full_name() or "").strip()
         recipient_context = {
-            "username": normalized_username,
-            "first_name": str(user.first_name or ""),
-            "last_name": str(user.last_name or ""),
-            "full_name": full_name or normalized_username,
-            "email": str(user.email or ""),
+            "username": user.username,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "full_name": user.get_full_name() or user.username,
+            "email": user.email,
         }
 
     context: dict[str, object] = {
@@ -678,7 +672,7 @@ def submit_ballot(*, election: Election, credential_public_id: str, ranking: lis
             chain_hash=chain_hash,
         )
     else:
-        supersedes_ballot_hash = str(current.ballot_hash or "").strip()
+        supersedes_ballot_hash = current.ballot_hash
 
         # We need to avoid violating the partial unique constraint on
         # (election, credential_public_id) where superseded_by IS NULL.
@@ -1192,7 +1186,7 @@ def open_election_for_start(*, election_id: int, scheduled: bool = True) -> Elec
 
     self_nominations = sorted(
         {
-            str(candidate.freeipa_username or "").strip()
+            candidate.freeipa_username
             for candidate in candidates
             if is_self_nomination(
                 candidate_username=candidate.freeipa_username,
@@ -1207,15 +1201,15 @@ def open_election_for_start(*, election_id: int, scheduled: bool = True) -> Elec
             reasons=("Candidates cannot nominate themselves: " + ", ".join(self_nominations),),
         )
 
-    candidate_usernames = [str(candidate.freeipa_username or "").strip() for candidate in candidates]
-    nominator_usernames = [str(candidate.nominated_by or "").strip() for candidate in candidates]
+    candidate_usernames = [candidate.freeipa_username for candidate in candidates]
+    nominator_usernames = [candidate.nominated_by for candidate in candidates]
     try:
         eligible_voters = start_eligible_voters(election=election, require_fresh=True)
         validation = validate_candidates_for_election(
             election=election,
             candidate_usernames=candidate_usernames,
             nominator_usernames=nominator_usernames,
-            eligible_group_cn=str(election.eligible_group_cn or "").strip(),
+            eligible_group_cn=election.eligible_group_cn,
             require_fresh=True,
         )
     except ElectionEligibilityError as exc:
@@ -1253,11 +1247,7 @@ def resolve_election_email_recipients(
     Returns the deliverable recipients and how many targets were skipped for
     lacking a resolvable account or email address.
     """
-    usernames = [
-        str(target.freeipa_username or "").strip()
-        for target in targets
-        if str(target.freeipa_username or "").strip()
-    ]
+    usernames = [target.freeipa_username for target in targets if target.freeipa_username]
     # Pre-warm individual FreeIPA user cache entries from the all-users list so
     # that the per-voter get() calls below are instant cache hits instead of N
     # individual IPA RPC calls.
@@ -1266,7 +1256,7 @@ def resolve_election_email_recipients(
     recipients: list[ElectionEmailRecipient] = []
     skipped = 0
     for target in targets:
-        username = str(target.freeipa_username or "").strip()
+        username = target.freeipa_username
         if not username:
             skipped += 1
             continue
@@ -1286,7 +1276,7 @@ def resolve_election_email_recipients(
             ElectionEmailRecipient(
                 username=username,
                 email=user.email,
-                credential_public_id=str(target.public_id or ""),
+                credential_public_id=target.public_id,
                 tz_name=_get_freeipa_timezone_name(user),
             )
         )
@@ -1412,7 +1402,7 @@ def unemailed_credential_recipients(
     pending = [
         credential
         for credential in credentials
-        if str(credential.freeipa_username or "").strip().lower() not in emailed_usernames
+        if credential.freeipa_username.lower() not in emailed_usernames
     ]
 
     recipients, skipped = resolve_election_email_recipients(targets=pending)

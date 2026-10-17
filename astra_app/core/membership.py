@@ -765,7 +765,7 @@ def visible_committee_membership_requests(
         if pending_request.is_organization_target:
             if pending_request.requested_organization is None:
                 continue
-        elif str(pending_request.requested_username or "").strip().lower() not in live_username_set:
+        elif pending_request.requested_username.lower() not in live_username_set:
             continue
 
         visible_requests.append(pending_request)
@@ -796,7 +796,7 @@ def auto_ignore_pending_requests_for_deleted_users() -> int:
         if request.is_organization_target:
             continue
 
-        normalized_username = str(request.requested_username or "").strip().lower()
+        normalized_username = request.requested_username.lower()
         if not normalized_username or normalized_username in live_usernames:
             continue
 
@@ -935,6 +935,30 @@ def get_expiring_memberships(*, days: int = 0) -> list[Membership]:
         .filter(expires_at__lte=threshold, expires_at__gt=now)
         .select_related("membership_type", "membership_type__category", "target_organization")
     )
+
+
+def memberships_with_open_request(memberships: Iterable[Membership]) -> set[int]:
+    """Pks of *memberships* whose target has a pending or on-hold request in the same category."""
+    memberships = list(memberships)
+    open_requests = MembershipRequest.objects.filter(
+        status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+        membership_type__category_id__in={membership.membership_type.category_id for membership in memberships},
+    )
+    open_keys: set[tuple[str | int, str]] = {
+        *open_requests.filter(
+            requested_username__in={membership.target_username for membership in memberships},
+            requested_organization__isnull=True,
+        ).values_list("requested_username", "membership_type__category_id"),
+        *open_requests.filter(
+            requested_organization_id__in={membership.target_organization_id for membership in memberships},
+        ).values_list("requested_organization_id", "membership_type__category_id"),
+    }
+    return {
+        membership.pk
+        for membership in memberships
+        if (membership.target_username or membership.target_organization_id, membership.membership_type.category_id)
+        in open_keys
+    }
 
 
 def get_valid_membership_type_codes(

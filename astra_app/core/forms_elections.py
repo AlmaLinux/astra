@@ -132,7 +132,7 @@ class ElectionDetailsForm(StyledModelForm):
         else:
             raw = str(self.initial.get("eligible_group_cn") or "").strip()
             if not raw and self.instance.pk is not None:
-                raw = str(self.instance.eligible_group_cn or "").strip()
+                raw = self.instance.eligible_group_cn
 
         choices: list[tuple[str, str]] = [("", "")]
         if raw:

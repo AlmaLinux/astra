@@ -152,7 +152,7 @@ def _compute_retention_cohort_12m(
 
     events_by_username: dict[str, list[MembershipLog]] = defaultdict(list)
     for event in events:
-        username = str(event.target_username).strip()
+        username = event.target_username
         if not username:
             continue
         events_by_username[username].append(event)
@@ -172,9 +172,7 @@ def _compute_retention_cohort_12m(
 
         first_approval = approvals[0]
         first_approval_at = first_approval.created_at.astimezone(datetime.UTC)
-        first_expires_at = first_approval.expires_at
-        if first_expires_at is not None:
-            first_expires_at = first_expires_at.astimezone(datetime.UTC)
+        first_expires_at = first_approval.expires_at.astimezone(datetime.UTC)
         cohort_start = _month_start_utc(first_approval_at)
         horizon = _add_months_utc(cohort_start, 12)
         if horizon > now_utc:
@@ -200,14 +198,14 @@ def _compute_retention_cohort_12m(
         if next_approval is not None:
             next_approval_at = next_approval.created_at.astimezone(datetime.UTC)
             terminated_before_renewal = any(terminated_at <= next_approval_at for terminated_at in termination_times)
-            if not terminated_before_renewal and first_expires_at is not None and next_approval_at <= first_expires_at:
+            if not terminated_before_renewal and next_approval_at <= first_expires_at:
                 cohort_row["retained"] += 1
             else:
                 cohort_row["lapsed_then_renewed"] += 1
             continue
 
         terminated_before_horizon = any(terminated_at <= horizon for terminated_at in termination_times)
-        if not terminated_before_horizon and (first_expires_at is None or first_expires_at >= horizon):
+        if not terminated_before_horizon and first_expires_at >= horizon:
             cohort_row["retained"] += 1
         else:
             cohort_row["lapsed_not_renewed"] += 1
@@ -922,7 +920,7 @@ def _build_membership_stats_active_memberships_chart_payloads(
             current_period = next_period
 
         checkpoints_at = [snapshot_at for _label, snapshot_at, _period_start in checkpoints]
-        intervals_by_type: dict[str, list[tuple[datetime.datetime, datetime.datetime | None]]] = defaultdict(list)
+        intervals_by_type: dict[str, list[tuple[datetime.datetime, datetime.datetime]]] = defaultdict(list)
         type_names: dict[str, str] = {}
         events_by_membership: dict[tuple[str, str], list[MembershipLog]] = defaultdict(list)
         for event in events:
@@ -931,28 +929,26 @@ def _build_membership_stats_active_memberships_chart_payloads(
             type_names[str(event.membership_type_id)] = str(event.membership_type.name)
 
         for (_target_key, membership_type_id), membership_events in events_by_membership.items():
-            current_start: datetime.datetime | None = None
-            current_end: datetime.datetime | None = None
+            # The open (start, end) term; approvals and expiry changes always carry an expiry.
+            current: tuple[datetime.datetime, datetime.datetime] | None = None
             for event in membership_events:
                 event_created_at = event.created_at.astimezone(datetime.UTC)
-                event_expires_at = event.expires_at.astimezone(datetime.UTC) if event.expires_at is not None else None
                 if event.action in {MembershipLog.Action.approved, MembershipLog.Action.expiry_changed}:
-                    if current_start is None or (current_end is not None and current_end <= event_created_at):
-                        current_start = event_created_at
-                    current_end = event_expires_at
+                    starts_new_term = current is None or current[1] <= event_created_at
+                    current_start = event_created_at if starts_new_term else current[0]
+                    current = (current_start, event.expires_at.astimezone(datetime.UTC))
                     continue
 
-                if current_start is None:
+                if current is None:
                     continue
 
-                interval_end = event_created_at if current_end is None else min(event_created_at, current_end)
-                if interval_end > current_start:
-                    intervals_by_type[membership_type_id].append((current_start, interval_end))
-                current_start = None
-                current_end = None
+                interval_end = min(event_created_at, current[1])
+                if interval_end > current[0]:
+                    intervals_by_type[membership_type_id].append((current[0], interval_end))
+                current = None
 
-            if current_start is not None and (current_end is None or current_end > current_start):
-                intervals_by_type[membership_type_id].append((current_start, current_end))
+            if current is not None and current[1] > current[0]:
+                intervals_by_type[membership_type_id].append(current)
 
         deltas_by_type = {
             membership_type_id: [0] * (len(checkpoints) + 1)
@@ -964,7 +960,7 @@ def _build_membership_stats_active_memberships_chart_payloads(
                 start_index = bisect_right(checkpoints_at, interval_start)
                 if start_index >= len(checkpoints):
                     continue
-                end_index = len(checkpoints) if interval_end is None else bisect_left(checkpoints_at, interval_end)
+                end_index = bisect_left(checkpoints_at, interval_end)
                 deltas[start_index] += 1
                 deltas[end_index] -= 1
 

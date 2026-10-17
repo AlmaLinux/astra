@@ -78,15 +78,10 @@ def _group_search_results(*, q: str, fas_only: bool) -> list[dict[str, str]]:
             continue
 
         if q_lower:
-            if q_lower not in g.cn.lower() and q_lower not in (g.description or "").lower():
+            if q_lower not in g.cn.lower() and q_lower not in g.description.lower():
                 continue
 
-        text = g.cn
-        desc = str(g.description or "").strip()
-        if desc:
-            text = f"{g.cn} — {desc}"
-
-        results.append({"id": g.cn, "text": text})
+        results.append({"id": g.cn, "text": f"{g.cn} — {g.description}" if g.description else g.cn})
         if len(results) >= 20:
             break
 
@@ -128,9 +123,9 @@ def group_member_user_search(request: HttpRequest) -> HttpResponse:
     return JsonResponse(
         {
             "users": [
-                {"username": str(user.username), "full_name": str(user.full_name)}
+                {"username": user.username, "full_name": user.full_name}
                 for user in users
-                if str(user.username).strip()
+                if user.username
             ]
         }
     )
@@ -148,7 +143,7 @@ def _groups_page_context(request: HttpRequest) -> dict[str, object]:
         and (
             not q_lower
             or q_lower in group.cn.lower()
-            or q_lower in (group.description or "").lower()
+            or q_lower in group.description.lower()
         )
     ]
     groups_sorted = sorted(groups_filtered, key=lambda group: group.cn.lower())

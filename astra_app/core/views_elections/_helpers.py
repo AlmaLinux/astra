@@ -137,9 +137,9 @@ def _election_email_preview_context(
         # Unsaved election — null-safe inline construction.
         base = {
             "election_id": int(election.id or 0),
-            "election_name": str(election.name or ""),
-            "election_description": str(election.description or ""),
-            "election_url": str(election.url or ""),
+            "election_name": election.name,
+            "election_description": election.description,
+            "election_url": election.url,
             "election_start_datetime": election.start_datetime or "",
             "election_end_datetime": election.end_datetime or "",
             "election_number_of_seats": election.number_of_seats or "",
@@ -193,13 +193,8 @@ def _candidate_usernames(
     """Collect candidate usernames, optionally including nominators."""
     usernames: set[str] = set()
     for candidate in candidates:
-        candidate_username = str(candidate.freeipa_username or "").strip()
-        if candidate_username:
-            usernames.add(candidate_username)
-
+        usernames.add(candidate.freeipa_username)
         if include_nominators:
-            nominator_username = str(candidate.nominated_by or "").strip()
-            if nominator_username:
-                usernames.add(nominator_username)
-
+            usernames.add(candidate.nominated_by)
+    usernames.discard("")
     return usernames

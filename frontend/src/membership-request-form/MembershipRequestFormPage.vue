@@ -32,8 +32,16 @@ const showIndividualQuestions = computed(() => selectedMembershipCategory.value 
 const showSponsorshipQuestions = computed(() => selectedMembershipCategory.value === "sponsorship");
 const showMirrorQuestions = computed(() => selectedMembershipCategory.value === "mirror" || selectedMembershipType.value === "mirror");
 
-const individualFields = computed(() => payload.value?.form.fields.filter((field) => field.name === "q_contributions") ?? []);
-const sponsorshipFields = computed(() => payload.value?.form.fields.filter((field) => field.name === "q_sponsorship_details") ?? []);
+// The single-textarea question groups; mirror questions render their own inputs below.
+const textQuestionSections = computed(() =>
+  [
+    { key: "individual", title: "Individual Membership", show: showIndividualQuestions.value, fieldName: "q_contributions" },
+    { key: "sponsorship", title: "Sponsorship", show: showSponsorshipQuestions.value, fieldName: "q_sponsorship_details" },
+  ].map(({ fieldName, ...section }) => ({
+    ...section,
+    fields: payload.value?.form.fields.filter((field) => field.name === fieldName) ?? [],
+  })),
+);
 const mirrorFields = computed(
   () => payload.value?.form.fields.filter((field) => field.name.startsWith("q_") && field.name !== "q_contributions" && field.name !== "q_sponsorship_details") ?? [],
 );
@@ -299,35 +307,15 @@ onMounted(async () => {
                 </div>
               </template>
 
-              <div data-test="questions-individual" class="mt-3" :style="showIndividualQuestions ? '' : 'display: none'">
-                <h5>Individual Membership</h5>
-                <div v-for="field in individualFields" :key="field.name" class="form-group">
-                  <label :for="field.id">
-                    {{ field.label }}
-                    <span v-if="dynamicRequired(field.name)" class="form-required-indicator text-danger font-weight-bold ml-1" title="Required" aria-hidden="true">*</span>
-                    <span v-if="dynamicRequired(field.name)" class="sr-only">Required</span>
-                  </label>
-                  <textarea
-                    :id="field.id"
-                    :ref="setFieldElement(field.name)"
-                    v-model="field.value"
-                    :name="field.name"
-                    :rows="fieldRows(field)"
-                    :class="fieldClasses(field)"
-                    v-bind="fieldControlAttrs(field)"
-                    :disabled="field.disabled"
-                    :required="dynamicRequired(field.name)"
-                    @input="handleInput(field.name)"
-                    @change="handleInput(field.name)"
-                    @blur="handleBlur(field.name)"
-                  />
-                  <div v-for="fieldError in field.errors" :key="fieldError" class="invalid-feedback d-block">{{ fieldError }}</div>
-                </div>
-              </div>
-
-              <div data-test="questions-sponsorship" class="mt-3" :style="showSponsorshipQuestions ? '' : 'display: none'">
-                <h5>Sponsorship</h5>
-                <div v-for="field in sponsorshipFields" :key="field.name" class="form-group">
+              <div
+                v-for="section in textQuestionSections"
+                :key="section.key"
+                :data-test="`questions-${section.key}`"
+                class="mt-3"
+                :style="section.show ? '' : 'display: none'"
+              >
+                <h5>{{ section.title }}</h5>
+                <div v-for="field in section.fields" :key="field.name" class="form-group">
                   <label :for="field.id">
                     {{ field.label }}
                     <span v-if="dynamicRequired(field.name)" class="form-required-indicator text-danger font-weight-bold ml-1" title="Required" aria-hidden="true">*</span>

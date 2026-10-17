@@ -16,6 +16,7 @@ from core.membership_notifications import (
     committee_recipient_emails_for_permission_graceful,
 )
 from core.models import Membership
+from core.operations import add_force_and_dry_run_arguments
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.templated_email import queue_templated_email
 
@@ -27,16 +28,7 @@ class Command(BaseCommand):
 
     @override
     def add_arguments(self, parser) -> None:
-        parser.add_argument(
-            "--force",
-            action="store_true",
-            help="Send even if an email was already queued today.",
-        )
-        parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Show what would be done without mutating data or sending email.",
-        )
+        add_force_and_dry_run_arguments(parser)
 
     @override
     def handle(self, *args, **options) -> None:
@@ -61,11 +53,7 @@ class Command(BaseCommand):
             .order_by("target_username")
             .values_list("target_username", flat=True)
         )
-        all_freeipa_users = {
-            str(user.username or "").strip(): user
-            for user in FreeIPAUser.all()
-            if str(user.username or "").strip()
-        }
+        all_freeipa_users = {user.username: user for user in FreeIPAUser.all() if user.username}
 
         embargoed_members: list[dict[str, str]] = []
         seen_usernames: set[str] = set()
@@ -86,7 +74,7 @@ class Command(BaseCommand):
             if embargoed_match is None:
                 continue
 
-            full_name = str(user.full_name or "").strip()
+            full_name = user.full_name
             country_name = embargoed_match.label.rsplit(" (", maxsplit=1)[0]
             embargoed_members.append(
                 {

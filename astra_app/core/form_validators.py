@@ -25,7 +25,7 @@ def validate_http_url(value: str, *, field_label: str) -> str:
         raise forms.ValidationError(f"Invalid {field_label}: must be at most 255 characters")
 
     parsed = urlparse(v)
-    scheme = (parsed.scheme or "").lower()
+    scheme = parsed.scheme.lower()
     if scheme not in {"http", "https"}:
         raise forms.ValidationError(f"Invalid {field_label}: URL must start with http:// or https://")
     if not parsed.netloc:

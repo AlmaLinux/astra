@@ -290,7 +290,7 @@ def has_signed_coc(username: str) -> bool:
     username = username.strip()
     if not username:
         return False
-    agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
+    agreement_cn = settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN
     if not agreement_cn:
         return False
     try:
@@ -314,7 +314,7 @@ def block_action_without_coc(
     if has_signed_coc(username):
         return None
 
-    agreement_cn = str(settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN or "").strip()
+    agreement_cn = settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN
     label = agreement_cn or "Community Code of Conduct"
     messages.error(request, f"You must sign the {label} before you can {action_label}.")
     return redirect(agreement_settings_url(agreement_cn, return_to=request.get_full_path()))

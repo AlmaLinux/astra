@@ -58,11 +58,10 @@ def last_votes(notes: Iterable[Note]) -> dict[str, str]:
         if value_norm not in {"approve", "disapprove"}:
             continue
 
-        username = str(note.username or "").strip()
-        if not username:
+        if not note.username:
             continue
 
-        last_vote_by_user[username.lower()] = value_norm
+        last_vote_by_user[note.username.lower()] = value_norm
 
     return last_vote_by_user
 

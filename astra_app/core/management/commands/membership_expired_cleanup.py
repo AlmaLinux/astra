@@ -1,6 +1,5 @@
 import datetime
 import logging
-from collections.abc import Iterable
 from typing import override
 
 from django.conf import settings
@@ -14,12 +13,12 @@ from core.email_context import (
     user_email_context_from_user,
 )
 from core.freeipa.user import FreeIPAUser
-from core.ipa_user_attrs import _first
+from core.ipa_user_attrs import _get_freeipa_timezone_name
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAGroupRemovalOutcome,
     FreeIPAMissingUserPolicy,
-    membership_request_queryset,
+    memberships_with_open_request,
     remove_organization_representative_from_group_if_present,
     remove_user_from_group,
 )
@@ -29,49 +28,10 @@ from core.membership_notifications import (
     send_membership_notification,
     would_queue_membership_notification,
 )
-from core.models import Membership, MembershipRequest, MembershipType
+from core.models import Membership
+from core.operations import add_force_and_dry_run_arguments
 
 logger = logging.getLogger(__name__)
-
-
-def _open_membership_request_keys(
-    *,
-    requested_usernames: set[str],
-    requested_organization_ids: set[int],
-    membership_category_ids: set[str],
-) -> tuple[set[tuple[str, str]], set[tuple[int, str]]]:
-    if not membership_category_ids:
-        return set(), set()
-
-    open_requests = membership_request_queryset().filter(
-        membership_type__category_id__in=membership_category_ids,
-        status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-    )
-
-    open_user_request_keys: set[tuple[str, str]] = set()
-    if requested_usernames:
-        open_user_request_keys = {
-            (requested_username, membership_category_id)
-            for requested_username, membership_category_id in open_requests.filter(
-                requested_username__in=requested_usernames,
-                requested_organization__isnull=True,
-            ).values_list("requested_username", "membership_type__category_id")
-        }
-
-    open_org_request_keys: set[tuple[int, str]] = set()
-    if requested_organization_ids:
-        open_org_request_keys = {
-            (requested_organization_id, membership_category_id)
-            for requested_organization_id, membership_category_id in open_requests.filter(
-                requested_organization_id__in=requested_organization_ids,
-            ).values_list("requested_organization_id", "membership_type__category_id")
-        }
-
-    return open_user_request_keys, open_org_request_keys
-
-
-def _preserved_expires_at(*, reference: datetime.datetime) -> datetime.datetime:
-    return reference + datetime.timedelta(days=1)
 
 
 class Command(BaseCommand):
@@ -83,16 +43,7 @@ class Command(BaseCommand):
 
     @override
     def add_arguments(self, parser) -> None:
-        parser.add_argument(
-            "--force",
-            action="store_true",
-            help="Send even if an email was already queued today.",
-        )
-        parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Show what would be done without mutating data or sending email.",
-        )
+        add_force_and_dry_run_arguments(parser)
 
     @override
     def handle(self, *args, **options) -> None:
@@ -107,56 +58,16 @@ class Command(BaseCommand):
             dry_run,
         )
 
-        expired_memberships: Iterable[Membership] = (
-            Membership.objects.select_related("membership_type")
-            .filter(
-                target_organization__isnull=True,
-                expires_at__lte=now,
-            )
-            .exclude(target_username="")
-            .order_by("target_username", "membership_type_id")
+        expired = Membership.objects.select_related("target_organization", "membership_type").filter(expires_at__lte=now)
+        expired_membership_rows = list(
+            expired.filter(target_organization__isnull=True).order_by("target_username", "membership_type_id")
         )
-        expired_sponsorships: Iterable[Membership] = (
-            Membership.objects.select_related("target_organization", "membership_type")
-            .filter(
-                target_organization__isnull=False,
-                expires_at__lte=now,
-            )
-            .order_by("target_organization_id", "membership_type_id")
+        expired_sponsorship_rows = list(
+            expired.filter(target_organization__isnull=False).order_by("target_organization_id", "membership_type_id")
         )
-
-        expired_membership_rows = list(expired_memberships)
-        expired_sponsorship_rows = list(expired_sponsorships)
-        membership_type_ids: set[str] = {
-            str(membership.membership_type.code or "").strip()
-            for membership in [*expired_membership_rows, *expired_sponsorship_rows]
-            if str(membership.membership_type.code or "").strip()
-        }
-        membership_category_by_type_id = {
-            str(type_id): str(category_id)
-            for type_id, category_id in MembershipType.objects.filter(code__in=membership_type_ids).values_list(
-                "code",
-                "category_id",
-            )
-        }
-        membership_category_ids: set[str] = {
-            category_id
-            for category_id in membership_category_by_type_id.values()
-            if category_id.strip()
-        }
-        open_user_request_keys, open_org_request_keys = _open_membership_request_keys(
-            requested_usernames={
-                str(membership.target_username or "").strip()
-                for membership in expired_membership_rows
-                if str(membership.target_username or "").strip()
-            },
-            requested_organization_ids={
-                int(sponsorship.target_organization.pk)
-                for sponsorship in expired_sponsorship_rows
-                if sponsorship.target_organization is not None
-            },
-            membership_category_ids=membership_category_ids,
-        )
+        with_open_request = memberships_with_open_request([*expired_membership_rows, *expired_sponsorship_rows])
+        # Memberships with an open request get a day's grace so the request can still be decided.
+        preserved_expires_at = now + datetime.timedelta(days=1)
 
         removed = 0
         emailed = 0
@@ -168,16 +79,11 @@ class Command(BaseCommand):
         sponsorship_failed = 0
 
         for membership in expired_membership_rows:
-            membership_category_id = str(
-                membership_category_by_type_id.get(str(membership.membership_type.code or "").strip(), "") or ""
-            ).strip()
-            membership_request_key = (str(membership.target_username or "").strip(), membership_category_id)
-            if membership_request_key in open_user_request_keys:
-                preserved_expires_at = _preserved_expires_at(reference=now)
+            if membership.pk in with_open_request:
                 logger.info(
                     "membership_expired_cleanup: skipped expired membership user=%s membership_category=%s due to open membership request; preserving through %s",
                     membership.target_username,
-                    membership_category_id,
+                    membership.membership_type.category_id,
                     preserved_expires_at,
                 )
                 if not dry_run:
@@ -214,7 +120,7 @@ class Command(BaseCommand):
                 removed += 1
                 continue
 
-            group_cn = str(membership.membership_type.group_cn or "").strip()
+            group_cn = membership.membership_type.group_cn
             if group_cn:
                 if dry_run:
                     logger.info(
@@ -242,7 +148,6 @@ class Command(BaseCommand):
                     )
 
             if fu.email:
-                tz_name = str(_first(fu._user_data, "fasTimezone", "") or "").strip() or "UTC"
                 if dry_run:
                     would_queue = would_queue_membership_notification(
                         force=force,
@@ -269,7 +174,7 @@ class Command(BaseCommand):
                         expires_at=membership.expires_at,
                         username=membership.target_username,
                         force=force,
-                        tz_name=tz_name,
+                        tz_name=_get_freeipa_timezone_name(fu),
                         extra_context=user_email_context_from_user(user=fu),
                     )
                     if did_queue:
@@ -304,16 +209,11 @@ class Command(BaseCommand):
             if org is None:
                 continue
             membership_type = sponsorship.membership_type
-            sponsorship_category_id = str(
-                membership_category_by_type_id.get(str(membership_type.code or "").strip(), "") or ""
-            ).strip()
-            sponsorship_request_key = (org.pk, sponsorship_category_id)
-            if sponsorship_request_key in open_org_request_keys:
-                preserved_expires_at = _preserved_expires_at(reference=now)
+            if sponsorship.pk in with_open_request:
                 logger.info(
                     "membership_expired_cleanup: skipped expired sponsorship org_id=%s membership_category=%s due to open membership request; preserving through %s",
                     org.pk,
-                    sponsorship_category_id,
+                    membership_type.category_id,
                     preserved_expires_at,
                 )
                 if not dry_run:
@@ -321,8 +221,8 @@ class Command(BaseCommand):
                     sponsorship.save(update_fields=["expires_at"])
                 continue
 
-            group_cn = str(membership_type.group_cn or "").strip()
-            rep_username = str(org.representative or "").strip()
+            group_cn = membership_type.group_cn
+            rep_username = org.representative
             removal_failed = False
 
             logger.info(
@@ -425,9 +325,6 @@ class Command(BaseCommand):
                         logger.info("[dry-run] Would skip email for %s; already queued today.", recipient_email)
                         sponsorship_skipped += 1
                 else:
-                    tz_name = "UTC"
-                    if rep is not None:
-                        tz_name = str(_first(rep._user_data, "fasTimezone", "") or "").strip() or "UTC"
                     did_queue = send_membership_notification(
                         recipient_email=recipient_email,
                         membership_type=membership_type,
@@ -436,7 +333,7 @@ class Command(BaseCommand):
                         organization=org,
                         membership=sponsorship,
                         force=force,
-                        tz_name=tz_name,
+                        tz_name=None if rep is None else _get_freeipa_timezone_name(rep),
                         extra_context=sponsor_context | {"extend_url": request_url},
                     )
                     if did_queue:

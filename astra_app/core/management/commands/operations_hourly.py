@@ -1,46 +1,14 @@
-import logging
 from typing import override
 
-from django.core.management.base import BaseCommand
-
-from core.operations import run_operations
-
-logger = logging.getLogger(__name__)
+from core.operations import OperationJobs, OperationsCommand
 
 
-class Command(BaseCommand):
+class Command(OperationsCommand):
     help = "Run hourly membership mirror validation and election lifecycle automation."
 
     @override
-    def add_arguments(self, parser) -> None:
-        parser.add_argument(
-            "--force",
-            action="store_true",
-            help="Pass --force through to sub-commands.",
+    def jobs(self, *, force: bool, dry_run: bool) -> OperationJobs:
+        return (
+            ("membership_mirror_validation", {"force": force, "dry_run": dry_run}),
+            ("election_lifecycle_automation", {"force": force, "dry_run": dry_run}),
         )
-        parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Show what would be done without mutating data or sending email.",
-        )
-
-    @override
-    def handle(self, *args, **options) -> None:
-        force: bool = bool(options.get("force"))
-        dry_run: bool = bool(options.get("dry_run"))
-
-        logger.info(
-            "operations_hourly: start force=%s dry_run=%s",
-            force,
-            dry_run,
-        )
-
-        run_operations(
-            name="operations_hourly",
-            jobs=(
-                ("membership_mirror_validation", {"force": force, "dry_run": dry_run}),
-                ("election_lifecycle_automation", {"force": force, "dry_run": dry_run}),
-            ),
-        )
-
-        logger.info("operations_hourly: complete")

@@ -27,6 +27,24 @@ ORGANIZATION_CONTACT_GROUP_DESCRIPTORS = (
 )
 
 
+def clean_representative_username(value: object, *, organization: Organization) -> str:
+    """An existing FreeIPA user who represents no other organization; empty leaves it unclaimed."""
+    username = str(value or "").strip()
+    if not username:
+        return ""
+
+    if FreeIPAUser.get(username) is None:
+        raise forms.ValidationError(f"Unknown user: {username}", code="unknown_representative")
+
+    # Avoid leaking which org they represent; just state the rule.
+    if Organization.objects.filter(representative=username).exclude(pk=organization.pk).exists():
+        raise forms.ValidationError(
+            "That user is already the representative of another organization.",
+            code="representative_not_unique",
+        )
+    return username
+
+
 class OrganizationEditForm(StyledModelForm):
     representative = forms.ChoiceField(
         required=False,
@@ -165,29 +183,5 @@ class OrganizationEditForm(StyledModelForm):
     def clean_representative(self) -> str:
         if "representative" not in self.fields:
             return ""
-
-        username = str(self.cleaned_data.get("representative") or "").strip()
-
-        if not username:
-            return ""
-
-        if FreeIPAUser.get(username) is None:
-            raise forms.ValidationError(
-                f"Unknown user: {username}",
-                code="unknown_representative",
-            )
-
-        # Avoid leaking which org they represent; just state the rule.
-        conflict_exists = (
-            Organization.objects.filter(representative=username)
-            .exclude(pk=self.instance.pk)
-            .exists()
-        )
-        if conflict_exists:
-            raise forms.ValidationError(
-                "That user is already the representative of another organization.",
-                code="representative_not_unique",
-            )
-
-        return username
+        return clean_representative_username(self.cleaned_data.get("representative"), organization=self.instance)
 

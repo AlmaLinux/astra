@@ -203,8 +203,8 @@ class ImportResultAccessHelpersTests(TestCase):
         pair_result = SimpleNamespace(row_errors=lambda: [(3, [pair_error])])
         flat_result = SimpleNamespace(row_errors=lambda: [flat_error])
 
-        self.assertEqual(get_result_row_errors(pair_result), ([(3, [pair_error])], []))
-        self.assertEqual(get_result_row_errors(flat_result), ([], [flat_error]))
+        self.assertEqual(get_result_row_errors(pair_result), [(3, pair_error)])
+        self.assertEqual(get_result_row_errors(flat_result), [(4, flat_error)])
 
     def test_get_result_rows_supports_callable_list_like_and_fallback_rows(self) -> None:
         callable_row = SimpleNamespace(number=1)

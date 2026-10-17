@@ -23,6 +23,7 @@ from post_office.models import Email, EmailTemplate
 
 from core import mail_progress
 from core.email_context import system_email_context, user_email_context_from_user
+from core.form_payloads import form_field_payload, form_payload
 from core.forms_base import StyledForm
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
@@ -377,33 +378,22 @@ def _preview_from_csv_session_payload(payload: dict[str, object]) -> tuple[Recip
 
 def _group_select_choices() -> list[tuple[str, str]]:
     groups = FreeIPAGroup.all()
-    groups_sorted = sorted(groups, key=lambda g: str(g.cn).lower())
     choices: list[tuple[str, str]] = [("", "(Select a group)")]
-    for g in groups_sorted:
-        cn = str(g.cn or "").strip()
-        if not cn:
-            continue
-        label = cn
-        if str(g.description or "").strip():
-            label = f"{cn} — {g.description}"
-        choices.append((cn, label))
+    for g in sorted(groups, key=lambda g: g.cn.lower()):
+        if g.cn:
+            choices.append((g.cn, f"{g.cn} — {g.description}" if g.description else g.cn))
     return choices
 
 
 def _user_select_choices() -> list[tuple[str, str]]:
     users = FreeIPAUser.all()
-    users_sorted = sorted(users, key=lambda u: str(u.username).lower())
     choices: list[tuple[str, str]] = []
-    for u in users_sorted:
-        username = str(u.username or "").strip()
-        if not username:
+    for u in sorted(users, key=lambda u: u.username.lower()):
+        if not u.username:
             continue
-        full_name = str(u.full_name or "").strip()
-        if full_name and full_name.lower() != username.lower():
-            label = f"{full_name} ({username})"
-        else:
-            label = username
-        choices.append((username, label))
+        full_name = u.full_name
+        label = f"{full_name} ({u.username})" if full_name and full_name.lower() != u.username.lower() else u.username
+        choices.append((u.username, label))
     return choices
 
 
@@ -708,67 +698,24 @@ def _render_send_mail_preview(
     return rendered_preview
 
 
-def _field_dom_id(*, bound_field: forms.BoundField) -> str:
-    custom_ids = {
-        "recipient_mode": "send-mail-recipient-mode",
-        "action": "send-mail-action",
-        "save_as_name": "send-mail-save-as-name",
-    }
-    return custom_ids.get(bound_field.name, bound_field.id_for_label)
+# Fields the page drives from its own controls, posted as hidden inputs with these DOM ids.
+_SEND_MAIL_CONTROL_FIELD_IDS = {
+    "recipient_mode": "send-mail-recipient-mode",
+    "action": "send-mail-action",
+    "save_as_name": "send-mail-save-as-name",
+}
 
 
-def _serialize_send_mail_field(*, bound_field: forms.BoundField) -> dict[str, object]:
-    widget = bound_field.field.widget
-    if isinstance(widget, forms.HiddenInput) or bound_field.name in {"recipient_mode", "action", "save_as_name"}:
-        widget_type = "hidden"
-    elif isinstance(widget, forms.Textarea):
-        widget_type = "textarea"
-    elif isinstance(widget, forms.SelectMultiple):
-        widget_type = "select-multiple"
-    elif isinstance(widget, forms.Select):
-        widget_type = "select"
-    elif isinstance(widget, forms.ClearableFileInput):
-        widget_type = "file"
-    else:
-        widget_type = "text"
-
-    raw_value = bound_field.value()
-    if isinstance(raw_value, (list, tuple)):
-        value: str | list[str] = [str(item) for item in raw_value if str(item)]
-    elif raw_value is None:
-        value = ""
-    else:
-        value = str(raw_value)
-
-    payload: dict[str, object] = {
-        "name": bound_field.name,
-        "id": _field_dom_id(bound_field=bound_field),
-        "widget": widget_type,
-        "value": value,
-        "required": bool(bound_field.field.required),
-        "disabled": bool(bound_field.field.disabled),
-        "errors": [str(error) for error in bound_field.errors],
-        "attrs": {
-            key: str(attr_value)
-            for key, attr_value in widget.attrs.items()
-            if attr_value is not None and key != "id"
-        },
-    }
-    if widget_type not in {"hidden", "file"} and isinstance(widget, (forms.Select, forms.SelectMultiple)):
-        payload["options"] = [
-            {"value": str(option_value), "label": str(option_label)}
-            for option_value, option_label in bound_field.field.choices
-            if str(option_value or "").strip()
-        ]
+def _serialize_send_mail_field(bound_field: forms.BoundField) -> dict[str, object]:
+    payload = form_field_payload(bound_field)
+    payload["attrs"].pop("id", None)
+    control_id = _SEND_MAIL_CONTROL_FIELD_IDS.get(bound_field.name)
+    if control_id is not None:
+        payload.pop("options", None)
+        payload |= {"widget": "hidden", "id": control_id}
+    elif "options" in payload:
+        payload["options"] = [option for option in payload["options"] if option["value"].strip()]
     return payload
-
-
-def _serialize_send_mail_form(*, form: SendMailForm) -> dict[str, object]:
-    return {
-        "is_bound": form.is_bound,
-        "non_field_errors": [str(error) for error in form.non_field_errors()],
-        "fields": [_serialize_send_mail_field(bound_field=field) for field in form],
-    }
 
 
 def _selected_template_id_from_form(*, form: SendMailForm) -> int | None:
@@ -808,7 +755,7 @@ def _serialize_send_mail_get_payload(*, state: SendMailGetState) -> dict[str, ob
         "has_saved_csv_recipients": state.has_saved_csv_recipients,
         "created_template_id": state.created_template_id,
         "templates": [{"id": template.pk, "name": template.name} for template in state.templates],
-        "form": _serialize_send_mail_form(form=state.form),
+        "form": form_payload(state.form, _serialize_send_mail_field),
         "recipient_preview": _serialize_recipient_preview(preview=state.preview),
         "compose": {
             "selected_template_id": state.selected_template_id,
@@ -876,9 +823,9 @@ def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
             initial.update(
                 {
                     "email_template_id": selected_template.pk,
-                    "subject": str(selected_template.subject or ""),
-                    "html_content": str(selected_template.html_content or ""),
-                    "text_content": str(selected_template.content or ""),
+                    "subject": selected_template.subject,
+                    "html_content": selected_template.html_content,
+                    "text_content": selected_template.content,
                 }
             )
 

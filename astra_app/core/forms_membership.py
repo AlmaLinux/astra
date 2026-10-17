@@ -162,7 +162,7 @@ class MembershipRequestForm(StyledForm):
 
     @staticmethod
     def _category_title(category: MembershipTypeCategory) -> str:
-        return str(category.name or "").replace("_", " ").title()
+        return category.name.replace("_", " ").title()
 
     @classmethod
     def _grouped_choices(

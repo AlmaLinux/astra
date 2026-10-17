@@ -13,6 +13,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.html import format_html
 
+from core.form_payloads import form_field_payload, form_payload
 from core.forms_membership import (
     MembershipRequestForm,
     MembershipRequestUpdateResponsesForm,
@@ -125,40 +126,16 @@ def _serialize_membership_request_form_option_groups(
     return groups
 
 
-def _serialize_membership_request_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
-    widget = bound_field.field.widget
-    if isinstance(widget, forms.Textarea):
-        widget_type = "textarea"
-    elif isinstance(widget, forms.Select):
-        widget_type = "select"
-    else:
-        widget_type = "text"
-
-    value = bound_field.value()
-    attrs = {key: str(attr_value) for key, attr_value in widget.attrs.items() if attr_value is not None}
-    payload: dict[str, object] = {
-        "name": bound_field.name,
-        "id": bound_field.id_for_label,
-        "label": str(bound_field.label or ""),
-        "widget": widget_type,
-        "value": "" if value is None else str(value),
-        "required": bool(bound_field.field.required),
-        "disabled": bool(bound_field.field.disabled),
-        "help_text": str(bound_field.help_text or ""),
-        "errors": [str(error) for error in bound_field.errors],
-        "attrs": attrs,
-    }
-    if widget_type == "select":
+def _labelled_form_field_payload(bound_field: forms.BoundField) -> dict[str, object]:
+    """Membership forms render their questions' own labels and help text."""
+    payload = form_field_payload(bound_field)
+    # str() resolves lazily translated labels and help text.
+    payload["label"] = str(bound_field.label)
+    payload["help_text"] = str(bound_field.help_text)
+    if payload.pop("options", None) is not None:
+        # The tier select groups its options by category.
         payload["option_groups"] = _serialize_membership_request_form_option_groups(bound_field=bound_field)
     return payload
-
-
-def _serialize_membership_request_form(*, form: MembershipRequestForm) -> dict[str, object]:
-    return {
-        "is_bound": form.is_bound,
-        "non_field_errors": [str(error) for error in form.non_field_errors()],
-        "fields": [_serialize_membership_request_form_field(bound_field=field) for field in form],
-    }
 
 
 def _build_membership_request_form_page_payload(
@@ -172,7 +149,7 @@ def _build_membership_request_form_page_payload(
         "organization": None if organization is None else {"id": organization.pk, "name": organization.name},
         "no_types_available": no_types_available,
         "prefill_type_unavailable_name": prefill_type_unavailable_name,
-        "form": _serialize_membership_request_form(form=form),
+        "form": form_payload(form, _labelled_form_field_payload),
     }
 
 
@@ -242,7 +219,7 @@ def _load_membership_request_create_access_context(
 
     representative_user: FreeIPAUser | None = fu
     if is_org_request:
-        representative_username = str(organization.representative or "").strip() if organization is not None else ""
+        representative_username = organization.representative if organization is not None else ""
         representative_user = FreeIPAUser.get(representative_username) if representative_username else None
 
     action_label = "request or renew memberships"
@@ -548,13 +525,10 @@ def _user_can_access_membership_request(*, username: str, membership_request: Me
         return False
 
     if membership_request.requested_username:
-        return membership_request.requested_username.strip().lower() == normalized_username
+        return membership_request.requested_username.lower() == normalized_username
 
     org = membership_request.requested_organization
-    if org is None:
-        return False
-
-    return str(org.representative or "").strip().lower() == normalized_username
+    return org is not None and org.representative.lower() == normalized_username
 
 
 def _load_membership_request_for_detail(*, pk: int) -> MembershipRequest:
@@ -564,26 +538,8 @@ def _load_membership_request_for_detail(*, pk: int) -> MembershipRequest:
     )
 
 
-def _serialize_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
-    widget_type = "textarea" if isinstance(bound_field.field.widget, forms.Textarea) else "text"
-    value = bound_field.value()
-    return {
-        "name": bound_field.name,
-        "label": str(bound_field.label or ""),
-        "widget": widget_type,
-        "value": "" if value is None else str(value),
-        "required": bool(bound_field.field.required),
-        "disabled": bool(bound_field.field.disabled),
-        "help_text": str(bound_field.help_text or ""),
-        "errors": [str(error) for error in bound_field.errors],
-    }
-
-
 def _serialize_update_form(*, form: MembershipRequestUpdateResponsesForm) -> dict[str, object]:
-    return {
-        "fields": [_serialize_form_field(bound_field=field) for field in form],
-        "non_field_errors": [str(error) for error in form.non_field_errors()],
-    }
+    return form_payload(form, _labelled_form_field_payload)
 
 
 def _membership_request_detail_title(
@@ -774,17 +730,16 @@ def _self_service_detail_payload(
     freeipa_user = FreeIPAUser.get(username)
     user_email = freeipa_user.email if freeipa_user is not None else ""
     can_resubmit = membership_request.status == MembershipRequest.Status.on_hold
-    form_payload: dict[str, object] | None = None
+    update_form: dict[str, object] | None = None
     if can_resubmit:
-        form = MembershipRequestUpdateResponsesForm(membership_request=membership_request)
-        form_payload = _serialize_update_form(form=form)
+        update_form = _serialize_update_form(form=MembershipRequestUpdateResponsesForm(membership_request=membership_request))
 
     return {
         "can_resubmit": can_resubmit,
         "can_rescind": membership_request.status in {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold},
-        "committee_email": str(settings.MEMBERSHIP_COMMITTEE_EMAIL or "").strip(),
+        "committee_email": settings.MEMBERSHIP_COMMITTEE_EMAIL,
         "user_email": user_email,
-        "form": form_payload,
+        "form": update_form,
     }
 
 

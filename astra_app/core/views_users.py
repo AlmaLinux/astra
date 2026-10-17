@@ -579,14 +579,14 @@ def _profile_context_for_user(
     profile_is_private = fu.fas_is_private if hasattr(fu, "fas_is_private") else False
     show_membership_card = (not profile_is_private) or is_self or viewer_is_membership_committee
 
-    profile_email = str(fu.email or "").strip()
+    profile_email = fu.email
     if profile_is_private and not is_self and viewer_is_membership_committee and not profile_email:
         try:
             full_profile_user = FreeIPAUser.get(fu.username, respect_privacy=False)
         except Exception:
             full_profile_user = None
         if full_profile_user is not None:
-            profile_email = str(full_profile_user.email or "").strip()
+            profile_email = full_profile_user.email
 
     if profile_is_private and not is_self and viewer_is_membership_committee and not country_status.code:
         try:

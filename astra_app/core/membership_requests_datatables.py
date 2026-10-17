@@ -625,7 +625,7 @@ def build_target_payload(*, row: dict[str, object]) -> dict[str, object]:
             "deleted": organization is None,
         }
 
-    requested_username = str(membership_request.requested_username or "")
+    requested_username = membership_request.requested_username
     full_name = str(row.get("full_name") or "")
     return {
         "kind": "user",
@@ -701,11 +701,7 @@ def build_note_details(
             for membership_request_id, responses in MembershipRequest.objects.filter(pk__in=request_ids).values_list("pk", "responses"):
                 responses_by_request_id[int(membership_request_id)] = _normalize_response_snapshot(responses)
 
-    author_usernames = {
-        str(note.username or "").strip().lower()
-        for note in notes
-        if note.username and note.username != CUSTOS and str(note.username or "").strip()
-    }
+    author_usernames = {note.username.lower() for note in notes if note.username and note.username != CUSTOS}
     if membership_request is None:
         users_by_username = FreeIPAUser.find_lightweight_by_usernames(author_usernames)
     else:
@@ -750,8 +746,8 @@ def serialize_note_group(
 ) -> dict[str, object]:
     header_entry = group["header_entry"]
     note = header_entry["note"]
-    username = str(note.username or "")
-    normalized_username = username.strip().lower()
+    username = note.username
+    normalized_username = username.lower()
     avatar_url = ""
     avatar_kind = "default"
     if header_entry.get("is_custos"):

@@ -234,7 +234,7 @@ def election_vote_submit(request, election_id: int):
     if isinstance(request_user, (FreeIPAUser, DegradedFreeIPAUser)):
         receipt_user = request_user
 
-    voter_email = str(receipt_user.email or "").strip() if receipt_user is not None else ""
+    voter_email = receipt_user.email if receipt_user is not None else ""
     email_queued = False
     if voter_email:
         tz_name = _get_freeipa_timezone_name(receipt_user) if isinstance(receipt_user, FreeIPAUser) else None

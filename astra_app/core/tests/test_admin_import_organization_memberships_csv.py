@@ -120,7 +120,7 @@ class OrganizationMembershipCSVImportResourceTests(TestCase):
         )
 
         with patch(
-            "core.organization_membership_csv_import.extract_csv_headers_from_uploaded_file",
+            "core.csv_import_utils.extract_csv_headers_from_uploaded_file",
             side_effect=RuntimeError("boom"),
         ):
             form = OrganizationMembershipCSVImportForm(

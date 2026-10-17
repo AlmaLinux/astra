@@ -5,7 +5,6 @@ from django.test import TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
 
-from core.country_codes import country_attr_name
 from core.freeipa.user import FreeIPAUser
 from core.models import (
     FreeIPAPermissionGrant,
@@ -364,7 +363,7 @@ class MembershipRequestDetailApiTests(TestCase):
                 "mail": ["alice@example.com"],
                 "givenname": ["Alice"],
                 "sn": ["User"],
-                country_attr_name(): ["IR"],
+                settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR: ["IR"],
                 "memberof_group": [],
             },
         )

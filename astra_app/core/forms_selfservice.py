@@ -3,7 +3,7 @@ import locale
 import re
 import zoneinfo
 from functools import lru_cache
-from typing import override
+from typing import Any, override
 from urllib.parse import urlparse
 
 import pycountry
@@ -176,7 +176,100 @@ def _get_country_choices() -> list[tuple[str, str]]:
     return choices + countries
 
 
-class ProfileForm(StyledForm):
+class FasProfileCleanMixin:
+    """Validation for the freeipa-fas profile attributes, shared by self-service and the admin.
+
+    Django only calls clean_<field> for fields the form declares, so each form picks up
+    just the rules for its own fields.
+    """
+
+    cleaned_data: dict[str, Any]
+
+    @classmethod
+    def _validate_multivalued_maxlen(cls, value: str, *, field_label: str, maxlen: int) -> str:
+        normalized: list[str] = []
+        for item in (i.strip() for i in _split_list_field(value)):
+            if not item:
+                continue
+            if len(item) > maxlen:
+                raise forms.ValidationError(f"Invalid {field_label}: each value must be at most {maxlen} characters")
+            normalized.append(item)
+        return "\n".join(normalized)
+
+    @classmethod
+    def _validate_gpg_key_ids(cls, value: str) -> str:
+        # Matches baseruserfas: Str("fasgpgkeyid*", minlength=16, maxlength=40)
+        normalized: list[str] = []
+        for item in (i.strip() for i in _split_list_field(value)):
+            if not item:
+                continue
+            if len(item) < 16 or len(item) > 40:
+                raise forms.ValidationError("Invalid GPG Key IDs: each value must be 16 to 40 characters")
+            normalized.append(item)
+        return "\n".join(normalized)
+
+    def clean_fasWebsiteUrl(self) -> str:
+        return validate_http_urls(self.cleaned_data.get("fasWebsiteUrl", ""), field_label="Website URL")
+
+    def clean_fasRssUrl(self) -> str:
+        return validate_http_urls(self.cleaned_data.get("fasRssUrl", ""), field_label="RSS URL")
+
+    def clean_fasIRCNick(self) -> str:
+        # baseruserfas: Str("fasircnick*", maxlength=64)
+        # Noggin-style: store chat identities as URL-ish strings (irc/matrix/mattermost).
+        try:
+            return normalize_chat_nicknames_text(self.cleaned_data.get("fasIRCNick", ""), max_item_len=64)
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+
+    def clean_fasPronoun(self) -> str:
+        # Matches baseruserfas: Str("faspronoun*", maxlength=64)
+        return self._validate_multivalued_maxlen(self.cleaned_data.get("fasPronoun", ""), field_label="Pronouns", maxlen=64)
+
+    def clean_fasLocale(self) -> str:
+        # Matches baseruserfas: Str("faslocale?", maxlength=64)
+        value = normalize_locale_tag(self.cleaned_data.get("fasLocale"))
+        if len(value) > 64:
+            raise forms.ValidationError("Locale must be at most 64 characters")
+        if value and not _is_valid_locale_code(value):
+            raise forms.ValidationError("Locale must be a valid locale short-code")
+        return value
+
+    def clean_fasTimezone(self) -> str:
+        # Matches baseruserfas: Str("fastimezone?", maxlength=64)
+        value = _normalize_str(self.cleaned_data.get("fasTimezone"))
+        if len(value) > 64:
+            raise forms.ValidationError("Timezone must be at most 64 characters")
+        if value and value not in _get_timezones():
+            raise forms.ValidationError("Timezone must be a valid IANA timezone")
+        return value
+
+    def clean_fasGitHubUsername(self) -> str:
+        # Matches baseruserfas normalizer=lambda value: value.strip(), maxlength=255
+        value = _normalize_profile_handle(self.cleaned_data.get("fasGitHubUsername"), expected_host="github.com")
+        if value and not _GITHUB_USERNAME_RE.match(value):
+            raise forms.ValidationError("GitHub username is not valid")
+        return value
+
+    def clean_fasGitLabUsername(self) -> str:
+        # Matches baseruserfas normalizer=lambda value: value.strip(), maxlength=255
+        value = _normalize_profile_handle(self.cleaned_data.get("fasGitLabUsername"), expected_host="gitlab.com")
+        if value and not _GITLAB_USERNAME_RE.match(value):
+            raise forms.ValidationError("GitLab username is not valid")
+        return value
+
+    def clean_fasRHBZEmail(self) -> str:
+        # Matches freeipa-fas userfas.check_fasuser_attr and baseruserfas normalizer strip
+        value = _normalize_str(self.cleaned_data.get("fasRHBZEmail")).lower()
+        if not value:
+            return ""
+        return validate_no_profanity_or_hate_speech(value, field_label="Bugzilla email")
+
+    def clean_fasGPGKeyId(self) -> str:
+        return self._validate_gpg_key_ids(self.cleaned_data.get("fasGPGKeyId", ""))
+
+
+class ProfileForm(FasProfileCleanMixin, StyledForm):
     # Core identity fields
     givenname = forms.CharField(
         label="First Name",
@@ -310,93 +403,6 @@ class ProfileForm(StyledForm):
         self.fields["fasLocale"].choices = _choices(get_locale_options(), current=locale_current)
         self.fields["fasTimezone"].choices = _choices(get_timezone_options(), current=timezone_current)
 
-    @classmethod
-    def _rejoin_lines(cls, items: list[str]) -> str:
-        return "\n".join(items)
-
-    @classmethod
-    def _validate_multivalued_maxlen(cls, value: str, *, field_label: str, maxlen: int) -> str:
-        items = [i.strip() for i in _split_list_field(value)]
-        normalized: list[str] = []
-        for i in items:
-            if not i:
-                continue
-            if len(i) > maxlen:
-                raise forms.ValidationError(f"Invalid {field_label}: each value must be at most {maxlen} characters")
-            normalized.append(i)
-        return cls._rejoin_lines(normalized)
-
-    @classmethod
-    def _validate_gpg_key_ids(cls, value: str) -> str:
-        # Matches baseruserfas: Str("fasgpgkeyid*", minlength=16, maxlength=40)
-        items = [i.strip() for i in _split_list_field(value)]
-        normalized: list[str] = []
-        for i in items:
-            if not i:
-                continue
-            if len(i) < 16 or len(i) > 40:
-                raise forms.ValidationError("Invalid GPG Key IDs: each value must be 16 to 40 characters")
-            normalized.append(i)
-        return cls._rejoin_lines(normalized)
-
-    def clean_fasWebsiteUrl(self):
-        return validate_http_urls(self.cleaned_data.get("fasWebsiteUrl", ""), field_label="Website URL")
-
-    def clean_fasRssUrl(self):
-        return validate_http_urls(self.cleaned_data.get("fasRssUrl", ""), field_label="RSS URL")
-
-    def clean_fasIRCNick(self):
-        # baseruserfas: Str("fasircnick*", maxlength=64)
-        # Noggin-style: store chat identities as URL-ish strings (irc/matrix/mattermost).
-        try:
-            return normalize_chat_nicknames_text(self.cleaned_data.get("fasIRCNick", ""), max_item_len=64)
-        except ValueError as exc:
-            raise forms.ValidationError(str(exc)) from exc
-
-    def clean_fasPronoun(self):
-        # Matches baseruserfas: Str("faspronoun*", maxlength=64)
-        return self._validate_multivalued_maxlen(self.cleaned_data.get("fasPronoun", ""), field_label="Pronouns", maxlen=64)
-
-    def clean_fasLocale(self):
-        # Matches baseruserfas: Str("faslocale?", maxlength=64)
-        value = normalize_locale_tag(self.cleaned_data.get("fasLocale"))
-        if len(value) > 64:
-            raise forms.ValidationError("Locale must be at most 64 characters")
-        if value and not _is_valid_locale_code(value):
-            raise forms.ValidationError("Locale must be a valid locale short-code")
-        return value
-
-    def clean_fasTimezone(self):
-        # Matches baseruserfas: Str("fastimezone?", maxlength=64)
-        value = _normalize_str(self.cleaned_data.get("fasTimezone"))
-        if len(value) > 64:
-            raise forms.ValidationError("Timezone must be at most 64 characters")
-        if value:
-            tzs = _get_timezones()
-            if value not in tzs:
-                raise forms.ValidationError("Timezone must be a valid IANA timezone")
-        return value
-
-    def clean_fasGitHubUsername(self):
-        # Matches baseruserfas normalizer=lambda value: value.strip(), maxlength=255
-        value = _normalize_profile_handle(
-            self.cleaned_data.get("fasGitHubUsername"),
-            expected_host="github.com",
-        )
-        if value and not _GITHUB_USERNAME_RE.match(value):
-            raise forms.ValidationError("GitHub username is not valid")
-        return value
-
-    def clean_fasGitLabUsername(self):
-        # Matches baseruserfas normalizer=lambda value: value.strip(), maxlength=255
-        value = _normalize_profile_handle(
-            self.cleaned_data.get("fasGitLabUsername"),
-            expected_host="gitlab.com",
-        )
-        if value and not _GITLAB_USERNAME_RE.match(value):
-            raise forms.ValidationError("GitLab username is not valid")
-        return value
-
     def clean_givenname(self):
         value = _normalize_str(self.cleaned_data.get("givenname"))
         return validate_no_profanity_or_hate_speech(value, field_label="First name")
@@ -414,20 +420,13 @@ class ProfileForm(StyledForm):
         return value
 
 
-class EmailsForm(StyledForm):
+class EmailsForm(FasProfileCleanMixin, StyledForm):
     mail = forms.EmailField(label="E-mail Address", required=True)
     fasRHBZEmail = forms.EmailField(label="Red Hat Bugzilla Email", required=False, max_length=255)
 
     def clean_mail(self):
         value = _normalize_str(self.cleaned_data.get("mail")).lower()
         return validate_no_profanity_or_hate_speech(value, field_label="Email address")
-
-    def clean_fasRHBZEmail(self):
-        # Matches freeipa-fas userfas.check_fasuser_attr and baseruserfas normalizer strip
-        value = _normalize_str(self.cleaned_data.get("fasRHBZEmail")).lower()
-        if not value:
-            return ""
-        return validate_no_profanity_or_hate_speech(value, field_label="Bugzilla email")
 
 
 class PrivacySettingsForm(StyledForm):
@@ -485,7 +484,7 @@ class AccountDeletionRequestForm(StyledForm):
         return _normalize_str(self.cleaned_data.get("reason_text"))
 
 
-class KeysForm(StyledForm):
+class KeysForm(FasProfileCleanMixin, StyledForm):
     fasGPGKeyId = forms.CharField(
         label="GPG Key IDs",
         required=False,
@@ -498,10 +497,6 @@ class KeysForm(StyledForm):
         widget=forms.Textarea(attrs={"rows": 6}),
         help_text="One per block/line.",
     )
-
-    def clean_fasGPGKeyId(self):
-        # baseruserfas constraints: each entry 16..40 chars
-        return ProfileForm._validate_gpg_key_ids(self.cleaned_data.get("fasGPGKeyId", ""))
 
 
 class OTPAddForm(StyledForm):

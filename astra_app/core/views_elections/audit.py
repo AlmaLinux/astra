@@ -507,7 +507,7 @@ def _build_election_audit_log_context(request: HttpRequest, *, election: Electio
 
         entry = item
         payload = entry.payload if isinstance(entry.payload, dict) else {}
-        event_type = str(entry.event_type or "").strip() or "unknown"
+        event_type = entry.event_type or "unknown"
         icon, icon_bg = _icon_for_event(event_type)
 
         event = {

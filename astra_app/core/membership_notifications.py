@@ -52,18 +52,16 @@ def organization_membership_request_url(
 def organization_sponsor_notification_recipient_email(
     *, organization: Organization, notification_kind: str,
 ) -> tuple[str, str | None]:
-    representative_username = str(organization.representative or "").strip()
+    representative_username = organization.representative
     if representative_username:
         try:
             representative = FreeIPAUser.get(representative_username, respect_privacy=False)
         except Exception:
             representative = None
-        if representative is not None:
-            address = str(representative.email or "").strip()
-            if address:
-                return address, None
+        if representative is not None and representative.email:
+            return representative.email, None
 
-    fallback_address = str(organization.primary_contact_email() or "").strip()
+    fallback_address = organization.primary_contact_email()
     if fallback_address:
         return fallback_address, None
 
@@ -172,7 +170,7 @@ def admin_group_emails(
     Logs an error and returns an empty list when nobody can be reached.
     """
     resolved_user_getter = user_getter or FreeIPAUser.get
-    admin_group_cn = str(settings.FREEIPA_ADMIN_GROUP or "").strip()
+    admin_group_cn = settings.FREEIPA_ADMIN_GROUP
     admin_group = FreeIPAGroup.get(admin_group_cn) if admin_group_cn else None
     if admin_group is None:
         logger.error("admin_group_emails: admin_group_missing group=%s", admin_group_cn)
@@ -181,8 +179,8 @@ def admin_group_emails(
     emails: set[str] = set()
     for username in admin_group.members:
         user = resolved_user_getter(username)
-        if user is not None and str(user.email or "").strip():
-            emails.add(str(user.email).strip())
+        if user is not None and user.email:
+            emails.add(user.email)
     if not emails:
         logger.error("admin_group_emails: no_admin_recipients group=%s", admin_group_cn)
     return sorted(emails, key=str.lower)
@@ -252,13 +250,10 @@ def committee_recipient_emails_for_permission_graceful(
     seen: set[str] = set()
     for username in expanded_usernames:
         user = resolved_user_getter(username)
-        if user is None or not user.email:
+        if user is None or not user.email or user.email in seen:
             continue
-        addr = str(user.email or "").strip()
-        if not addr or addr in seen:
-            continue
-        seen.add(addr)
-        recipients.append(addr)
+        seen.add(user.email)
+        recipients.append(user.email)
 
     if not recipients:
         warnings.append(f"No email addresses found for any principals with {permission}")
@@ -306,7 +301,7 @@ def send_membership_notification(
 
     if organization is not None:
         base_ctx = organization_sponsor_email_context(organization=organization)
-        committee_email = str(settings.MEMBERSHIP_COMMITTEE_EMAIL or "").strip()
+        committee_email = settings.MEMBERSHIP_COMMITTEE_EMAIL
         cc = [committee_email] if committee_email else None
         reply_to = [committee_email] if committee_email else None
         context = {
@@ -314,7 +309,7 @@ def send_membership_notification(
             **membership_committee_email_context(),
             **system_email_context(),
             "organization_id": organization.pk,
-            "organization_name": str(organization.name or ""),
+            "organization_name": organization.name,
             "membership_type": membership_type.name,
             "membership_type_code": membership_type.code,
             "expires_at": _format_expires_at(expires_at=expires_at, tz_name=tz_name),

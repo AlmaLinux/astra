@@ -119,7 +119,7 @@ class Command(BaseCommand):
                     f"status={membership_request.status}"
                 )
 
-            resolved_group = str(membership_request.membership_type.group_cn or "").strip()
+            resolved_group = membership_request.membership_type.group_cn
             if not resolved_group:
                 raise CommandError(
                     f"membership request ID {membership_request.pk} has no configured membership group"
@@ -131,13 +131,13 @@ class Command(BaseCommand):
                 )
 
             if membership_request.is_user_target:
-                target = str(membership_request.requested_username or "").strip()
+                target = membership_request.requested_username
             else:
                 if membership_request.requested_organization is None:
                     raise CommandError(
                         f"membership request ID {membership_request.pk} has no organization to resolve representative"
                     )
-                target = str(membership_request.requested_organization.representative or "").strip()
+                target = membership_request.requested_organization.representative
 
             if not target:
                 raise CommandError(
@@ -216,7 +216,7 @@ class Command(BaseCommand):
             return freeipa_users_by_username[normalized]
 
         for membership_type in membership_types.order_by("code"):
-            group_cn = str(membership_type.group_cn or "").strip()
+            group_cn = membership_type.group_cn
             if not group_cn:
                 continue
 
@@ -246,10 +246,8 @@ class Command(BaseCommand):
                 )
                 for m in active_org_memberships:
                     org = m.target_organization
-                    if org is not None:
-                        representative = str(org.representative or "").strip()
-                        if representative:
-                            expected.add(representative)
+                    if org is not None and org.representative:
+                        expected.add(org.representative)
 
             if targeted_mode:
                 if target not in expected:

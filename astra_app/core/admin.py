@@ -57,17 +57,9 @@ from core.form_validators import (
     clean_fas_irc_channels_value,
     clean_fas_mailing_list_value,
     clean_fas_url_value,
-    validate_http_urls,
 )
-from core.forms_selfservice import (
-    _GITHUB_USERNAME_RE,
-    _GITLAB_USERNAME_RE,
-    ProfileForm,
-    _get_timezones,
-    _is_valid_locale_code,
-    _normalize_profile_handle,
-    normalize_locale_tag,
-)
+from core.forms_organizations import clean_representative_username
+from core.forms_selfservice import FasProfileCleanMixin
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.client import clear_current_viewer_username, set_current_viewer_username
 from core.freeipa.exceptions import FreeIPAOperationFailed
@@ -118,7 +110,6 @@ from core.organization_membership_csv_import import (
     required_organization_membership_csv_columns,
 )
 from core.organization_representative_transition import apply_organization_representative_transition
-from core.profanity import validate_no_profanity_or_hate_speech
 from core.protected_resources import protected_freeipa_group_cns
 from core.signals import CANONICAL_SIGNALS
 from core.templated_email import queue_templated_email
@@ -857,7 +848,7 @@ def _freeipa_user_attribute_rows(user: FreeIPAUser) -> list[tuple[str, str]]:
     return rows
 
 
-class IPAUserBaseForm(FreeIPAFormMixin, forms.ModelForm):
+class IPAUserBaseForm(FreeIPAFormMixin, FasProfileCleanMixin, forms.ModelForm):
     groups = forms.MultipleChoiceField(
         required=False,
         widget=_duallistbox_widget(),
@@ -933,71 +924,6 @@ class IPAUserBaseForm(FreeIPAFormMixin, forms.ModelForm):
     class Meta:
         model = IPAUser
         fields = ("username", "first_name", "last_name", "email", "is_active")
-
-    def clean_fasWebsiteUrl(self) -> str:
-        return validate_http_urls(self.cleaned_data.get("fasWebsiteUrl", ""), field_label="Website URL")
-
-    def clean_fasRssUrl(self) -> str:
-        return validate_http_urls(self.cleaned_data.get("fasRssUrl", ""), field_label="RSS URL")
-
-    def clean_fasIRCNick(self) -> str:
-        # Delegate to the same shared normalization used by self-service.
-        from core.chatnicknames import normalize_chat_nicknames_text
-
-        try:
-            return normalize_chat_nicknames_text(self.cleaned_data.get("fasIRCNick", ""), max_item_len=64)
-        except ValueError as exc:
-            raise forms.ValidationError(str(exc)) from exc
-
-    def clean_fasPronoun(self) -> str:
-        return ProfileForm._validate_multivalued_maxlen(
-            self.cleaned_data.get("fasPronoun", ""),
-            field_label="Pronouns",
-            maxlen=64,
-        )
-
-    def clean_fasLocale(self) -> str:
-        value = normalize_locale_tag(self.cleaned_data.get("fasLocale"))
-        if len(value) > 64:
-            raise forms.ValidationError("Locale must be at most 64 characters")
-        if value and not _is_valid_locale_code(value):
-            raise forms.ValidationError("Locale must be a valid locale short-code")
-        return value
-
-    def clean_fasTimezone(self) -> str:
-        value = _normalize_str(self.cleaned_data.get("fasTimezone"))
-        if len(value) > 64:
-            raise forms.ValidationError("Timezone must be at most 64 characters")
-        if value and value not in _get_timezones():
-            raise forms.ValidationError("Timezone must be a valid IANA timezone")
-        return value
-
-    def clean_fasGitHubUsername(self) -> str:
-        value = _normalize_profile_handle(
-            self.cleaned_data.get("fasGitHubUsername"),
-            expected_host="github.com",
-        )
-        if value and not _GITHUB_USERNAME_RE.match(value):
-            raise forms.ValidationError("GitHub username is not valid")
-        return value
-
-    def clean_fasGitLabUsername(self) -> str:
-        value = _normalize_profile_handle(
-            self.cleaned_data.get("fasGitLabUsername"),
-            expected_host="gitlab.com",
-        )
-        if value and not _GITLAB_USERNAME_RE.match(value):
-            raise forms.ValidationError("GitLab username is not valid")
-        return value
-
-    def clean_fasRHBZEmail(self) -> str:
-        value = _normalize_str(self.cleaned_data.get("fasRHBZEmail")).lower()
-        if not value:
-            return ""
-        return validate_no_profanity_or_hate_speech(value, field_label="Bugzilla email")
-
-    def clean_fasGPGKeyId(self) -> str:
-        return ProfileForm._validate_gpg_key_ids(self.cleaned_data.get("fasGPGKeyId", ""))
 
     @override
     def __init__(self, *args, **kwargs):
@@ -1978,7 +1904,7 @@ class MembershipTypeAdmin(admin.ModelAdmin):
 
             current = (self.initial.get("group_cn") or "").strip()
             if not current and self.instance and self.instance.group_cn:
-                current = str(self.instance.group_cn or "").strip()
+                current = self.instance.group_cn
             if current and current not in group_names:
                 group_names.append(current)
 
@@ -2421,7 +2347,7 @@ class ElectionAdmin(admin.ModelAdmin):
 
     def _run_election_action(self, request: HttpRequest, queryset, *, action_fn: Callable, success_verb: str) -> None:
         """Shared boilerplate for election admin actions that apply a function per election."""
-        actor_username = str(request.user.username or "").strip()
+        actor_username = request.user.username
         for election in queryset:
             try:
                 action_fn(election=election, actor=actor_username)
@@ -3846,7 +3772,7 @@ class OrganizationAdmin(admin.ModelAdmin):
 
             current = str(self.initial.get("representative") or "").strip()
             if not current and self.instance:
-                current = str(self.instance.representative or "").strip()
+                current = self.instance.representative
 
             if current and current not in usernames:
                 usernames.append(current)
@@ -3861,29 +3787,7 @@ class OrganizationAdmin(admin.ModelAdmin):
             ]
 
         def clean_representative(self) -> str:
-            username = str(self.cleaned_data.get("representative") or "").strip()
-            # No representative means the organization stays unclaimed.
-            if not username:
-                return ""
-
-            if FreeIPAUser.get(username) is None:
-                raise forms.ValidationError(
-                    f"Unknown user: {username}",
-                    code="unknown_representative",
-                )
-
-            conflict_exists = (
-                Organization.objects.filter(representative=username)
-                .exclude(pk=self.instance.pk)
-                .exists()
-            )
-            if conflict_exists:
-                raise forms.ValidationError(
-                    "That user is already the representative of another organization.",
-                    code="representative_not_unique",
-                )
-
-            return username
+            return clean_representative_username(self.cleaned_data.get("representative"), organization=self.instance)
 
         @override
         def clean(self) -> dict[str, Any]:
@@ -3892,7 +3796,7 @@ class OrganizationAdmin(admin.ModelAdmin):
             if self.instance.pk is None:
                 return cleaned_data
 
-            current_representative = str(self.instance.representative or "").strip()
+            current_representative = self.instance.representative
             new_representative = str(cleaned_data.get("representative") or "").strip()
             if current_representative == new_representative:
                 return cleaned_data
@@ -3933,8 +3837,8 @@ class OrganizationAdmin(admin.ModelAdmin):
                         if looked_up_type is not None:
                             new_membership_type = looked_up_type
 
-                    old_group_cn = str(current_membership.membership_type.group_cn or "").strip()
-                    new_group_cn = str(new_membership_type.group_cn or "").strip()
+                    old_group_cn = current_membership.membership_type.group_cn
+                    new_group_cn = new_membership_type.group_cn
                     if not old_group_cn and not new_group_cn:
                         continue
 
@@ -3961,7 +3865,7 @@ class OrganizationAdmin(admin.ModelAdmin):
                 membership_type = MembershipType.objects.filter(pk=membership_type_id).first()
                 if membership_type is None:
                     continue
-                if str(membership_type.group_cn or "").strip():
+                if membership_type.group_cn:
                     raise forms.ValidationError(
                         "Change the representative and sponsorship memberships in separate saves."
                     )
@@ -4141,7 +4045,7 @@ class FreeIPAPermissionGrantAdmin(admin.ModelAdmin):
 
             current = str(self.initial.get("principal_name") or "").strip()
             if not current and self.instance and self.instance.principal_name:
-                current = str(self.instance.principal_name or "").strip()
+                current = self.instance.principal_name
 
             if selected_type == FreeIPAPermissionGrant.PrincipalType.group:
                 principal_names = _freeipa_group_names()

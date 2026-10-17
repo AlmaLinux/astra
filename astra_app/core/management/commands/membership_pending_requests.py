@@ -13,6 +13,7 @@ from core.membership_notifications import (
     oldest_pending_membership_request_wait_time,
 )
 from core.models import MembershipRequest
+from core.operations import add_force_and_dry_run_arguments
 from core.permissions import ASTRA_ADD_MEMBERSHIP
 from core.templated_email import queue_templated_email
 
@@ -24,16 +25,7 @@ class Command(BaseCommand):
 
     @override
     def add_arguments(self, parser) -> None:
-        parser.add_argument(
-            "--force",
-            action="store_true",
-            help="Send even if an email was already queued today.",
-        )
-        parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Show what would be done without mutating data or sending email.",
-        )
+        add_force_and_dry_run_arguments(parser)
 
     @override
     def handle(self, *args, **options) -> None:

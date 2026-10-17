@@ -40,6 +40,8 @@ async function selectOptionFromSelect2(page: Page, fieldName: string, searchTerm
 
   const select2Container = select.locator("xpath=following-sibling::span[contains(@class, 'select2')]");
   await expect(select2Container).toBeVisible();
+  // The page disables its controls until an action's refresh finishes; a disabled select2 won't open.
+  await expect(select).toBeEnabled();
   await select2Container.click();
 
   const searchResponse = page.waitForResponse((response) => {

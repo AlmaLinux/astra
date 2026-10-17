@@ -23,7 +23,7 @@ def protected_freeipa_group_cns() -> frozenset[str]:
 
     protected: set[str] = set()
 
-    admin_group = str(settings.FREEIPA_ADMIN_GROUP or "").strip()
+    admin_group = settings.FREEIPA_ADMIN_GROUP
     if admin_group:
         protected.add(admin_group)
 

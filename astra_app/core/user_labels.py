@@ -14,7 +14,7 @@ def user_label(username: str, *, user: FreeIPAUser | None = None) -> str:
     if not u:
         return ""
 
-    full_name = "" if user is None else str(user.full_name or "").strip()
+    full_name = "" if user is None else user.full_name
     if full_name and full_name != u:
         return f"{full_name} ({u})"
     return u

@@ -6,7 +6,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 
-from core.country_codes import country_attr_name, country_label_from_code
+from core.country_codes import country_label_from_code
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.e2e_registry import get_e2e_service_client
 from core.membership_notes import CUSTOS
@@ -182,7 +182,7 @@ class MembershipCommitteeResetCommandTests(TestCase):
         reviewer = client.user_show("regular01")["result"]
 
         self.assertIn(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP, reviewer.get("memberof_group", []))
-        self.assertEqual(reviewer.get(country_attr_name()), ["US"])
+        self.assertEqual(reviewer.get(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR), ["US"])
 
         agreement = FreeIPAFASAgreement.get("AlmaLinux Community Code of Conduct")
         self.assertIsNotNone(agreement)
@@ -288,7 +288,7 @@ class MembershipCommitteeResetCommandTests(TestCase):
 
         client = get_e2e_service_client()
         regular06 = client.user_show("regular06")["result"]
-        self.assertEqual(regular06.get(country_attr_name()), ["RU"])
+        self.assertEqual(regular06.get(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR), ["RU"])
 
         request_id = payload["actors"]["committee_reviewer"]["request_aliases"]["pending_row_action"]
         detail_request = MembershipRequest.objects.get(pk=request_id)

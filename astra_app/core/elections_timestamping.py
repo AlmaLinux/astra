@@ -79,7 +79,7 @@ def get_canonical_bytes(entry: AuditLogEntry) -> bytes:
 
 
 def _load_private_key() -> ec.EllipticCurvePrivateKey:
-    key_value = str(settings.ELECTION_REKOR_SIGNING_KEY or "").strip()
+    key_value = settings.ELECTION_REKOR_SIGNING_KEY.strip()
     if not key_value:
         raise ValueError("ELECTION_REKOR_SIGNING_KEY is not configured")
 
@@ -155,7 +155,7 @@ def _attest_entry(entry: AuditLogEntry) -> None:
         },
     }
 
-    endpoint = str(settings.ELECTION_REKOR_ENDPOINT or "").strip().rstrip("/")
+    endpoint = settings.ELECTION_REKOR_ENDPOINT.strip().rstrip("/")
     timeout_seconds = int(settings.ELECTION_REKOR_TIMEOUT_SECONDS)
     total_attempts = int(settings.ELECTION_REKOR_RETRY_COUNT) + 1
 
@@ -234,10 +234,7 @@ def _write_attestation_failed(entry_id: int, error_type: str) -> None:
 
 
 def schedule_attestation(entry: AuditLogEntry) -> None:
-    endpoint = str(settings.ELECTION_REKOR_ENDPOINT or "").strip()
-    signing_key = str(settings.ELECTION_REKOR_SIGNING_KEY or "").strip()
-
-    if not endpoint or not signing_key:
+    if not settings.ELECTION_REKOR_ENDPOINT.strip() or not settings.ELECTION_REKOR_SIGNING_KEY.strip():
         return
     if entry.event_type not in ATTESTED_EVENT_TYPES:
         return

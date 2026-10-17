@@ -47,11 +47,11 @@ def apply_organization_representative_transition(
     try:
         with transaction.atomic():
             locked_organization = Organization.objects.select_for_update().get(pk=organization_id)
-            old_representative = str(locked_organization.representative or "").strip()
+            old_representative = locked_organization.representative
             targeted_group_cns: list[str] = []
             seen_group_cns: set[str] = set()
             for membership in get_valid_memberships(organization=locked_organization):
-                group_cn = str(membership.membership_type.group_cn or "").strip()
+                group_cn = membership.membership_type.group_cn
                 if not group_cn or group_cn in seen_group_cns:
                     continue
                 seen_group_cns.add(group_cn)

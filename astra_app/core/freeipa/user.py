@@ -214,20 +214,13 @@ class FreeIPAUser(_FreeIPAClientMixin):
 
     @property
     def full_name(self) -> str:
-        displayname = str(self.displayname or "").strip()
-        if displayname:
-            return displayname
-
-        gecos = str(self.gecos or "").strip()
-        if gecos:
-            return gecos
-
-        commonname = str(self.commonname or "").strip()
-        if commonname:
-            return commonname
-
-        derived = f"{self.first_name or ''} {self.last_name or ''}".strip()
-        return derived or self.username
+        return (
+            self.displayname.strip()
+            or self.gecos.strip()
+            or self.commonname.strip()
+            or f"{self.first_name} {self.last_name}".strip()
+            or self.username
+        )
 
     def get_full_name(self) -> str:
         return self.full_name
@@ -652,7 +645,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
         updates["o_gecos"] = desired_name
         updates["o_displayname"] = desired_name
 
-        initials = f"{(str(self.first_name).strip()[:1] or '').upper()}{(str(self.last_name).strip()[:1] or '').upper()}"
+        initials = f"{self.first_name.strip()[:1]}{self.last_name.strip()[:1]}".upper()
         if initials:
             updates["o_initials"] = initials
 
@@ -713,7 +706,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
         except Exception:
             return set()
 
-        username = str(self.username or "").strip().lower()
+        username = self.username.lower()
         if not username:
             return set()
 

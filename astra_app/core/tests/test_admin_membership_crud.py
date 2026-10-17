@@ -113,7 +113,7 @@ class AdminMembershipCRUDTests(TestCase):
 
         from core.models import MembershipLog
 
-        MembershipLog.create_for_approval_at(
+        MembershipLog.create_for_approval(
             actor_username="reviewer",
             membership_type=membership_type,
             approved_at=datetime.datetime(2026, 1, 2, 0, 0, tzinfo=datetime.UTC),
@@ -319,7 +319,7 @@ class AdminMembershipCRUDTests(TestCase):
             category_id="individual",
             sort_order=10,
         )
-        MembershipLog.create_for_approval_at(
+        MembershipLog.create_for_approval(
             actor_username="reviewer",
             membership_type=membership_type,
             approved_at=datetime.datetime(2026, 1, 10, 0, 0, tzinfo=datetime.UTC),
@@ -361,7 +361,7 @@ class AdminMembershipCRUDTests(TestCase):
         original_end = datetime.datetime.combine(today + datetime.timedelta(days=200), datetime.time(23, 59, 59), tzinfo=datetime.UTC)
         new_start = original_start + datetime.timedelta(days=35)
         new_end = original_end - datetime.timedelta(days=11)
-        approved_log = MembershipLog.create_for_approval_at(
+        approved_log = MembershipLog.create_for_approval(
             actor_username="reviewer",
             membership_type=membership_type,
             approved_at=original_start,
@@ -503,7 +503,7 @@ class AdminMembershipCRUDTests(TestCase):
         original_end = datetime.datetime.combine(today + datetime.timedelta(days=200), datetime.time(23, 59, 59), tzinfo=datetime.UTC)
         new_start = original_start + datetime.timedelta(days=40)
         new_end = original_end + datetime.timedelta(days=20)
-        approved_log = MembershipLog.create_for_approval_at(
+        approved_log = MembershipLog.create_for_approval(
             actor_username="reviewer",
             membership_type=membership_type,
             approved_at=original_start,
@@ -608,7 +608,7 @@ class AdminMembershipCRUDTests(TestCase):
         )
 
         starts_at = datetime.datetime(2025, 1, 1, 0, 0, tzinfo=datetime.UTC)
-        approved_log = MembershipLog.create_for_approval_at(
+        approved_log = MembershipLog.create_for_approval(
             actor_username="reviewer",
             membership_type=membership_type,
             approved_at=starts_at,
@@ -659,7 +659,7 @@ class AdminMembershipCRUDTests(TestCase):
             sort_order=5,
         )
         organization = self._create_organization(name="Replacement Org")
-        MembershipLog.create_for_approval_at(
+        MembershipLog.create_for_approval(
             actor_username="reviewer",
             membership_type=old_membership_type,
             approved_at=datetime.datetime(2026, 1, 1, 0, 0, tzinfo=datetime.UTC),

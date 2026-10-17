@@ -427,7 +427,7 @@ def previous_expires_at_for_extension(
     """
     filters: dict[str, object] = {"membership_type": membership_type}
     if membership_request.is_user_target:
-        normalized_username = str(membership_request.requested_username or "").strip()
+        normalized_username = membership_request.requested_username
         if not normalized_username:
             return None
         filters["target_username"] = normalized_username
@@ -517,7 +517,7 @@ def _execute_membership_grant(
             .first()
         )
 
-        new_group_cn = str(membership_type.group_cn or "").strip()
+        new_group_cn = membership_type.group_cn
         if new_group_cn and target_organization.representative:
             try:
                 representative = FreeIPAUser.get(target_organization.representative, respect_privacy=False)
@@ -537,8 +537,8 @@ def _execute_membership_grant(
 
             old_group_cn_for_cleanup: str | None = None
             if old_membership is not None and old_membership.membership_type.group_cn:
-                old_group_cn = str(old_membership.membership_type.group_cn or "").strip()
-                if old_group_cn and old_group_cn != new_group_cn:
+                old_group_cn = old_membership.membership_type.group_cn
+                if old_group_cn != new_group_cn:
                     old_group_cn_for_cleanup = old_group_cn
 
             representative_sync_payload = (
@@ -547,7 +547,7 @@ def _execute_membership_grant(
                 old_group_cn_for_cleanup,
             )
 
-        log = MembershipLog.create_for_approval_at(
+        log = MembershipLog.create_for_approval(
             actor_username=actor_username,
             membership_type=membership_type,
             approved_at=approved_at,
@@ -587,7 +587,7 @@ def _execute_membership_grant(
 
         group_add_payload = (normalized_target_username, membership_type.group_cn)
 
-        log = MembershipLog.create_for_approval_at(
+        log = MembershipLog.create_for_approval(
             actor_username=actor_username,
             membership_type=membership_type,
             approved_at=approved_at,

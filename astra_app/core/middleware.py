@@ -178,7 +178,8 @@ def _get_user_timezone_name(user) -> str | None:
 def _wants_json_response(request) -> bool:
     """True when the client expects a JSON response (API call, .json endpoint)."""
     accept = str(request.headers.get("Accept") or "")
-    content_type = str(request.content_type or "")
+    # A bare HttpRequest (not built from a WSGI/ASGI environ) leaves content_type as None.
+    content_type = request.content_type or ""
     return (
         request.path.endswith(".json")
         or "application/json" in accept

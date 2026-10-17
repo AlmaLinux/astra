@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { onMounted, ref } from "vue";
 
-import { fetchRegisterActivatePayload, type RegisterActivateBootstrap, type RegisterActivatePayload, type RegistrationFormField } from "./types";
+import ServerFormFields from "../shared/components/ServerFormFields.vue";
+import { fetchRegisterActivatePayload, type RegisterActivateBootstrap, type RegisterActivatePayload } from "./types";
 
 const props = defineProps<{
   bootstrap: RegisterActivateBootstrap;
@@ -10,23 +11,13 @@ const props = defineProps<{
 const payload = ref<RegisterActivatePayload | null>(props.bootstrap.initialPayload);
 const loadError = ref("");
 
-const visibleFields = computed(() => payload.value?.form.fields.filter((field) => field.widget !== "hidden") ?? []);
-
 const fieldLabels: Record<string, string> = {
   password: "Password",
   password_confirm: "Confirm password",
 };
-
-function fieldLabel(field: RegistrationFormField): string {
-  return fieldLabels[field.name] || field.name;
-}
-
-function fieldHelpText(field: RegistrationFormField): string {
-  if (field.name === "password") {
-    return "Choose a strong password.";
-  }
-  return "";
-}
+const fieldHelpTexts: Record<string, string> = {
+  password: "Choose a strong password.",
+};
 
 async function loadPayload(): Promise<void> {
   if (payload.value !== null || !props.bootstrap.apiUrl) {
@@ -58,29 +49,7 @@ onMounted(async () => {
             <div class="card-body">
               <p>Hello <strong>{{ payload.username }}</strong>. To activate your account, please choose a password.</p>
 
-              <div v-if="payload.form.nonFieldErrors.length" class="alert alert-danger" role="alert">
-                <div v-for="errorItem in payload.form.nonFieldErrors" :key="errorItem">{{ errorItem }}</div>
-              </div>
-
-              <div v-for="field in visibleFields" :key="field.name" class="form-group">
-                <label :for="field.id">
-                  {{ fieldLabel(field) }}
-                  <span v-if="field.required" class="form-required-indicator text-danger font-weight-bold ml-1" title="Required" aria-hidden="true">*</span>
-                  <span v-if="field.required" class="sr-only">Required</span>
-                </label>
-                <input
-                  :id="field.id"
-                  v-model="field.value"
-                  :type="field.widget"
-                  :name="field.name"
-                  class="form-control"
-                  :required="field.required"
-                  :disabled="field.disabled"
-                  v-bind="field.attrs"
-                >
-                <small v-if="fieldHelpText(field)" class="form-text text-muted">{{ fieldHelpText(field) }}</small>
-                <div v-for="fieldError in field.errors" :key="fieldError" class="invalid-feedback d-block">{{ fieldError }}</div>
-              </div>
+              <ServerFormFields :form="payload.form" :labels="fieldLabels" :help-texts="fieldHelpTexts" />
             </div>
             <div class="card-footer d-flex justify-content-between align-items-center">
               <button type="submit" class="btn btn-primary" title="Activate account and set password">Activate</button>

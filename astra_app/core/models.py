@@ -382,8 +382,8 @@ class Organization(models.Model):
 
     @override
     def save(self, *args, **kwargs) -> None:
-        self.representative = str(self.representative or "").strip()
-        self.claim_secret = str(self.claim_secret or "").strip()
+        self.representative = self.representative.strip()
+        self.claim_secret = self.claim_secret.strip()
 
         if not self.representative and not self.claim_secret:
             # Unclaimed organizations need a stable server-side secret so
@@ -558,8 +558,8 @@ class MirrorMembershipValidation(models.Model):
 
     @override
     def save(self, *args, **kwargs) -> None:
-        self.answer_fingerprint = str(self.answer_fingerprint or "").strip()
-        self.noted_result_fingerprint = str(self.noted_result_fingerprint or "").strip()
+        self.answer_fingerprint = self.answer_fingerprint.strip()
+        self.noted_result_fingerprint = self.noted_result_fingerprint.strip()
         if not isinstance(self.result, dict):
             self.result = {}
         super().save(*args, **kwargs)
@@ -606,13 +606,13 @@ class AccountInvitation(models.Model):
 
     @override
     def save(self, *args, **kwargs) -> None:
-        self.email = str(self.email or "").strip().lower()
-        self.full_name = str(self.full_name or "").strip()
-        self.note = str(self.note or "").strip()
-        self.invited_by_username = str(self.invited_by_username or "").strip()
-        self.email_template_name = str(self.email_template_name or "").strip()
-        self.dismissed_by_username = str(self.dismissed_by_username or "").strip()
-        self.accepted_username = str(self.accepted_username or "").strip().lower()
+        self.email = self.email.strip().lower()
+        self.full_name = self.full_name.strip()
+        self.note = self.note.strip()
+        self.invited_by_username = self.invited_by_username.strip()
+        self.email_template_name = self.email_template_name.strip()
+        self.dismissed_by_username = self.dismissed_by_username.strip()
+        self.accepted_username = self.accepted_username.strip().lower()
         if not isinstance(self.freeipa_matched_usernames, list):
             self.freeipa_matched_usernames = []
         else:
@@ -656,9 +656,9 @@ class AccountInvitationSend(models.Model):
 
     @override
     def save(self, *args, **kwargs) -> None:
-        self.sent_by_username = str(self.sent_by_username or "").strip()
-        self.template_name = str(self.template_name or "").strip()
-        self.error_category = str(self.error_category or "").strip()
+        self.sent_by_username = self.sent_by_username.strip()
+        self.template_name = self.template_name.strip()
+        self.error_category = self.error_category.strip()
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -1013,24 +1013,20 @@ class MembershipLog(models.Model):
         dues_usd: int | None = None,
     ) -> MembershipLog:
         """Internal factory: all public create_for_* methods delegate here."""
-        kwargs: dict[str, object] = {
-            "actor_username": actor_username,
-            "target_username": target_username,
-            "target_organization": target_organization,
-            "deleted_organization_id": deleted_organization_id,
-            "deleted_organization_name": deleted_organization_name,
-            "membership_type": membership_type,
-            "membership_request": membership_request,
-            "action": action,
-            "dues_usd": dues_usd,
-        }
-        if expires_at is not None:
-            kwargs["expires_at"] = expires_at
-        if rejection_reason:
-            kwargs["rejection_reason"] = rejection_reason
-        if import_batch_id is not None:
-            kwargs["import_batch_id"] = import_batch_id
-        return cls.objects.create(**kwargs)
+        return cls.objects.create(
+            actor_username=actor_username,
+            target_username=target_username,
+            target_organization=target_organization,
+            deleted_organization_id=deleted_organization_id,
+            deleted_organization_name=deleted_organization_name,
+            membership_type=membership_type,
+            membership_request=membership_request,
+            action=action,
+            expires_at=expires_at,
+            rejection_reason=rejection_reason,
+            import_batch_id=import_batch_id,
+            dues_usd=dues_usd,
+        )
 
     # --- Factory methods (unified: pass target_username OR target_organization) ---
 
@@ -1054,12 +1050,12 @@ class MembershipLog(models.Model):
         )
 
     @classmethod
-    def create_for_approval_at(
+    def create_for_approval(
         cls,
         *,
         actor_username: str,
         membership_type: MembershipType,
-        approved_at: datetime.datetime,
+        approved_at: datetime.datetime | None = None,
         target_username: str = "",
         target_organization: Organization | None = None,
         previous_expires_at: datetime.datetime | None = None,
@@ -1077,31 +1073,13 @@ class MembershipLog(models.Model):
             membership_type=membership_type, membership_request=membership_request,
             action=cls.Action.approved,
             expires_at=cls.expiry_for_approval_at(
-                approved_at=approved_at, previous_expires_at=previous_expires_at,
+                approved_at=approved_at or timezone.now(), previous_expires_at=previous_expires_at,
             ),
             import_batch_id=import_batch_id,
             dues_usd=dues_usd,
         )
         apply_membership_log_side_effects(log=log)
         return log
-
-    @classmethod
-    def create_for_approval(
-        cls,
-        *,
-        actor_username: str,
-        membership_type: MembershipType,
-        target_username: str = "",
-        target_organization: Organization | None = None,
-        previous_expires_at: datetime.datetime | None = None,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        return cls.create_for_approval_at(
-            actor_username=actor_username, target_username=target_username,
-            target_organization=target_organization,
-            membership_type=membership_type, approved_at=timezone.now(),
-            previous_expires_at=previous_expires_at, membership_request=membership_request,
-        )
 
     @classmethod
     def create_for_expiry_change(
@@ -1230,41 +1208,6 @@ class MembershipLog(models.Model):
             if log.membership_request is not None:
                 add_note(membership_request=log.membership_request, username=actor_username, action=note_action)
         return log
-
-    @classmethod
-    def create_for_rejection(
-        cls,
-        *,
-        actor_username: str,
-        membership_type: MembershipType,
-        rejection_reason: str,
-        target_username: str = "",
-        target_organization: Organization | None = None,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        return cls._create_log(
-            actor_username=actor_username, target_username=target_username,
-            target_organization=target_organization,
-            membership_type=membership_type, membership_request=membership_request,
-            action=cls.Action.rejected, rejection_reason=rejection_reason,
-        )
-
-    @classmethod
-    def create_for_ignore(
-        cls,
-        *,
-        actor_username: str,
-        membership_type: MembershipType,
-        target_username: str = "",
-        target_organization: Organization | None = None,
-        membership_request: MembershipRequest | None = None,
-    ) -> MembershipLog:
-        return cls._create_log(
-            actor_username=actor_username, target_username=target_username,
-            target_organization=target_organization,
-            membership_type=membership_type, membership_request=membership_request,
-            action=cls.Action.ignored,
-        )
 
 
 class PrivacyReasonTextQuerySet(models.QuerySet):
@@ -1623,7 +1566,7 @@ class VotingCredential(models.Model):
         return f"VotingCredential(election_id={self.election_id}, pk={self.pk})"
 
     def _has_username_binding(self) -> bool:
-        return str(self.freeipa_username or "").strip() != ""
+        return bool(self.freeipa_username)
 
     def _was_anonymized_before_save(self) -> bool:
         if self.pk is None:
@@ -1927,8 +1870,8 @@ class FreeIPAPermissionGrant(models.Model):
     @override
     def save(self, *args, **kwargs) -> None:
         # Normalize for stable matching (FreeIPA names are case-insensitive in practice).
-        self.permission = str(self.permission or "").strip().lower()
-        self.principal_name = str(self.principal_name or "").strip().lower()
+        self.permission = self.permission.strip().lower()
+        self.principal_name = self.principal_name.strip().lower()
         super().save(*args, **kwargs)
 
 

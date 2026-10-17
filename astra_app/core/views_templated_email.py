@@ -10,6 +10,7 @@ from django.urls import reverse, reverse_lazy
 from django.views.decorators.http import require_GET, require_http_methods, require_POST, require_safe
 from post_office.models import EmailTemplate
 
+from core.form_payloads import form_payload
 from core.forms_base import StyledForm
 from core.permissions import ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL, json_permission_required_any
 from core.templated_email import (
@@ -88,37 +89,6 @@ class EmailTemplateManageForm(StyledForm):
             raise ValidationError(str(exc)) from exc
 
 
-def _serialize_email_template_manage_field(*, bound_field: forms.BoundField) -> dict[str, object]:
-    widget = bound_field.field.widget
-    if isinstance(widget, forms.Textarea):
-        widget_type = "textarea"
-    elif isinstance(widget, forms.Select):
-        widget_type = "select"
-    else:
-        widget_type = "text"
-
-    value = bound_field.value()
-    attrs = {key: str(attr_value) for key, attr_value in widget.attrs.items() if attr_value is not None}
-    return {
-        "name": bound_field.name,
-        "id": bound_field.id_for_label,
-        "widget": widget_type,
-        "value": "" if value is None else str(value),
-        "required": bool(bound_field.field.required),
-        "disabled": bool(bound_field.field.disabled),
-        "errors": [str(error) for error in bound_field.errors],
-        "attrs": attrs,
-    }
-
-
-def _serialize_email_template_manage_form(*, form: EmailTemplateManageForm) -> dict[str, object]:
-    return {
-        "is_bound": form.is_bound,
-        "non_field_errors": [str(error) for error in form.non_field_errors()],
-        "fields": [_serialize_email_template_manage_field(bound_field=field) for field in form],
-    }
-
-
 def _build_email_templates_list_payload() -> dict[str, object]:
     locked_names = locked_email_template_names()
     templates = list(EmailTemplate.objects.all().order_by("name"))
@@ -153,7 +123,7 @@ def _build_email_template_editor_payload(
             "description": template.description or "",
             "is_locked": is_locked,
         },
-        "form": _serialize_email_template_manage_form(form=form),
+        "form": form_payload(form),
         "compose": {
             "selected_template_id": None if template is None else template.pk,
             "template_options": []

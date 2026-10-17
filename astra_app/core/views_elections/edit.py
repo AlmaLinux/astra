@@ -415,7 +415,7 @@ def election_edit(request, election_id: int):
                     election=election,
                     candidate_usernames=candidate_usernames,
                     nominator_usernames=nominator_usernames,
-                    eligible_group_cn=str(election.eligible_group_cn or "").strip(),
+                    eligible_group_cn=election.eligible_group_cn,
                 )
             except ElectionEligibilityError as exc:
                 messages.error(request, str(exc))

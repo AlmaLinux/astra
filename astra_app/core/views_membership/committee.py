@@ -781,7 +781,7 @@ def build_membership_request_detail_committee_context(
                 embargoed_country_label = embargoed_match.label
     else:
         org = req.requested_organization
-        representative_username = str(org.representative or "").strip() if org is not None else ""
+        representative_username = org.representative if org is not None else ""
         if representative_username:
             representative_user = FreeIPAUser.get(representative_username, respect_privacy=False)
             if representative_user is not None:

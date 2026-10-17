@@ -118,11 +118,7 @@ def _split_emails(value: object) -> list[str]:
 
 
 def _render_email_contents(email: Email) -> tuple[str, str, str]:
-    return (
-        str(email.subject or ""),
-        str(email.html_message or ""),
-        str(email.message or ""),
-    )
+    return email.subject, email.html_message, email.message
 
 
 def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
@@ -171,8 +167,8 @@ def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
             {
                 "date": log.date,
                 "status": log.get_status_display(),
-                "message": str(log.message or ""),
-                "exception_type": str(log.exception_type or ""),
+                "message": log.message,
+                "exception_type": log.exception_type,
             }
             for log in logs_sorted
         ]
@@ -190,7 +186,7 @@ def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
             {
                 "email_id": email.id,
                 "modal_id": _email_modal_id(email.id),
-                "from_email": str(email.from_email or ""),
+                "from_email": email.from_email,
                 "to": _split_emails(email.to),
                 "cc": _split_emails(email.cc),
                 "bcc": _split_emails(email.bcc),
@@ -220,7 +216,7 @@ def _current_username_from_request(http_request: HttpRequest | None) -> str:
 
 def _avatar_users_by_username(notes: list[Note]) -> dict[str, object]:
     avatar_users_by_username: dict[str, object] = {}
-    for username in {str(n.username or "").strip() for n in notes if n.username and n.username != CUSTOS}:
+    for username in {n.username for n in notes if n.username and n.username != CUSTOS}:
         user_obj = FreeIPAUser.get(username)
         if user_obj is not None:
             avatar_users_by_username[username.lower()] = user_obj
@@ -391,7 +387,7 @@ def _timeline_entries_for_notes(
     entries: list[dict[str, Any]] = []
     for n in notes:
         is_self = current_username and n.username.lower() == current_username.lower()
-        avatar_user = avatar_users_by_username.get(str(n.username or "").strip().lower())
+        avatar_user = avatar_users_by_username.get(n.username.lower())
         is_custos = n.username == CUSTOS
         display_username = _note_display_username(n)
 
@@ -489,7 +485,7 @@ def _group_timeline_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
 
     for entry in entries:
         note: Note = entry["note"]
-        username = str(note.username or "").strip().lower()
+        username = note.username.lower()
         is_self = bool(entry.get("is_self", False))
         mr_id = entry.get("membership_request_id")
 

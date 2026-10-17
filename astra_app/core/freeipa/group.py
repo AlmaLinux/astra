@@ -313,7 +313,7 @@ class FreeIPAGroup(_FreeIPAClientMixin):
         old_fas_discussion_url = _first_str(self._group_data.get("fasdiscussionurl"))
         old_fas_irc_channels = set(_clean_str_list(self._group_data.get("fasircchannel", [])))
 
-        new_description = str(self.description or "").strip()
+        new_description = self.description.strip()
         new_fas_url = str(self.fas_url or "").strip()
         new_fas_mailing_list = str(self.fas_mailing_list or "").strip()
         new_fas_discussion_url = str(self.fas_discussion_url or "").strip()
@@ -641,7 +641,7 @@ class FreeIPAGroup(_FreeIPAClientMixin):
         return users
 
     def _member_usernames_recursive(self, *, visited: set[str], fas_only: bool) -> set[str]:
-        cn = str(self.cn or "").strip()
+        cn = self.cn
         key = cn.lower()
         if key and key in visited:
             return set()

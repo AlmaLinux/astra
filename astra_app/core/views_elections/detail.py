@@ -113,7 +113,7 @@ def _candidate_cards_context(election: Election) -> tuple[list[Candidate], list[
     nominator_usernames: set[str] = set()
     nominator_organization_ids: set[int] = set()
     for candidate in candidates:
-        parsed_nominator = parse_nominator_identifier(str(candidate.nominated_by or ""))
+        parsed_nominator = parse_nominator_identifier(candidate.nominated_by)
         if parsed_nominator.organization_id is not None:
             nominator_organization_ids.add(parsed_nominator.organization_id)
         elif parsed_nominator.username:
@@ -131,13 +131,13 @@ def _candidate_cards_context(election: Election) -> tuple[list[Candidate], list[
 
         nominator_display_name = ""
         nominator_profile_username = ""
-        parsed_nominator = parse_nominator_identifier(str(candidate.nominated_by or ""))
+        parsed_nominator = parse_nominator_identifier(candidate.nominated_by)
         if parsed_nominator.organization_id is not None:
             organization = organizations_by_id.get(parsed_nominator.organization_id)
             if organization is not None:
                 nominator_display_name = organization.name
             else:
-                nominator_display_name = str(candidate.nominated_by or "")
+                nominator_display_name = candidate.nominated_by
         elif parsed_nominator.username:
             nominator_user = users_by_username.get(parsed_nominator.username)
             if nominator_user is not None:
@@ -193,7 +193,7 @@ def _serialize_election_detail_page_payload(
         "quorum": election.quorum,
         "eligible_group_cn": election.eligible_group_cn,
         "can_vote": can_vote,
-        "viewer_email": str(request.user.email or "").strip() or None,
+        "viewer_email": request.user.email or None,
         "credential_issued_at": credential_issued_at.isoformat() if credential_issued_at is not None else None,
         "eligibility_min_membership_age_days": settings.ELECTION_ELIGIBILITY_MIN_MEMBERSHIP_AGE_DAYS,
         "show_turnout_chart": summary_context["show_turnout_chart"],
@@ -541,7 +541,7 @@ def _eligible_voters_context_data(
     else:
         eligible = elections_eligibility.eligible_voters_from_memberships(election=election)
         eligible_for_grid = (
-            [v for v in eligible if q_lower in str(v.username or "").lower()]
+            [v for v in eligible if q_lower in v.username.lower()]
             if q_lower
             else list(eligible)
         )

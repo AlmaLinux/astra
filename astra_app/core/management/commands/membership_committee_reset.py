@@ -9,8 +9,7 @@ from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 
-from core.country_codes import country_attr_name
-from core.e2e_membership_request_reset import seed_membership_request_workflow
+from core.e2e_membership_request_reset import ensure_individual_and_mirror_types, seed_membership_request_workflow
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.e2e_registry import get_e2e_service_client, is_e2e_fake_freeipa_enabled
 from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, MembershipRequest, MembershipType, Note
@@ -239,35 +238,13 @@ class Command(BaseCommand):
             )
 
         with transaction.atomic():
-            self._ensure_membership_types()
+            ensure_individual_and_mirror_types()
             self._ensure_permission_grants()
             self._clear_existing_slice()
             self._ensure_committee_actor()
             payload = self._seed_slice()
 
         self.stdout.write(json.dumps(payload))
-
-    def _ensure_membership_types(self) -> None:
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="mirror",
-            defaults={
-                "name": "Mirror",
-                "group_cn": "almalinux-mirror",
-                "category_id": "mirror",
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
 
     def _ensure_permission_grants(self) -> None:
         for permission in (ASTRA_ADD_MEMBERSHIP, ASTRA_ADD_SEND_MAIL):
@@ -309,7 +286,7 @@ class Command(BaseCommand):
 
     def _ensure_committee_actor(self) -> None:
         client = get_e2e_service_client()
-        country_attr = country_attr_name()
+        country_attr = settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR
         embargoed_country_code = settings.MEMBERSHIP_EMBARGOED_COUNTRY_CODES[0]
 
         client.group_add(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP, o_description="Fake E2E membership committee group")

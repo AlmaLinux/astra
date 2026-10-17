@@ -2,11 +2,11 @@ import hashlib
 import hmac
 import logging
 import secrets
+from functools import partial
 from typing import cast, override
 from urllib.parse import quote
 
 import requests
-from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import views as auth_views
@@ -24,6 +24,7 @@ from core.account_invitation_reconcile import (
     load_account_invitation_from_token,
     reconcile_account_invitation_for_username,
 )
+from core.form_payloads import TEXT_INPUT_ATTRS, form_field_payload, form_payload
 from core.freeipa.client import _build_freeipa_client
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import exception_log_fields
@@ -48,17 +49,6 @@ from .password_reset import (
 
 logger = logging.getLogger(__name__)
 PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY = "pending_account_invitation_token"
-_AUTH_RECOVERY_ALLOWED_FIELD_ATTRS = {
-    "autocomplete",
-    "autocapitalize",
-    "autocorrect",
-    "inputmode",
-    "maxlength",
-    "minlength",
-    "pattern",
-    "placeholder",
-    "spellcheck",
-}
 
 
 def _auth_recovery_json(value: object) -> str:
@@ -71,51 +61,15 @@ def _auth_recovery_json_response(payload: dict[str, object], *, status: int = 20
     return response
 
 
-def _auth_recovery_field_widget_type(widget: forms.Widget) -> str:
-    if isinstance(widget, forms.HiddenInput):
-        return "hidden"
-    if isinstance(widget, forms.EmailInput):
-        return "email"
-    if isinstance(widget, forms.PasswordInput):
-        return "password"
-    return "text"
-
-
-def _serialize_auth_recovery_form_field(*, bound_field: forms.BoundField) -> dict[str, object]:
-    widget = bound_field.field.widget
-    widget_attrs = bound_field.build_widget_attrs(widget.attrs)
-    widget_context = widget.get_context(bound_field.html_name, bound_field.value(), widget_attrs)["widget"]
-    attrs = {
-        name: str(value)
-        for name, value in widget_context["attrs"].items()
-        if value is not None and name in _AUTH_RECOVERY_ALLOWED_FIELD_ATTRS
-    }
-    payload: dict[str, object] = {
-        "name": bound_field.name,
-        "id": bound_field.id_for_label,
-        "widget": _auth_recovery_field_widget_type(widget),
-        "value": "" if widget_context.get("value") is None else str(widget_context.get("value")),
-        "required": bool(bound_field.field.required),
-        "disabled": bool(bound_field.field.disabled),
-        "errors": [str(error) for error in bound_field.errors],
-        "attrs": attrs,
-    }
-    return payload
-
-
 def _serialize_auth_recovery_form(
     *,
     form: PasswordResetRequestForm | PasswordResetSetForm | ExpiredPasswordChangeForm | SyncTokenForm,
     exclude_hidden_fields: bool = False,
 ) -> dict[str, object]:
-    fields = [_serialize_auth_recovery_form_field(bound_field=field) for field in form]
+    payload = form_payload(form, partial(form_field_payload, allowed_attrs=TEXT_INPUT_ATTRS))
     if exclude_hidden_fields:
-        fields = [field for field in fields if field["widget"] != "hidden"]
-    return {
-        "is_bound": form.is_bound,
-        "non_field_errors": [str(error) for error in form.non_field_errors()],
-        "fields": fields,
-    }
+        payload["fields"] = [field for field in payload["fields"] if field["widget"] != "hidden"]
+    return payload
 
 
 def _build_password_reset_request_payload(*, form: PasswordResetRequestForm) -> dict[str, object]:
@@ -1056,7 +1010,7 @@ def otp_sync(request: HttpRequest) -> HttpResponse:
                 verify=settings.FREEIPA_VERIFY_SSL,
                 timeout=10,
             )
-            if response.ok and "Token sync rejected" not in (response.text or ""):
+            if response.ok and "Token sync rejected" not in response.text:
                 messages.success(request, "Token successfully synchronized")
                 return redirect("login")
 

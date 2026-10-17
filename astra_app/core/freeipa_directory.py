@@ -137,7 +137,7 @@ def snapshot_freeipa_users(*, respect_privacy: bool = True) -> list[FreeIPAUser]
             )
         )
 
-    users.sort(key=lambda user: str(user.username).strip().lower())
+    users.sort(key=lambda user: user.username.lower())
     return users
 
 
