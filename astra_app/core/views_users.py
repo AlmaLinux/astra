@@ -35,6 +35,7 @@ from core.membership import (
 )
 from core.membership_notifications import membership_extend_url
 from core.membership_payloads import (
+    membership_action_url_templates,
     serialize_membership_entry,
     serialize_pending_membership_entry,
 )
@@ -427,6 +428,7 @@ def _profile_context_for_user(
         has_pending_request_in_category = membership_category_id in pending_request_category_ids
         memberships.append(
             {
+                "membership_id": membership.pk,
                 "membership_type": membership.membership_type,
                 "created_at": membership.created_at,
                 "expires_at": expires_at,
@@ -876,6 +878,7 @@ def _serialize_user_profile_membership_entry_data(
 ) -> dict[str, object]:
     membership_type = cast(MembershipType | dict[str, object], entry["membership_type"])
     return serialize_membership_entry(
+        membership_id=cast(int, entry["membership_id"]),
         membership_type=membership_type,
         created_at=entry.get("created_at"),
         expires_at=entry.get("expires_at"),
@@ -967,12 +970,7 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
             "membership_request_detail_url_template": reverse("membership-request-detail", args=[123456789]).replace(
                 "123456789", "__request_id__"
             ),
-            "membership_set_expiry_url_template": reverse(
-                "membership-set-expiry", args=["__username__", "__membership_type_code__"]
-            ),
-            "membership_terminate_url_template": reverse(
-                "membership-terminate", args=["__username__", "__membership_type_code__"]
-            ),
+            **membership_action_url_templates(),
             "group_detail_url_template": reverse("group-detail", args=["__group_name__"]),
             "agreements_url_template": f"{settings_url(tab='agreements')}&agreement=__agreement_cn__",
             "settings_country_code_url": settings_url(tab="profile", highlight="country_code"),

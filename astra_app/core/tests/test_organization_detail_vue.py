@@ -97,11 +97,11 @@ class OrganizationDetailVueTests(TestCase):
         )
         self.assertContains(
             response,
-            f'data-organization-detail-sponsorship-set-expiry-url-template="{reverse("organization-sponsorship-set-expiry", args=[organization.pk, "__membership_type_code__"])}"',
+            'data-organization-detail-membership-update-url-template="/membership/__membership_id__/update/"',
         )
         self.assertContains(
             response,
-            f'data-organization-detail-sponsorship-terminate-url-template="{reverse("organization-sponsorship-terminate", args=[organization.pk, "__membership_type_code__"])}"',
+            'data-organization-detail-membership-terminate-url-template="/membership/__membership_id__/terminate/"',
         )
         self.assertContains(response, 'data-organization-detail-csrf-token="')
         self.assertContains(
@@ -127,6 +127,7 @@ class OrganizationDetailVueTests(TestCase):
             "sponsorships": [],
             "sponsorship_entries": [
                 {
+                    "membership_id": 42,
                     "sponsorship": {
                         "membership_type": sponsor_type,
                     },
@@ -181,6 +182,7 @@ class OrganizationDetailVueTests(TestCase):
         self.assertTrue(payload["organization"]["is_representative"])
         membership = payload["organization"]["memberships"][0]
         pending_membership = payload["organization"]["pending_memberships"][0]
+        self.assertEqual(membership["id"], 42)
         self.assertEqual(membership["membershipType"]["code"], sponsor_type.code)
         self.assertEqual(membership["createdAt"], "2024-01-15T12:00:00+00:00")
         self.assertEqual(membership["expiresAt"], "2026-04-30T00:00:00+00:00")

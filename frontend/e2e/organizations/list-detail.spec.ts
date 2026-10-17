@@ -212,11 +212,11 @@ test("organizations-detail-sponsorship-actions expose tier-change and typed term
     /membership_type=ruby/,
   );
 
-  await page.getByRole("button", { name: "Edit expiration", exact: true }).click();
+  await page.getByRole("button", { name: "Edit membership", exact: true }).click();
 
   const managementModal = page.locator(".modal.show").filter({ hasText: `Manage membership: Gold Sponsor Member for ${orgName}` }).first();
   await expect(managementModal).toBeVisible();
-  await expect(managementModal.getByRole("button", { name: "Save expiration", exact: true })).toBeVisible();
+  await expect(managementModal.getByRole("button", { name: "Save changes", exact: true })).toBeVisible();
   await expect(managementModal.getByRole("button", { name: /^Terminate membership/ }).first()).toBeVisible();
 
   await managementModal.getByRole("button", { name: /^Terminate membership/ }).first().click();
@@ -359,8 +359,8 @@ test("organizations-detail-sponsorship-actions separate committee-only controls 
   await expect(representativeActions.getByRole("link", { name: "Change tier", exact: true })).toBeVisible();
   // Outside the renewal window only the committee may (re)issue the current term's invoice.
   await expect(representativeActions.getByRole("button", { name: /^(Generate|Regenerate) invoice$/ })).toBeVisible();
-  await expect(committeeActions.getByRole("button", { name: "Edit expiration", exact: true })).toBeVisible();
-  await expect(representativeActions.getByRole("button", { name: "Edit expiration", exact: true })).toHaveCount(0);
+  await expect(committeeActions.getByRole("button", { name: "Edit membership", exact: true })).toBeVisible();
+  await expect(representativeActions.getByRole("button", { name: "Edit membership", exact: true })).toHaveCount(0);
 });
 
 // As a representative, I can record billing notes, such as a PO number, that are printed on my invoices.
@@ -437,22 +437,24 @@ test("organizations-inkind-dues-invoice lets the committee discount dues and pri
   await page.goto(detailTarget);
   await expect(page.locator("[data-organization-detail-root]")).toBeVisible();
 
-  await page.locator('[data-membership-actions="committee"]').getByRole("button", { name: "Edit expiration", exact: true }).click();
+  await page.locator('[data-membership-actions="committee"]').getByRole("button", { name: "Edit membership", exact: true }).click();
   const managementModal = page.locator(".modal.show").filter({ hasText: "Manage membership: Gold Sponsor Member" }).first();
-  const saveDues = managementModal.getByRole("button", { name: "Save dues", exact: true });
+  const save = managementModal.getByRole("button", { name: "Save changes", exact: true });
   const duesInput = managementModal.getByLabel("Annual dues (USD)", { exact: true });
+  // Nothing to save until something changes.
+  await expect(save).toBeDisabled();
   // A sponsor paying the standard price starts with an empty field, which only takes digits.
   await expect(duesInput).toHaveValue("");
   await duesInput.pressSequentially("50a00");
   await expect(duesInput).toHaveValue("5000");
   // A dues change cannot even be submitted without a reason.
-  await expect(saveDues).toBeDisabled();
-  await expect(managementModal.locator('span[title="Enter a reason for the dues change first."]')).toContainText("Save dues");
-  await managementModal.getByLabel("Reason", { exact: true }).fill("Hosts our CI runners worth $15,000 a year");
-  await expect(saveDues).toBeEnabled();
-  await saveDues.click();
+  await expect(save).toBeDisabled();
+  await expect(managementModal.locator('span[title="Enter a reason for the dues change first."]')).toContainText("Save changes");
+  await managementModal.getByLabel("Reason for the dues change", { exact: true }).fill("Hosts our CI runners worth $15,000 a year");
+  await expect(save).toBeEnabled();
+  await save.click();
 
-  await expect(page.getByText("Sponsorship dues updated.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Sponsorship updated.", { exact: true })).toBeVisible();
   await expect(page.locator('[data-membership-dues="gold"]')).toHaveText("Annual dues: $5,000 (discounted from $20,000)");
 
   await page.locator('[data-membership-actions="representative"]').getByRole("button", { name: /^(Generate|Regenerate) invoice$/ }).click();
@@ -516,9 +518,15 @@ test("organizations-inkind-representative sees the discount but cannot change or
 
   // Posting straight to the committee endpoints changes nothing.
   const headers = { "X-CSRFToken": (await root.getAttribute("data-organization-detail-csrf-token")) ?? "" };
-  const form = { dues_usd: "0", dues_reason: "We would like a discount" };
-  await page.request.post(`/organization/${organization.organization_id}/sponsorship/gold/dues/`, { headers, form });
-  const approve = await page.request.post(`/api/v1/membership/request/${requestId}/approve`, { headers, form });
+  const detail = await (await page.request.get(`/api/v1/organizations/${organization.organization_id}/detail`)).json();
+  await page.request.post(`/membership/${detail.organization.memberships[0].id}/update/`, {
+    headers,
+    form: { expires_on: "2099-12-31", dues_usd: "0", dues_reason: "We would like a discount" },
+  });
+  const approve = await page.request.post(`/api/v1/membership/request/${requestId}/approve`, {
+    headers,
+    form: { dues_usd: "0", dues_reason: "We would like a discount" },
+  });
   expect(approve.status()).toBe(403);
   await page.reload();
   await expect(page.locator('[data-membership-dues="gold"]')).toHaveText(discount);

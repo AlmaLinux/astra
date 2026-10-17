@@ -66,7 +66,7 @@ export interface UserProfileMembershipType {
 }
 
 export interface UserProfileMembershipManagementAction {
-  expiryUrlTemplate: string;
+  updateUrlTemplate: string;
   terminateUrlTemplate: string;
   csrfToken: string;
   nextUrl: string;
@@ -75,6 +75,7 @@ export interface UserProfileMembershipManagementAction {
 export interface UserProfileMembershipEntry {
   kind: "membership";
   key: string;
+  id: number;
   requestId: number | null;
   membershipType: UserProfileMembershipType;
   createdAt: string | null;
@@ -157,7 +158,7 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
   const membershipHistoryUrlTemplate = String(root.dataset.userProfileMembershipHistoryUrlTemplate || "").trim();
   const membershipRequestUrl = String(root.dataset.userProfileMembershipRequestUrl || "").trim();
   const membershipRequestDetailUrlTemplate = String(root.dataset.userProfileMembershipRequestDetailUrlTemplate || "").trim();
-  const membershipSetExpiryUrlTemplate = String(root.dataset.userProfileMembershipSetExpiryUrlTemplate || "").trim();
+  const membershipUpdateUrlTemplate = String(root.dataset.userProfileMembershipUpdateUrlTemplate || "").trim();
   const membershipTerminateUrlTemplate = String(root.dataset.userProfileMembershipTerminateUrlTemplate || "").trim();
   const csrfToken = String(root.dataset.userProfileCsrfToken || "").trim();
   const nextUrl = String(root.dataset.userProfileNextUrl || "").trim();
@@ -180,7 +181,7 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
     || !membershipHistoryUrlTemplate
     || !membershipRequestUrl
     || !membershipRequestDetailUrlTemplate
-    || !membershipSetExpiryUrlTemplate
+    || !membershipUpdateUrlTemplate
     || !membershipTerminateUrlTemplate
     || !csrfToken
     || !nextUrl
@@ -207,7 +208,7 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
     membershipRequestUrl,
     membershipRequestDetailUrlTemplate,
     membershipManagement: {
-      expiryUrlTemplate: membershipSetExpiryUrlTemplate,
+      updateUrlTemplate: membershipUpdateUrlTemplate,
       terminateUrlTemplate: membershipTerminateUrlTemplate,
       csrfToken,
       nextUrl,

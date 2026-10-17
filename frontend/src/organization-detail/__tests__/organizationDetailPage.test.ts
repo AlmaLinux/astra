@@ -17,10 +17,9 @@ const bootstrap: OrganizationDetailBootstrap = {
   sendMailUrlTemplate: "/email-tools/send-mail/?type=manual&to=__email__",
   membershipRequestUrl: "/organization/1/membership/request/",
   membershipHistoryUrl: "/membership/log/org/1/",
-  sponsorshipSetExpiryUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/expiry/",
-  sponsorshipTerminateUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/terminate/",
+  membershipUpdateUrlTemplate: "/membership/__membership_id__/update/",
+  membershipTerminateUrlTemplate: "/membership/__membership_id__/terminate/",
   sponsorshipInvoiceRegenerateUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/invoice/regenerate/",
-  sponsorshipSetDuesUrlTemplate: "/organization/1/sponsorship/__membership_type_code__/dues/",
   csrfToken: "csrf-token",
   nextUrl: "/organization/1/",
   expiryMinDate: "2026-04-01",
@@ -254,6 +253,7 @@ describe("OrganizationDetailPage", () => {
                 canRequestTierChange: true,
                 tierChangeMembershipTypeCode: "ruby",
                 canManage: true,
+                id: 7,
               },
             ],
             pending_memberships: [],
@@ -283,18 +283,19 @@ describe("OrganizationDetailPage", () => {
 
     expect(wrapper.find('a[href="/organization/1/membership/request/?membership_type=ruby"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("Change tier");
-    expect(wrapper.text()).toContain("Edit expiration");
-    expect(wrapper.find('form[action="/organization/1/sponsorship/gold/expiry/"]').exists()).toBe(true);
-    const expiryReason = wrapper.get('form[action="/organization/1/sponsorship/gold/expiry/"] textarea[name="reason"]');
+    expect(wrapper.text()).toContain("Edit membership");
+    expect(wrapper.text()).not.toContain("Edit expiration");
+    expect(wrapper.find('form[action="/membership/7/update/"]').exists()).toBe(true);
+    const expiryReason = wrapper.get('form[action="/membership/7/update/"] textarea[name="expiration_reason"]');
     expect(expiryReason.attributes("required")).toBeUndefined();
-    expect(wrapper.find('form[action="/organization/1/sponsorship/gold/terminate/"]').exists()).toBe(true);
+    expect(wrapper.find('form[action="/membership/7/terminate/"]').exists()).toBe(true);
     const terminate = wrapper.get("#sponsorship-expiry-modal-gold-terminate-submit");
     expect(terminate.attributes("disabled")).toBeDefined();
     expect(terminate.element.parentElement?.getAttribute("title")).toBe("Type the organization name to confirm first.");
     await wrapper.get("#sponsorship-expiry-modal-gold-terminate-confirm-input").setValue("acme org");
     expect(terminate.attributes("disabled")).toBeUndefined();
     expect(terminate.element.parentElement?.getAttribute("title")).toBe("Terminate this membership now");
-    expect(wrapper.find('#sponsorship-expires-on-gold').attributes("value")).toBe("2026-04-30");
+    expect((wrapper.get("#sponsorship-expiry-modal-gold-expires-on").element as HTMLInputElement).value).toBe("2026-04-30");
     expect(wrapper.find('input[name="csrfmiddlewaretoken"]').attributes("value")).toBe("csrf-token");
     expect(wrapper.text()).toContain("Manage membership: Gold Sponsor Member for Acme Org");
   });
@@ -647,6 +648,7 @@ describe("OrganizationDetailPage", () => {
       requestId: null,
       kind: "membership" as const,
       key: "membership-gold",
+      id: 7,
       membershipType: { name: "Gold Sponsor Member", code: "gold", description: "", annualDuesUsd: 20000 },
       createdAt: null,
       expiresAt: "2026-11-18T23:59:59Z",
@@ -705,66 +707,16 @@ describe("OrganizationDetailPage", () => {
     }
   });
 
-  it("lets the committee change a sponsor's dues with a reason in the manage dialog", async () => {
+  it("lets the committee change a sponsor's dues alongside the expiration in the manage dialog", async () => {
     const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: true, duesUsd: 5000 }] });
 
     await flushPromises();
     await flushPromises();
 
-    const form = wrapper.find('#sponsorship-expiry-modal-gold form[action="/organization/1/sponsorship/gold/dues/"]');
-    expect(form.exists()).toBe(true);
-    expect(form.find('input[name="csrfmiddlewaretoken"]').attributes("value")).toBe("csrf-token");
-    const amount = form.find('input[name="dues_usd"]');
-    expect((amount.element as HTMLInputElement).value).toBe("5000");
-    expect(form.find('textarea[name="dues_reason"]').attributes("required")).toBeDefined();
-    expect(form.text()).toContain("Leave empty to charge the standard price of $20,000");
-  });
-
-  it("leaves the dues field empty for a sponsor paying the standard price", async () => {
-    const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: true }] });
-
-    await flushPromises();
-    await flushPromises();
-
-    expect((wrapper.get('input[name="dues_usd"]').element as HTMLInputElement).value).toBe("");
-  });
-
-  it("keeps the dues form unsubmittable until the committee gives a reason", async () => {
-    const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: true }] });
-
-    await flushPromises();
-    await flushPromises();
-
-    const form = wrapper.get('form[action="/organization/1/sponsorship/gold/dues/"]');
-    const save = form.get("button[type=submit]");
-    const reason = form.get('textarea[name="dues_reason"]');
-    expect(save.attributes("disabled")).toBeDefined();
-    expect(save.element.parentElement?.getAttribute("title")).toBe("Enter a reason for the dues change first.");
-
-    await reason.setValue("   ");
-    expect(save.attributes("disabled")).toBeDefined();
-
-    await form.get('input[name="dues_usd"]').setValue("5000");
-    await reason.setValue("Hosts our CI runners");
-    expect(save.attributes("disabled")).toBeUndefined();
-    // Typing the reason re-renders the form; the amount entered must survive it.
+    const form = wrapper.get('#sponsorship-expiry-modal-gold form[action="/membership/7/update/"]');
+    expect((form.get('input[name="expires_on"]').element as HTMLInputElement).value).toBe("2026-11-18");
     expect((form.get('input[name="dues_usd"]').element as HTMLInputElement).value).toBe("5000");
-    expect(save.element.parentElement?.getAttribute("title")).toBe("Save annual dues");
-  });
-
-  it("keeps the dues form unsubmittable while the amount exceeds the standard price", async () => {
-    const wrapper = mountWithOrganization({ memberships: [{ ...goldMembership(null), canManage: true }] });
-
-    await flushPromises();
-    await flushPromises();
-
-    const form = wrapper.get('form[action="/organization/1/sponsorship/gold/dues/"]');
-    await form.get('input[name="dues_usd"]').setValue("25000");
-    await form.get('textarea[name="dues_reason"]').setValue("Typo");
-
-    const save = form.get("button[type=submit]");
-    expect(save.attributes("disabled")).toBeDefined();
-    expect(save.element.parentElement?.getAttribute("title")).toBe("The annual dues can't exceed the standard price of $20,000.");
+    expect(form.text()).toContain("Leave empty to charge the standard price of $20,000");
   });
 
   it("names the membership once, without repeating it as a badge", async () => {
@@ -788,7 +740,7 @@ describe("OrganizationDetailPage", () => {
 
     expect(wrapper.find('[data-membership-dues="gold"]').text()).toBe("Annual dues: $5,000 (discounted from $20,000)");
     expect(wrapper.find('input[name="dues_usd"]').exists()).toBe(false);
-    expect(wrapper.find('form[action="/organization/1/sponsorship/gold/dues/"]').exists()).toBe(false);
+    expect(wrapper.find('form[action="/membership/7/update/"]').exists()).toBe(false);
   });
 
   it("has no dues form for tiers without dues", async () => {
@@ -878,8 +830,8 @@ describe("OrganizationDetailPage", () => {
     expect(representativeRow.text()).toContain("Request renewal");
     expect(representativeRow.text()).toContain("Change tier");
     expect(representativeRow.text()).toContain("Generate invoice");
-    expect(representativeRow.text()).not.toContain("Edit expiration");
-    expect(committeeRow.text()).toBe("Edit expiration");
+    expect(representativeRow.text()).not.toContain("Edit membership");
+    expect(committeeRow.text()).toBe("Edit membership");
   });
 
   it("omits the committee action row for viewers who cannot manage the membership", async () => {

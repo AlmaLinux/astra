@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import DuesAmountInput from "../shared/components/DuesAmountInput.vue";
-import GuardedButton from "../shared/components/GuardedButton.vue";
 import MembershipCard from "../shared/components/MembershipCard.vue";
-import { duesAmountError, formatDateInputValue, formatFullDate, formatUsd, pendingMembershipBadge } from "../shared/membershipPresentation";
+import MembershipManageModal from "../shared/components/MembershipManageModal.vue";
+import { formatFullDate, formatUsd, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   OrganizationDetailBootstrap,
@@ -22,10 +21,6 @@ const payload = ref<OrganizationDetailResponse | null>(null);
 const error = ref("");
 const isLoading = ref(false);
 const activeContactKey = ref("representative");
-const terminationConfirmByLabel = ref<Record<string, string>>({});
-// Controlled inputs: typing the reason re-renders the form, which would reset uncontrolled ones.
-// An empty amount charges the standard price.
-const duesDraftByCode = ref<Record<string, { amount: string; reason: string }>>({});
 
 const CONTACT_LABELS: Record<string, string> = {
   business: "Business",
@@ -119,41 +114,12 @@ function managementModalId(membership: OrganizationDetailResponse["organization"
   return membershipCode ? `sponsorship-expiry-modal-${membershipCode}` : "";
 }
 
-function managementInputId(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
-  const membershipCode = membershipTypeCode(membership);
-  return membershipCode ? `sponsorship-expires-on-${membershipCode}` : "";
+function updateActionUrl(membership: OrganizationDetailMembership): string {
+  return fillUrlTemplate(props.bootstrap.membershipUpdateUrlTemplate, "__membership_id__", membership.id);
 }
 
-function expiryActionUrl(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
-  return fillUrlTemplate(props.bootstrap.sponsorshipSetExpiryUrlTemplate, "__membership_type_code__", membershipTypeCode(membership));
-}
-
-function terminateActionUrl(membership: OrganizationDetailResponse["organization"]["memberships"][number]): string {
-  return fillUrlTemplate(props.bootstrap.sponsorshipTerminateUrlTemplate, "__membership_type_code__", membershipTypeCode(membership));
-}
-
-function setDuesActionUrl(membership: OrganizationDetailMembership): string {
-  return fillUrlTemplate(props.bootstrap.sponsorshipSetDuesUrlTemplate, "__membership_type_code__", membershipTypeCode(membership));
-}
-
-function hasDues(membership: OrganizationDetailMembership): boolean {
-  return membership.membershipType.annualDuesUsd > 0;
-}
-
-// Why the dues form can't be saved yet, or "" when it can.
-function duesSaveBlocker(membership: OrganizationDetailMembership): string {
-  const draft = duesDraftByCode.value[membershipTypeCode(membership)];
-  if (!draft) {
-    return "";
-  }
-  const amountError = duesAmountError(draft.amount, membership.membershipType.annualDuesUsd);
-  if (amountError) {
-    return amountError;
-  }
-  if (!draft.reason.trim()) {
-    return "Enter a reason for the dues change first.";
-  }
-  return "";
+function terminateActionUrl(membership: OrganizationDetailMembership): string {
+  return fillUrlTemplate(props.bootstrap.membershipTerminateUrlTemplate, "__membership_id__", membership.id);
 }
 
 // The page's only statement of a paid tier's dues: descriptions are shown without them.
@@ -204,32 +170,12 @@ function expiresToneClass(membership: OrganizationDetailMembership): string {
   return membership.isExpiringSoon ? "text-danger" : "text-muted";
 }
 
-function expirationCurrentText(membership: OrganizationDetailMembership): string {
-  const label = expiresLabel(membership);
-  if (!label) {
-    return "";
-  }
-  return `Current expiration: ${label} (UTC)`;
-}
-
 function contactLabel(key: string): string {
   return CONTACT_LABELS[key] || key;
 }
 
 function pendingBadge(status: string): { label: string; className: string } {
   return pendingMembershipBadge(status, Boolean(payload.value?.organization.is_representative));
-}
-
-function normalized(value: string): string {
-  return value.toLowerCase().trim();
-}
-
-function terminationMatches(label: string, terminator: string): boolean {
-  return normalized(terminationConfirmByLabel.value[label] || "") === normalized(terminator);
-}
-
-function resetTermination(label: string): void {
-  terminationConfirmByLabel.value[label] = "";
 }
 
 async function load(): Promise<void> {
@@ -248,15 +194,6 @@ async function load(): Promise<void> {
       return;
     }
     payload.value = (await response.json()) as OrganizationDetailResponse;
-    duesDraftByCode.value = Object.fromEntries(
-      payload.value.organization.memberships.map((membership) => [
-        membershipTypeCode(membership),
-        {
-          amount: membership.duesUsd === null || membership.duesUsd === membership.membershipType.annualDuesUsd ? "" : String(membership.duesUsd),
-          reason: "",
-        },
-      ]),
-    );
   } catch {
     error.value = "Unable to load organization details right now.";
   } finally {
@@ -479,8 +416,8 @@ onMounted(async () => {
                     class="btn btn-sm btn-outline-secondary"
                     data-toggle="modal"
                     :data-target="`#${managementModalId(membership)}`"
-                    title="Edit membership expiration date"
-                  >Edit expiration</button>
+                    title="Edit or terminate this membership"
+                  >Edit membership</button>
                 </div>
               </div>
 
@@ -519,161 +456,21 @@ onMounted(async () => {
                 </div>
               </div>
 
-              <div
+              <MembershipManageModal
                 v-if="canManageExpiration(membership)"
-                class="modal fade"
-                :id="managementModalId(membership)"
-                tabindex="-1"
-                role="dialog"
-                :aria-labelledby="`${managementModalId(membership)}-label`"
-                aria-hidden="true"
-              >
-                <div class="modal-dialog" role="document">
-                  <div class="modal-content">
-                    <div class="modal-header">
-                      <div class="mr-3">
-                        <h5 class="modal-title mb-0" :id="`${managementModalId(membership)}-label`">Manage membership: {{ membershipLabel(membership) }} for {{ organizationName() }}</h5>
-                      </div>
-                      <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
-                        <span aria-hidden="true">&times;</span>
-                      </button>
-                    </div>
-
-                    <div class="modal-body">
-                      <div v-if="expirationCurrentText(membership)" class="mb-3">{{ expirationCurrentText(membership) }}</div>
-
-                      <form method="post" :action="expiryActionUrl(membership)" novalidate>
-                        <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
-                        <input v-if="bootstrap.nextUrl" type="hidden" name="next" :value="bootstrap.nextUrl">
-
-                        <div class="form-group">
-                          <label :for="managementInputId(membership)">Expiration date</label>
-                          <input
-                            :id="managementInputId(membership)"
-                            name="expires_on"
-                            type="date"
-                            class="form-control"
-                            :value="formatDateInputValue(membership.expiresAt)"
-                            :min="bootstrap.expiryMinDate"
-                            required
-                          >
-                        </div>
-
-                        <div class="text-muted small mb-3">Expiration is an end-of-day date in UTC.</div>
-
-                        <div class="form-group">
-                          <label :for="`${managementInputId(membership)}-reason`">Reason (optional)</label>
-                          <textarea
-                            :id="`${managementInputId(membership)}-reason`"
-                            name="reason"
-                            class="form-control"
-                            rows="2"
-                            placeholder="Recorded as a committee note"
-                          />
-                        </div>
-
-                        <div class="d-flex justify-content-between">
-                          <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without saving">Cancel</button>
-                          <button type="submit" class="btn btn-primary" title="Save expiration date">Save expiration</button>
-                        </div>
-                      </form>
-
-                      <form v-if="hasDues(membership)" method="post" :action="setDuesActionUrl(membership)" class="mt-4 pt-3 border-top" novalidate>
-                        <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
-                        <input v-if="bootstrap.nextUrl" type="hidden" name="next" :value="bootstrap.nextUrl">
-
-                        <DuesAmountInput
-                          :id="`${managementModalId(membership)}-dues`"
-                          v-model="duesDraftByCode[membershipTypeCode(membership)].amount"
-                          name="dues_usd"
-                          :default-usd="membership.membershipType.annualDuesUsd"
-                        />
-
-                        <div class="form-group">
-                          <label :for="`${managementModalId(membership)}-dues-reason`">Reason</label>
-                          <textarea
-                            :id="`${managementModalId(membership)}-dues-reason`"
-                            v-model="duesDraftByCode[membershipTypeCode(membership)].reason"
-                            name="dues_reason"
-                            class="form-control"
-                            rows="2"
-                            placeholder="E.g. the in-kind agreement this reflects"
-                            required
-                          />
-                        </div>
-
-                        <div class="d-flex justify-content-end">
-                          <GuardedButton
-                            type="submit"
-                            class="btn btn-primary"
-                            :blocked-reason="duesSaveBlocker(membership)"
-                            title="Save annual dues"
-                          >Save dues</GuardedButton>
-                        </div>
-                      </form>
-
-                      <div class="mt-4 pt-3 border-top">
-                        <div class="border border-danger rounded p-3 bg-light">
-                          <div class="font-weight-bold text-danger mb-1">Danger zone</div>
-                          <div class="small text-muted mb-3">Ends this membership early.</div>
-
-                          <div class="d-flex justify-content-end">
-                            <button
-                              type="button"
-                              class="btn btn-outline-danger"
-                              data-toggle="collapse"
-                              :data-target="`#${managementModalId(membership)}-terminate-collapse`"
-                              aria-expanded="false"
-                              :aria-controls="`${managementModalId(membership)}-terminate-collapse`"
-                              title="Show termination confirmation"
-                            >Terminate membership&hellip;</button>
-                          </div>
-
-                          <div class="collapse mt-3" :id="`${managementModalId(membership)}-terminate-collapse`">
-                            <div class="alert alert-danger mb-3" role="alert">This will end the membership early and cannot be undone.</div>
-
-                            <form method="post" :action="terminateActionUrl(membership)" class="m-0" novalidate>
-                              <input type="hidden" name="csrfmiddlewaretoken" :value="bootstrap.csrfToken">
-                              <input v-if="bootstrap.nextUrl" type="hidden" name="next" :value="bootstrap.nextUrl">
-
-                              <div class="form-group">
-                                <label :for="`${managementModalId(membership)}-terminate-confirm-input`">Type the name to confirm</label>
-                                <input
-                                  :id="`${managementModalId(membership)}-terminate-confirm-input`"
-                                  v-model="terminationConfirmByLabel[membershipTypeCode(membership)]"
-                                  name="confirm"
-                                  type="text"
-                                  class="form-control"
-                                  :class="{
-                                    'is-valid': Boolean(terminationConfirmByLabel[membershipTypeCode(membership)]) && terminationMatches(membershipTypeCode(membership), organizationName()),
-                                    'is-invalid': Boolean(terminationConfirmByLabel[membershipTypeCode(membership)]) && !terminationMatches(membershipTypeCode(membership), organizationName()),
-                                  }"
-                                  :placeholder="organizationName()"
-                                  autocomplete="off"
-                                  :data-terminate-target="organizationName()"
-                                  required
-                                >
-                                <div class="invalid-feedback">Does not match. Type the name to enable termination (case-insensitive).</div>
-                              </div>
-
-                              <div class="d-flex justify-content-end">
-                                <button type="button" class="btn btn-outline-secondary" data-terminate-action="cancel" title="Cancel termination and collapse this section" @click="resetTermination(membershipTypeCode(membership))">Cancel termination</button>
-                                <GuardedButton
-                                  type="submit"
-                                  class="btn btn-danger ml-2"
-                                  :id="`${managementModalId(membership)}-terminate-submit`"
-                                  :blocked-reason="terminationMatches(membershipTypeCode(membership), organizationName()) ? '' : 'Type the organization name to confirm first.'"
-                                  title="Terminate this membership now"
-                                >Terminate membership</GuardedButton>
-                              </div>
-                            </form>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+                :modal-id="managementModalId(membership)"
+                :membership-type="membership.membershipType"
+                :target-name="organizationName()"
+                target-noun="organization name"
+                :expires-at="membership.expiresAt"
+                :expires-label="expiresLabel(membership)"
+                :expiry-min-date="bootstrap.expiryMinDate"
+                :dues-usd="membership.duesUsd"
+                :update-url="updateActionUrl(membership)"
+                :terminate-url="terminateActionUrl(membership)"
+                :csrf-token="bootstrap.csrfToken"
+                :next-url="bootstrap.nextUrl"
+              />
             </li>
 
             <li

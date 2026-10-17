@@ -5,25 +5,19 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required, user_passes_test
 from django.core.exceptions import ValidationError
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.db import transaction
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 
 from core.forms_membership import MembershipUpdateExpiryForm
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
-from core.membership import (
-    FreeIPACallerMode,
-    FreeIPAGroupRemovalOutcome,
-    FreeIPAMissingUserPolicy,
-    get_valid_memberships,
-    remove_organization_representative_from_group_if_present,
-    remove_user_from_group,
-)
+from core.membership import revoke_membership_group_access
 from core.membership_constants import MembershipCategoryCode
-from core.membership_dues import change_membership_dues, parse_dues_usd
-from core.models import Membership, MembershipLog, MembershipType, Organization
+from core.membership_dues import change_membership_dues, effective_dues_usd, parse_dues_usd, payable_dues_usd
+from core.models import Membership, MembershipLog
 from core.permissions import (
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
@@ -45,7 +39,6 @@ from core.views_utils import (
     _normalize_str,
     _resolve_post_redirect,
     get_username,
-    normalize_freeipa_username,
     parse_datatables_request_base,
     post_only_404,
     typed_confirmation_matches,
@@ -227,86 +220,25 @@ def membership_sponsors_list(request: HttpRequest) -> HttpResponse:
     )
 
 
-def _load_active_membership(
-    *,
-    membership_type: MembershipType,
-    username: str | None = None,
-    organization: Organization | None = None,
-) -> Membership | None:
-    memberships = get_valid_memberships(username=username, organization=organization)
-    for membership in memberships:
-        if membership.membership_type_id == membership_type.code:
-            return membership
-    return None
-
-
-def _load_committee_membership_type(membership_type_code: str) -> MembershipType:
-    normalized_code = _normalize_str(membership_type_code)
-    if not normalized_code:
-        raise Http404("Not found")
-    return get_object_or_404(MembershipType, pk=normalized_code)
-
-
-def _load_active_membership_or_redirect(
-    request: HttpRequest,
-    *,
-    membership_type: MembershipType,
-    username: str | None = None,
-    organization: Organization | None = None,
-    not_found_message: str,
-    redirect_name: str,
-    redirect_kwargs: dict[str, object],
-) -> Membership | HttpResponse:
-    active_membership = _load_active_membership(
-        membership_type=membership_type,
-        username=username,
-        organization=organization,
+def _load_committee_membership(request: HttpRequest, membership_id: int) -> tuple[Membership, str] | HttpResponse:
+    """The active membership a committee action targets, and where to send the committee afterwards."""
+    membership = (
+        Membership.objects.active()
+        .select_related("membership_type", "target_organization")
+        .filter(pk=membership_id)
+        .first()
     )
-    if active_membership is None:
-        messages.error(request, not_found_message)
-        return redirect(redirect_name, **redirect_kwargs)
-    return active_membership
+    if membership is None:
+        # Every sponsorship change replaces the membership row (see Membership.replace_within_category),
+        # so a page loaded before another change posts an id that no longer exists.
+        messages.error(request, "That membership has changed or expired since the page was loaded.")
+        return redirect(_resolve_post_redirect(request, default=reverse("users"), use_referer=True))
 
-
-def _remove_freeipa_group_membership(
-    *,
-    request: HttpRequest,
-    user: FreeIPAUser,
-    group_cn: str,
-    redirect_to: str,
-    error_message: str,
-    log_message: str,
-    log_args: tuple[object, ...],
-) -> HttpResponse | None:
-    if not remove_user_from_group(username=user.username, group_cn=group_cn):
-        logger.error(log_message, *log_args)
-        messages.error(request, error_message)
-        return redirect(redirect_to)
-    return None
-
-
-def _remove_group_membership_if_present(
-    *,
-    request: HttpRequest,
-    user: FreeIPAUser,
-    group_cn: str,
-    redirect_to: str,
-    error_message: str,
-    log_message: str,
-    log_args: tuple[object, ...],
-) -> HttpResponse | None:
-    normalized_group_cn = str(group_cn or "").strip()
-    if not normalized_group_cn or normalized_group_cn not in user.groups_list:
-        return None
-    return _remove_freeipa_group_membership(
-        request=request,
-        user=user,
-        group_cn=normalized_group_cn,
-        redirect_to=redirect_to,
-        error_message=error_message,
-        log_message=log_message,
-        log_args=log_args,
-    )
+    if membership.target_organization is not None:
+        default_redirect = reverse("organization-detail", kwargs={"organization_id": membership.target_organization.pk})
+    else:
+        default_redirect = reverse("user-profile", kwargs={"username": membership.target_username})
+    return membership, _resolve_post_redirect(request, default=default_redirect, use_referer=True)
 
 
 def _parse_expiry_datetime_or_redirect(
@@ -328,262 +260,102 @@ def _parse_expiry_datetime_or_redirect(
     # The committee sets an expiration DATE. Interpret that as end-of-day UTC
     # (single source of truth), and rely on timezone conversion for display.
     expires_at = datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
-    return expires_at, form.cleaned_data["reason"]
+    return expires_at, form.cleaned_data["expiration_reason"]
 
 
-def _load_user_membership(
-    request: HttpRequest,
-    username: str,
-    membership_type_code: str,
-) -> tuple[str, MembershipType, FreeIPAUser] | HttpResponse:
-    """Validate and load user + membership type for committee actions.
-
-    Returns ``(normalized_username, membership_type, ipa_user)`` on success,
-    or an ``HttpResponse`` redirect on validation failure.
-    """
-    username = normalize_freeipa_username(username)
-    if not username:
-        raise Http404("Not found")
-
-    membership_type = _load_committee_membership_type(membership_type_code)
-
-    target = FreeIPAUser.get(username)
-    if target is None:
-        messages.error(request, "Unable to load the requested user from FreeIPA.")
-        return redirect("user-profile", username=username)
-
-    active_membership = _load_active_membership_or_redirect(
-        request,
-        membership_type=membership_type,
-        username=username,
-        not_found_message="That user does not currently have an active membership of that type.",
-        redirect_name="user-profile",
-        redirect_kwargs={"username": username},
-    )
-    if isinstance(active_membership, HttpResponse):
-        return active_membership
-
-    return username, membership_type, target
-
-
-def _load_organization_membership(
-    request: HttpRequest,
-    organization_id: int,
-    membership_type_code: str,
-) -> tuple[Organization, MembershipType, Membership] | HttpResponse:
-    """Validate and load organization + membership type for committee actions."""
-    if organization_id <= 0:
-        raise Http404("Not found")
-
-    organization = get_object_or_404(Organization, pk=organization_id)
-    membership_type = _load_committee_membership_type(membership_type_code)
-
-    active_membership = _load_active_membership_or_redirect(
-        request,
-        membership_type=membership_type,
-        organization=organization,
-        not_found_message="That organization does not currently have an active sponsorship of that type.",
-        redirect_name="organization-detail",
-        redirect_kwargs={"organization_id": organization.pk},
-    )
-    if isinstance(active_membership, HttpResponse):
-        return active_membership
-
-    return organization, membership_type, active_membership
-
-
-def _remove_organization_representative_group_membership_if_present(
-    *,
-    request: HttpRequest,
-    organization: Organization,
-    membership_type: MembershipType,
-    redirect_to: str,
-    error_message: str,
-    log_message: str,
-) -> HttpResponse | None:
-    group_cn = membership_type.group_cn
-    rep_username = organization.representative
-    if not group_cn or not rep_username:
-        return None
-
-    outcome = remove_organization_representative_from_group_if_present(
-        representative_username=rep_username,
-        group_cn=group_cn,
-        caller_mode=FreeIPACallerMode.best_effort,
-        missing_user_policy=FreeIPAMissingUserPolicy.treat_as_noop,
-    )
-    if outcome in {
-        FreeIPAGroupRemovalOutcome.noop_blank_input,
-        FreeIPAGroupRemovalOutcome.user_not_found,
-        FreeIPAGroupRemovalOutcome.already_not_member,
-        FreeIPAGroupRemovalOutcome.removed,
-    }:
-        return None
-
-    logger.error(log_message, organization.pk, rep_username, group_cn)
-    messages.error(request, error_message)
-    return redirect(redirect_to)
 
 
 @permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
 @post_only_404
-def membership_set_expiry(
-    request: HttpRequest,
-    username: str = "",
-    membership_type_code: str = "",
-    organization_id: int | None = None,
-) -> HttpResponse:
-    target: dict[str, object]
-    if organization_id is not None:
-        result = _load_organization_membership(request, organization_id, membership_type_code)
-        if isinstance(result, HttpResponse):
-            return result
-        organization, membership_type, _active_membership = result
-        target = {"target_organization": organization}
-        success_message = "Sponsorship expiration updated."
-        redirect_to = _resolve_post_redirect(
-            request,
-            default=reverse("organization-detail", kwargs={"organization_id": organization.pk}),
-            use_referer=True,
-        )
-    else:
-        result = _load_user_membership(request, username, membership_type_code)
-        if isinstance(result, HttpResponse):
-            return result
-        username, membership_type, _target = result
-        target = {"target_username": username}
-        success_message = "Membership expiration updated."
-        redirect_to = reverse("user-profile", kwargs={"username": username})
+def membership_update(request: HttpRequest, membership_id: int) -> HttpResponse:
+    """Save the manage membership dialog: the expiry and, for sponsorships on paid tiers, the dues.
+
+    Only the fields that changed are recorded, all or nothing, each with its own reason
+    as its committee note.
+    """
+    result = _load_committee_membership(request, membership_id)
+    if isinstance(result, HttpResponse):
+        return result
+    membership, redirect_to = result
+    is_sponsorship = membership.target_organization is not None
 
     parsed = _parse_expiry_datetime_or_redirect(request, redirect_to=redirect_to)
     if isinstance(parsed, HttpResponse):
         return parsed
-    expires_at, reason = parsed
+    expires_at, expiration_reason = parsed
+    actor_username = get_username(request)
 
+    changed = False
     try:
-        MembershipLog.create_for_expiry_change(
-            actor_username=get_username(request),
-            membership_type=membership_type,
-            expires_at=expires_at,
-            reason=reason,
-            **target,
-        )
+        with transaction.atomic():
+            # The dialog only has a dues field for sponsorships on paid tiers.
+            if is_sponsorship and "dues_usd" in request.POST:
+                dues_usd = payable_dues_usd(membership.membership_type, parse_dues_usd(request.POST["dues_usd"]))
+                if dues_usd != effective_dues_usd(membership):
+                    # Before the expiry change, which replaces membership's term.
+                    change_membership_dues(
+                        membership=membership,
+                        dues_usd=dues_usd,
+                        reason=str(request.POST.get("dues_reason") or ""),
+                        actor_username=actor_username,
+                    )
+                    changed = True
+            # The committee edits a date, so an unchanged date keeps the stored timestamp.
+            if expires_at.date() != membership.expires_at.astimezone(datetime.UTC).date():
+                MembershipLog.create_for_expiry_change(
+                    actor_username=actor_username,
+                    membership_type=membership.membership_type,
+                    expires_at=expires_at,
+                    reason=expiration_reason,
+                    target_username=membership.target_username,
+                    target_organization=membership.target_organization,
+                )
+                changed = True
     except ValidationError as exc:
         messages.error(request, exc.messages[0])
         return redirect(redirect_to)
 
-    messages.success(request, success_message)
-    return redirect(redirect_to)
-
-
-@permission_required(ASTRA_CHANGE_MEMBERSHIP, login_url=reverse_lazy("users"))
-@post_only_404
-def organization_sponsorship_set_dues(request: HttpRequest, organization_id: int, membership_type_code: str) -> HttpResponse:
-    result = _load_organization_membership(request, organization_id, membership_type_code)
-    if isinstance(result, HttpResponse):
-        return result
-    organization, membership_type, active_membership = result
-    redirect_to = _resolve_post_redirect(
-        request,
-        default=reverse("organization-detail", kwargs={"organization_id": organization.pk}),
-        use_referer=True,
-    )
-
-    try:
-        # An empty amount charges the standard price.
-        dues_usd = parse_dues_usd(request.POST.get("dues_usd"))
-        change_membership_dues(
-            membership=active_membership,
-            dues_usd=membership_type.annual_dues_usd if dues_usd is None else dues_usd,
-            reason=str(request.POST.get("dues_reason") or ""),
-            actor_username=get_username(request),
-        )
-    except ValidationError as exc:
-        messages.error(request, exc.messages[0])
-        return redirect(redirect_to)
-
-    messages.success(request, "Sponsorship dues updated.")
+    if changed:
+        messages.success(request, "Sponsorship updated." if is_sponsorship else "Membership updated.")
+    else:
+        messages.info(request, "No changes to save.")
     return redirect(redirect_to)
 
 
 @permission_required(ASTRA_DELETE_MEMBERSHIP, login_url=reverse_lazy("users"))
 @post_only_404
-def membership_terminate(
-    request: HttpRequest,
-    username: str = "",
-    membership_type_code: str = "",
-    organization_id: int | None = None,
-    redirect_to: str | None = None,
-) -> HttpResponse:
-    if organization_id is not None:
-        result = _load_organization_membership(request, organization_id, membership_type_code)
-        if isinstance(result, HttpResponse):
-            return result
-        organization, membership_type, _active_membership = result
-        resolved_redirect = redirect_to or reverse("organization-detail", kwargs={"organization_id": organization.pk})
-        if not typed_confirmation_matches(request.POST.get("confirm"), organization.name):
-            messages.error(request, "Type the organization name to confirm the termination.")
-            return redirect(resolved_redirect)
-
-        error_redirect = _remove_organization_representative_group_membership_if_present(
-            request=request,
-            organization=organization,
-            membership_type=membership_type,
-            redirect_to=resolved_redirect,
-            error_message="Failed to remove the representative from the FreeIPA group.",
-            log_message=(
-                "organization_sponsorship_terminate: failed to remove representative from group "
-                "org_id=%s rep=%r group_cn=%r"
-            ),
-        )
-        if error_redirect is not None:
-            return error_redirect
-
-        MembershipLog.create_for_termination(
-            actor_username=get_username(request),
-            membership_type=membership_type,
-            target_organization=organization,
-        )
-
-        messages.success(request, "Sponsorship terminated.")
-        return redirect(resolved_redirect)
-
-    result = _load_user_membership(request, username, membership_type_code)
+def membership_terminate(request: HttpRequest, membership_id: int) -> HttpResponse:
+    result = _load_committee_membership(request, membership_id)
     if isinstance(result, HttpResponse):
         return result
-    username, membership_type, target = result
-    resolved_redirect = redirect_to or reverse("user-profile", kwargs={"username": username})
-    if not typed_confirmation_matches(request.POST.get("confirm"), username):
-        messages.error(request, "Type the username to confirm the termination.")
+    membership, resolved_redirect = result
+    organization = membership.target_organization
+
+    if organization is not None:
+        confirmed = typed_confirmation_matches(request.POST.get("confirm"), organization.name)
+        confirmation_error = "Type the organization name to confirm the termination."
+    else:
+        confirmed = typed_confirmation_matches(request.POST.get("confirm"), membership.target_username)
+        confirmation_error = "Type the username to confirm the termination."
+    if not confirmed:
+        messages.error(request, confirmation_error)
         return redirect(resolved_redirect)
 
-    group_cn = membership_type.group_cn
-    error_redirect = _remove_group_membership_if_present(
-        request=request,
-        user=target,
-        group_cn=group_cn,
-        redirect_to=resolved_redirect,
-        error_message="Failed to remove the user from the FreeIPA group.",
-        log_message=(
-            "membership_terminate: failed to remove user from group username=%s "
-            "membership_type=%s group_cn=%s"
-        ),
-        log_args=(username, membership_type.code, group_cn),
-    )
-    if error_redirect is not None:
-        return error_redirect
+    # Revoke access first: a termination recorded while FreeIPA still grants it would be a lie.
+    if not revoke_membership_group_access(membership):
+        messages.error(request, "Failed to remove the FreeIPA group access, so the membership was not terminated.")
+        return redirect(resolved_redirect)
 
     MembershipLog.create_for_termination(
         actor_username=get_username(request),
-        membership_type=membership_type,
-        target_username=username,
+        membership_type=membership.membership_type,
+        target_username=membership.target_username,
+        target_organization=organization,
     )
-
-    messages.success(request, "Membership terminated.")
+    messages.success(request, "Sponsorship terminated." if organization is not None else "Membership terminated.")
     return redirect(resolved_redirect)
 
 __all__ = [
-    "_load_active_membership",
     "membership_audit_log",
     "membership_audit_log_api",
     "membership_audit_log_organization",
@@ -591,7 +363,7 @@ __all__ = [
     "membership_minutes",
     "membership_minutes_api",
     "membership_sponsors_api",
-    "membership_set_expiry",
+    "membership_update",
     "membership_sponsors_list",
     "membership_stats",
     "stats_membership_summary_api",

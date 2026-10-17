@@ -38,8 +38,7 @@ class TerminateConfirmationTests(MembershipDuesTestMixin, TestCase):
         return [str(message) for message in get_messages(response.wsgi_request)]
 
     def test_sponsorship_termination_needs_the_organization_name(self) -> None:
-        self._active_gold()
-        url = reverse("organization-sponsorship-terminate", args=[self.organization.pk, "gold"])
+        url = reverse("membership-terminate", args=[self._active_gold().pk])
 
         for confirm in ("", "Some Other Org"):
             with self.subTest(confirm=confirm):
@@ -55,8 +54,10 @@ class TerminateConfirmationTests(MembershipDuesTestMixin, TestCase):
             code="individual",
             defaults={"name": "Individual", "group_cn": "almalinux-individual", "category_id": "individual", "enabled": True},
         )
-        Membership.objects.create(target_username="rep1", membership_type=individual, expires_at=timezone.now() + datetime.timedelta(days=30))
-        url = reverse("membership-terminate", args=["rep1", "individual"])
+        membership = Membership.objects.create(
+            target_username="rep1", membership_type=individual, expires_at=timezone.now() + datetime.timedelta(days=30)
+        )
+        url = reverse("membership-terminate", args=[membership.pk])
 
         response = self.client.post(url)
         self.assertIn("Type the username to confirm the termination.", self._messages(response))
@@ -64,3 +65,18 @@ class TerminateConfirmationTests(MembershipDuesTestMixin, TestCase):
 
         self.client.post(url, data={"confirm": "REP1"})
         self.assertFalse(Membership.objects.filter(target_username="rep1").exists())
+
+    def test_a_member_missing_from_freeipa_can_still_be_terminated(self) -> None:
+        individual, _ = MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={"name": "Individual", "group_cn": "almalinux-individual", "category_id": "individual", "enabled": True},
+        )
+        # With no FreeIPA account there is no group access left to revoke.
+        membership = Membership.objects.create(
+            target_username="ghost", membership_type=individual, expires_at=timezone.now() + datetime.timedelta(days=30)
+        )
+
+        response = self.client.post(reverse("membership-terminate", args=[membership.pk]), data={"confirm": "ghost"})
+
+        self.assertIn("Membership terminated.", self._messages(response))
+        self.assertFalse(Membership.objects.filter(target_username="ghost").exists())

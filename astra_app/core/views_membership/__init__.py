@@ -7,19 +7,17 @@ from core.membership_request_workflow import (
     reject_membership_request,
 )
 from core.views_membership.admin import (
-    _load_active_membership,
     membership_audit_log,
     membership_audit_log_api,
     membership_audit_log_organization,
     membership_audit_log_user,
     membership_minutes,
     membership_minutes_api,
-    membership_set_expiry,
     membership_sponsors_api,
     membership_sponsors_list,
     membership_stats,
     membership_terminate,
-    organization_sponsorship_set_dues,
+    membership_update,
 )
 from core.views_membership.committee import (
     membership_notes_aggregate_add_api,
@@ -60,7 +58,6 @@ from core.views_utils import block_action_without_coc, block_action_without_coun
 
 __all__ = [
     "FreeIPAUser",
-    "_load_active_membership",
     "approve_membership_request",
     "block_action_without_coc",
     "block_action_without_country_code",
@@ -103,11 +100,10 @@ __all__ = [
     "membership_requests_bulk_api",
     "membership_requests_bulk",
     "membership_sponsors_api",
-    "membership_set_expiry",
+    "membership_update",
     "membership_sponsors_list",
     "membership_stats",
     "membership_terminate",
-    "organization_sponsorship_set_dues",
     "record_membership_request_created",
     "reject_membership_request",
     "run_membership_request_action",

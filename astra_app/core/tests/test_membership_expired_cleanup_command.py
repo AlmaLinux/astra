@@ -503,7 +503,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             with (
                 patch("core.freeipa.user.FreeIPAUser.get", return_value=rep),
                 patch(
-                    "core.management.commands.membership_expired_cleanup.remove_organization_representative_from_group_if_present",
+                    "core.management.commands.membership_expired_cleanup.remove_user_from_group_if_present",
                     autospec=True,
                 ) as remove_rep_from_group_mock,
                 patch(
@@ -640,7 +640,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         with patch("django.utils.timezone.now", return_value=frozen_now):
             with patch("core.freeipa.user.FreeIPAUser.get", return_value=rep):
                 with patch(
-                    "core.management.commands.membership_expired_cleanup.remove_organization_representative_from_group_if_present",
+                    "core.management.commands.membership_expired_cleanup.remove_user_from_group_if_present",
                     return_value=FreeIPAGroupRemovalOutcome.failed,
                     create=True,
                 ):

@@ -19,8 +19,8 @@ from core.membership import (
     FreeIPAGroupRemovalOutcome,
     FreeIPAMissingUserPolicy,
     memberships_with_open_request,
-    remove_organization_representative_from_group_if_present,
     remove_user_from_group,
+    remove_user_from_group_if_present,
 )
 from core.membership_notifications import (
     organization_membership_request_url,
@@ -253,8 +253,8 @@ class Command(BaseCommand):
                             group_cn,
                         )
                     else:
-                        outcome = remove_organization_representative_from_group_if_present(
-                            representative_username=rep_username,
+                        outcome = remove_user_from_group_if_present(
+                            username=rep_username,
                             group_cn=group_cn,
                             caller_mode=FreeIPACallerMode.best_effort,
                             missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,

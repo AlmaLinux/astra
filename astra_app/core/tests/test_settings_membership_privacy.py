@@ -272,6 +272,31 @@ class SelfServiceMembershipPrivacyTests(TestCase):
         self.assertEqual(note.action["reason_category"], "privacy")
         self.assertIsNone(note.content)
 
+    def test_membership_termination_works_for_a_tier_without_a_freeipa_group(self) -> None:
+        self._create_membership_type(code="individual", name="Individual", group_cn="")
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="individual",
+            expires_at=timezone.now() + datetime.timedelta(days=60),
+        )
+
+        request = self.factory.post(
+            reverse("settings-membership-terminate", kwargs={"membership_type_code": "individual"}),
+            data={"reason_category": "privacy", "reason_text": "", "current_password": "correct horse battery staple"},
+        )
+        self._add_session_and_messages(request)
+        self._add_csrf(request)
+        request.user = self._auth_user("alice")
+
+        with (
+            patch("core.views_settings._reauthenticate_destructive_action", autospec=True, return_value=True),
+            patch("core.views_settings.membership_self_terminated.send", autospec=True),
+        ):
+            response = views_settings.settings_membership_terminate(request, membership_type_code="individual")
+
+        self.assertEqual(response["Location"], reverse("settings") + "?tab=membership&status=terminated")
+        self.assertFalse(Membership.objects.filter(target_username="alice").exists())
+
     def test_membership_termination_reauth_failure_logs_exception_object(self) -> None:
         self._create_membership_type(
             code="individual",
@@ -341,7 +366,7 @@ class SelfServiceMembershipPrivacyTests(TestCase):
 
         with (
             patch("core.views_settings._reauthenticate_destructive_action", autospec=True, return_value=True),
-            patch("core.views_settings.remove_user_from_group", autospec=True, return_value=True),
+            patch("core.views_settings.revoke_membership_group_access", autospec=True, return_value=True),
             patch(
                 "core.views_settings.MembershipLog.create_for_termination",
                 autospec=True,

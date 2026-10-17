@@ -53,21 +53,6 @@ urlpatterns = [
         name="organization-membership-request",
     ),
     path(
-        "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/expiry/",
-        views_membership.membership_set_expiry,
-        name="organization-sponsorship-set-expiry",
-    ),
-    path(
-        "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/dues/",
-        views_membership.organization_sponsorship_set_dues,
-        name="organization-sponsorship-set-dues",
-    ),
-    path(
-        "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/terminate/",
-        views_membership.membership_terminate,
-        name="organization-sponsorship-terminate",
-    ),
-    path(
         "organization/<int:organization_id>/sponsorship/<str:membership_type_code>/invoice/regenerate/",
         views_organizations.organization_sponsorship_invoice_regenerate,
         name="organization-sponsorship-invoice-regenerate",
@@ -312,16 +297,8 @@ urlpatterns = [
     path("membership/minutes/", views_membership.membership_minutes, name="membership-minutes"),
     path("membership/minutes/data/", views_membership.membership_minutes_api, name="membership-minutes-data"),
 
-    path(
-        "membership/manage/<str:username>/<str:membership_type_code>/expiry/",
-        views_membership.membership_set_expiry,
-        name="membership-set-expiry",
-    ),
-    path(
-        "membership/manage/<str:username>/<str:membership_type_code>/terminate/",
-        views_membership.membership_terminate,
-        name="membership-terminate",
-    ),
+    path("membership/<int:membership_id>/update/", views_membership.membership_update, name="membership-update"),
+    path("membership/<int:membership_id>/terminate/", views_membership.membership_terminate, name="membership-terminate"),
 
     path("settings/", views_settings.settings_root, name="settings"),
     path("settings/avatar/", views_settings.avatar_manage, name="avatar-manage"),

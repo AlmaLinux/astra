@@ -27,8 +27,8 @@ describe("mountUserProfilePage", () => {
     root.setAttribute("data-user-profile-membership-history-url-template", "/membership/log/__username__/?username=__username__");
     root.setAttribute("data-user-profile-membership-request-url", "/membership/request/");
     root.setAttribute("data-user-profile-membership-request-detail-url-template", "/membership/request/__request_id__/");
-    root.setAttribute("data-user-profile-membership-set-expiry-url-template", "/membership/manage/__username__/__membership_type_code__/expiry/");
-    root.setAttribute("data-user-profile-membership-terminate-url-template", "/membership/manage/__username__/__membership_type_code__/terminate/");
+    root.setAttribute("data-user-profile-membership-update-url-template", "/membership/__membership_id__/update/");
+    root.setAttribute("data-user-profile-membership-terminate-url-template", "/membership/__membership_id__/terminate/");
     root.setAttribute("data-user-profile-csrf-token", "csrf-token");
     root.setAttribute("data-user-profile-next-url", "/user/alice/");
     root.setAttribute("data-user-profile-membership-notes-summary-url", "/api/v1/membership-notes/aggregate/summary/?target_type=user&target=alice");

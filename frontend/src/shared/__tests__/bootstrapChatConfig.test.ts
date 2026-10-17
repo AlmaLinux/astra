@@ -36,8 +36,8 @@ function makeUserProfileRoot(): HTMLDivElement {
   root.dataset.userProfileMembershipHistoryUrlTemplate = "/membership/log/__username__/?username=__username__";
   root.dataset.userProfileMembershipRequestUrl = "/membership/request/";
   root.dataset.userProfileMembershipRequestDetailUrlTemplate = "/membership/request/__request_id__/";
-  root.dataset.userProfileMembershipSetExpiryUrlTemplate = "/membership/manage/__username__/__membership_type_code__/expiry/";
-  root.dataset.userProfileMembershipTerminateUrlTemplate = "/membership/manage/__username__/__membership_type_code__/terminate/";
+  root.dataset.userProfileMembershipUpdateUrlTemplate = "/membership/__membership_id__/update/";
+  root.dataset.userProfileMembershipTerminateUrlTemplate = "/membership/__membership_id__/terminate/";
   root.dataset.userProfileCsrfToken = "csrf-token";
   root.dataset.userProfileNextUrl = "/user/alice/";
   root.dataset.userProfileMembershipNotesSummaryUrl = "/api/v1/membership-notes/aggregate/summary/?target_type=user&target=alice";

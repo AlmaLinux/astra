@@ -375,7 +375,7 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             ),
             patch("core.membership_request_workflow.FreeIPAUser.get", return_value=bob),
             patch(
-                "core.membership.remove_organization_representative_from_group_if_present",
+                "core.membership.remove_user_from_group_if_present",
                 side_effect=RuntimeError("This entry is not a member"),
             ),
             patch(

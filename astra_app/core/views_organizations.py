@@ -28,9 +28,6 @@ from core.freeipa.user import FreeIPAUser
 from core.freeipa_directory import search_freeipa_users
 from core.logging_extras import current_exception_log_fields
 from core.membership import (
-    FreeIPACallerMode,
-    FreeIPAGroupRemovalOutcome,
-    FreeIPAMissingUserPolicy,
     FreeIPARepresentativeSyncError,
     build_pending_request_context,
     compute_membership_requestability_context,
@@ -38,13 +35,17 @@ from core.membership import (
     get_membership_request_eligibility,
     get_valid_memberships,
     get_valid_memberships_by_organization_ids,
-    remove_organization_representative_from_group_if_present,
     resolve_request_ids_by_membership_type,
+    revoke_membership_group_access,
     suggest_tier_change_membership_type_code,
 )
 from core.membership_dues import effective_dues_usd
 from core.membership_notes import add_note
-from core.membership_payloads import serialize_membership_entry, serialize_pending_membership_entry
+from core.membership_payloads import (
+    membership_action_url_templates,
+    serialize_membership_entry,
+    serialize_pending_membership_entry,
+)
 from core.membership_request_workflow import ignore_open_membership_requests_for_target
 from core.models import (
     AccountInvitation,
@@ -876,6 +877,7 @@ def _build_organization_detail_page_context(
             requestable_codes=requestable_codes_by_category.get(sponsorship_category_id, set()),
         )
         sponsorship_entries.append({
+            "membership_id": sponsorship.pk,
             "sponsorship": sponsorship,
             "badge_text": str(sponsorship.membership_type_id).replace("_", " ").title(),
             "is_expiring_soon": sponsorship.expires_at <= expiring_soon_by,
@@ -943,6 +945,7 @@ def _serialize_organization_detail_page_membership_entry(
         expires_at = entry.get("expires_at")
 
     return serialize_membership_entry(
+        membership_id=cast(int, entry["membership_id"]),
         membership_type=membership_type,
         created_at=created_at,
         expires_at=expires_at,
@@ -1215,20 +1218,9 @@ def organization_detail(request: HttpRequest, organization_id: int) -> HttpRespo
             ).replace(str(membership_request_id_sentinel), "__request_id__"),
             "membership_request_url": reverse("organization-membership-request", args=[organization.pk]),
             "membership_history_url": reverse("membership-audit-log-organization", args=[organization.pk]),
-            "sponsorship_set_expiry_url_template": reverse(
-                "organization-sponsorship-set-expiry",
-                args=[organization.pk, membership_type_code_sentinel],
-            ).replace(membership_type_code_sentinel, "__membership_type_code__"),
-            "sponsorship_terminate_url_template": reverse(
-                "organization-sponsorship-terminate",
-                args=[organization.pk, membership_type_code_sentinel],
-            ).replace(membership_type_code_sentinel, "__membership_type_code__"),
+            **membership_action_url_templates(),
             "sponsorship_invoice_regenerate_url_template": reverse(
                 "organization-sponsorship-invoice-regenerate",
-                args=[organization.pk, membership_type_code_sentinel],
-            ).replace(membership_type_code_sentinel, "__membership_type_code__"),
-            "sponsorship_set_dues_url_template": reverse(
-                "organization-sponsorship-set-dues",
                 args=[organization.pk, membership_type_code_sentinel],
             ).replace(membership_type_code_sentinel, "__membership_type_code__"),
             "csrf_token": get_token(request),
@@ -1253,38 +1245,14 @@ def organization_delete(request: HttpRequest, organization_id: int) -> HttpRespo
 
     # Remove representative from ALL active membership FreeIPA groups before
     # deleting. CASCADE on Membership.target_organization handles DB cleanup.
-    rep_username = organization.representative
     active_memberships = list(
-        Membership.objects.select_related("membership_type")
+        Membership.objects.select_related("membership_type", "target_organization")
         .filter(target_organization=organization)
     )
-
-    if rep_username and active_memberships:
-        rep = FreeIPAUser.get(rep_username)
-        if rep is not None:
-            for membership in active_memberships:
-                group_cn = membership.membership_type.group_cn
-                if group_cn and group_cn in rep.groups_list:
-                    outcome = remove_organization_representative_from_group_if_present(
-                        representative_username=rep_username,
-                        group_cn=group_cn,
-                        caller_mode=FreeIPACallerMode.best_effort,
-                        missing_user_policy=FreeIPAMissingUserPolicy.treat_as_noop,
-                    )
-                    if outcome not in {
-                        FreeIPAGroupRemovalOutcome.removed,
-                        FreeIPAGroupRemovalOutcome.already_not_member,
-                        FreeIPAGroupRemovalOutcome.noop_blank_input,
-                        FreeIPAGroupRemovalOutcome.user_not_found,
-                    }:
-                        logger.error(
-                            "organization_delete: failed to remove representative from group org_id=%s rep=%r group_cn=%r",
-                            organization.pk,
-                            rep_username,
-                            group_cn,
-                        )
-                        messages.error(request, "Failed to remove the representative from the FreeIPA group.")
-                        return redirect("organization-detail", organization_id=organization.pk)
+    for membership in active_memberships:
+        if not revoke_membership_group_access(membership):
+            messages.error(request, "Failed to remove the representative from the FreeIPA group.")
+            return redirect("organization-detail", organization_id=organization.pk)
 
     actor_username = get_username(request)
     with transaction.atomic():

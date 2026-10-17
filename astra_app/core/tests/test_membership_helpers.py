@@ -18,8 +18,8 @@ from core.membership import (
     get_expiring_memberships,
     get_valid_memberships,
     membership_target_filter,
-    remove_organization_representative_from_group_if_present,
     remove_user_from_group,
+    remove_user_from_group_if_present,
     resolve_request_ids_by_membership_type,
     rollback_organization_representative_groups,
     sync_organization_representative_groups,
@@ -272,9 +272,9 @@ class MembershipHelperTests(TestCase):
         add_mock.assert_called_once()
         self.assertEqual(add_mock.call_args.kwargs["group_name"], "g2")
 
-    def test_remove_organization_representative_from_group_if_present_blank_is_noop(self) -> None:
-        outcome = remove_organization_representative_from_group_if_present(
-            representative_username="",
+    def test_remove_user_from_group_if_present_blank_is_noop(self) -> None:
+        outcome = remove_user_from_group_if_present(
+            username="",
             group_cn="",
             caller_mode=FreeIPACallerMode.best_effort,
             missing_user_policy=FreeIPAMissingUserPolicy.treat_as_noop,
@@ -286,7 +286,7 @@ class MembershipHelperTests(TestCase):
 
         with (
             patch(
-                "core.membership.remove_organization_representative_from_group_if_present",
+                "core.membership.remove_user_from_group_if_present",
                 return_value=FreeIPAGroupRemovalOutcome.failed,
             ) as remove_mock,
             patch(
@@ -305,7 +305,7 @@ class MembershipHelperTests(TestCase):
             )
 
         remove_mock.assert_called_once_with(
-            representative_username="bob",
+            username="bob",
             group_cn="almalinux-gold",
             caller_mode=FreeIPACallerMode.raise_on_error,
             missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
@@ -633,6 +633,77 @@ class MembershipHelperTests(TestCase):
             memberships = get_valid_memberships(username="alice")
 
         self.assertEqual([m.membership_type_id for m in memberships], ["basic"])
+
+    def _revocable_memberships(self) -> dict[str, Membership]:
+        for code, category_id, group_cn in (
+            ("individual", "individual", "almalinux-individual"),
+            ("gold", "sponsorship", "almalinux-gold"),
+            ("groupless", "individual", ""),
+        ):
+            MembershipType.objects.update_or_create(
+                code=code,
+                defaults={"name": code.title(), "group_cn": group_cn, "category_id": category_id, "enabled": True},
+            )
+        return {
+            "member": Membership.objects.create(target_username="alice", membership_type_id="individual", expires_at=FAR_FUTURE),
+            "sponsor": Membership.objects.create(
+                target_organization=Organization.objects.create(name="Acme", representative="bob"),
+                membership_type_id="gold",
+                expires_at=FAR_FUTURE,
+            ),
+            "groupless": Membership.objects.create(target_username="carol", membership_type_id="groupless", expires_at=FAR_FUTURE),
+            "no_representative": Membership.objects.create(
+                target_organization=Organization.objects.create(name="Unclaimed", representative=""),
+                membership_type_id="gold",
+                expires_at=FAR_FUTURE,
+            ),
+        }
+
+    def _freeipa_users(self, groups_by_username: dict[str, list[str]]):
+        users = {
+            username: FreeIPAUser(username, {"uid": [username], "memberof_group": groups})
+            for username, groups in groups_by_username.items()
+        }
+        return patch("core.membership.FreeIPAUser.get", side_effect=lambda username, **_kwargs: users.get(username))
+
+    def test_revoke_membership_group_access_removes_the_member_or_the_representative(self) -> None:
+        from core.membership import revoke_membership_group_access
+
+        memberships = self._revocable_memberships()
+        for key, holder, group_cn in (("member", "alice", "almalinux-individual"), ("sponsor", "bob", "almalinux-gold")):
+            with (
+                self.subTest(key),
+                self._freeipa_users({holder: [group_cn]}),
+                patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock,
+            ):
+                self.assertTrue(revoke_membership_group_access(memberships[key]))
+                remove_mock.assert_called_once()
+                self.assertEqual(remove_mock.call_args.args[0].username, holder)
+                self.assertEqual(remove_mock.call_args.kwargs["group_name"], group_cn)
+
+    def test_revoke_membership_group_access_succeeds_when_there_is_nothing_to_revoke(self) -> None:
+        from core.membership import revoke_membership_group_access
+
+        memberships = self._revocable_memberships()
+        # alice already left the group, and bob is not in FreeIPA at all.
+        with (
+            self._freeipa_users({"alice": [], "carol": ["almalinux-individual"]}),
+            patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock,
+        ):
+            for key in ("member", "sponsor", "groupless", "no_representative"):
+                with self.subTest(key):
+                    self.assertTrue(revoke_membership_group_access(memberships[key]))
+        remove_mock.assert_not_called()
+
+    def test_revoke_membership_group_access_reports_freeipa_failures(self) -> None:
+        from core.membership import revoke_membership_group_access
+
+        memberships = self._revocable_memberships()
+        with (
+            self._freeipa_users({"alice": ["almalinux-individual"]}),
+            patch.object(FreeIPAUser, "remove_from_group", autospec=True, side_effect=RuntimeError("FreeIPA down")),
+        ):
+            self.assertFalse(revoke_membership_group_access(memberships["member"]))
 
     def test_remove_user_from_group_handles_missing_user(self) -> None:
         with patch("core.membership.FreeIPAUser.get", return_value=None):

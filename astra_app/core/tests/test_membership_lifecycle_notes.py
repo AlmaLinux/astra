@@ -190,19 +190,17 @@ class LifecycleNoteViewTests(LifecycleNotesTestMixin, TestCase):
         return [str(message) for message in get_messages(response.wsgi_request)]
 
     def test_committee_expiry_reason_becomes_the_note_content(self) -> None:
-        self._active_gold()
-        self._active_individual()
-
-        for url in (
-            reverse("organization-sponsorship-set-expiry", args=[self.organization.pk, "gold"]),
-            reverse("membership-set-expiry", args=["rep1", "individual"]),
-        ):
-            with self.subTest(url=url):
-                self.client.post(url, data={"expires_on": "2031-01-31", "reason": "  Paid late  "})
+        # One endpoint serves sponsorships and individual memberships alike.
+        for membership in (self._active_gold(), self._active_individual()):
+            with self.subTest(membership=membership):
+                self.client.post(
+                    reverse("membership-update", args=[membership.pk]),
+                    data={"expires_on": "2031-01-31", "expiration_reason": "  Paid late  "},
+                )
 
         self.assertEqual([note.content for note in self._notes("expiry_changed")], ["Paid late", "Paid late"])
 
-    def test_committee_expiry_change_to_the_current_date_is_rejected(self) -> None:
+    def test_committee_expiry_change_to_the_current_date_records_nothing(self) -> None:
         membership = self._active_gold()
         # The form sets an end-of-day UTC date, so give the membership one.
         Membership.objects.filter(pk=membership.pk).update(
@@ -211,9 +209,9 @@ class LifecycleNoteViewTests(LifecycleNotesTestMixin, TestCase):
         logs_before = MembershipLog.objects.count()
 
         response = self.client.post(
-            reverse("organization-sponsorship-set-expiry", args=[self.organization.pk, "gold"]),
+            reverse("membership-update", args=[membership.pk]),
             data={"expires_on": "2031-01-31"},
         )
 
-        self.assertIn(f"{self.gold.name} already expires on 2031-01-31.", self._messages(response))
+        self.assertIn("No changes to save.", self._messages(response))
         self.assertEqual(MembershipLog.objects.count(), logs_before)

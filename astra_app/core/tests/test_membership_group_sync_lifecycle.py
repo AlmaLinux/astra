@@ -50,7 +50,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
             },
         )
 
-        Membership.objects.create(
+        membership = Membership.objects.create(
             target_username="alice",
             membership_type_id="individual",
             expires_at=timezone.now() + datetime.timedelta(days=30),
@@ -87,7 +87,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                 resp = self.client.post(
-                    reverse("membership-terminate", args=["alice", "individual"]),
+                    reverse("membership-terminate", args=[membership.pk]),
                     data={"confirm": "alice"},
                     follow=False,
                 )
@@ -147,7 +147,7 @@ class MembershipGroupSyncLifecycleTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
             with patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock:
                 resp = self.client.post(
-                    reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]),
+                    reverse("membership-terminate", args=[Membership.objects.get(target_organization=org).pk]),
                     data={"confirm": org.name},
                     follow=False,
                 )

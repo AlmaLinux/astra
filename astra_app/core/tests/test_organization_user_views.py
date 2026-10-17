@@ -2736,7 +2736,7 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                reverse("membership-update", args=[sponsorship.pk]),
                 data={
                     "expires_on": new_expires_on.isoformat(),
                     "next": reverse("organization-detail", args=[org.pk]),
@@ -2812,7 +2812,7 @@ class OrganizationUserViewsTests(TestCase):
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             resp = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                reverse("membership-update", args=[Membership.objects.get(target_organization=org).pk]),
                 data={
                     "expires_on": past_date.isoformat(),
                     "next": reverse("organization-detail", args=[org.pk]),
@@ -2851,52 +2851,31 @@ class OrganizationUserViewsTests(TestCase):
             ).exists()
         )
 
-    def test_membership_admin_can_set_org_sponsorship_expiry_creates_row_when_absent(self) -> None:
-        """Setting expiry when no membership exists returns an error."""
-        import datetime
+    def test_membership_admin_is_sent_back_when_the_membership_changed_since_the_page_loaded(self) -> None:
+        from core.models import FreeIPAPermissionGrant
+        from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP
 
-        from core.models import FreeIPAPermissionGrant, Membership, MembershipType, Organization
-        from core.permissions import ASTRA_CHANGE_MEMBERSHIP
-
-        MembershipType.objects.update_or_create(
-            code="gold",
-            defaults={
-                "name": "Gold",
-                "description": "Gold",
-                "category_id": "sponsorship",
-                "sort_order": 2,
-                "enabled": True,
-            },
-        )
-
-        org = Organization.objects.create(name="Acme", representative="bob")
-        Membership.objects.filter(target_organization=org).delete()
-
-        FreeIPAPermissionGrant.objects.create(
-            permission=ASTRA_CHANGE_MEMBERSHIP,
-            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
-            principal_name="reviewer",
-        )
+        for permission in (ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP):
+            FreeIPAPermissionGrant.objects.create(
+                permission=permission,
+                principal_type=FreeIPAPermissionGrant.PrincipalType.user,
+                principal_name="reviewer",
+            )
 
         reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
         self._login_as_freeipa_user("reviewer")
 
-        new_expires_on = datetime.date(2030, 1, 31)
-
+        page = "/organization/1/"
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
-                data={
-                    "expires_on": new_expires_on.isoformat(),
-                    "next": reverse("organization-detail", args=[org.pk]),
-                },
-                follow=True,
-            )
-
-        self.assertEqual(resp.status_code, 200)
-        messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("That organization does not currently have an active sponsorship of that type.", messages)
-        self.assertFalse(Membership.objects.filter(target_organization=org).exists())
+            for url_name, data in (("membership-update", {"expires_on": "2030-01-31"}), ("membership-terminate", {"confirm": "x"})):
+                with self.subTest(url_name=url_name):
+                    # A sponsorship change replaces the row, so a stale page posts an id that no longer exists.
+                    resp = self.client.post(reverse(url_name, args=[999999]), data={**data, "next": page})
+                    self.assertRedirects(resp, page, fetch_redirect_response=False)
+                    self.assertIn(
+                        "That membership has changed or expired since the page was loaded.",
+                        [m.message for m in get_messages(resp.wsgi_request)],
+                    )
 
     def test_membership_admin_cannot_set_expiry_on_expired_org_sponsorship(self) -> None:
         import datetime
@@ -2917,7 +2896,7 @@ class OrganizationUserViewsTests(TestCase):
 
         org = Organization.objects.create(name="Acme", representative="bob")
         expired_at = timezone.now() - datetime.timedelta(days=1)
-        Membership.objects.create(
+        expired = Membership.objects.create(
             target_organization=org,
             membership_type_id="gold",
             expires_at=expired_at,
@@ -2936,7 +2915,7 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                reverse("membership-update", args=[expired.pk]),
                 data={
                     "expires_on": new_expires_on.isoformat(),
                     "next": reverse("organization-detail", args=[org.pk]),
@@ -2945,76 +2924,11 @@ class OrganizationUserViewsTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.redirect_chain[-1][0], reverse("organization-detail", args=[org.pk]))
         messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("That organization does not currently have an active sponsorship of that type.", messages)
+        self.assertIn("That membership has changed or expired since the page was loaded.", messages)
         sponsorship = Membership.objects.get(target_organization=org)
         self.assertEqual(sponsorship.expires_at, expired_at)
-
-    def test_membership_admin_can_set_org_sponsorship_expiry_when_membership_type_mismatch(self) -> None:
-        """Setting expiry for a type the org does not hold returns an error."""
-        import datetime
-
-        from core.models import Membership, MembershipType, Organization
-        from core.permissions import ASTRA_CHANGE_MEMBERSHIP
-
-        MembershipType.objects.update_or_create(
-            code="gold",
-            defaults={
-                "name": "Gold",
-                "description": "Gold",
-                "category_id": "sponsorship",
-                "sort_order": 2,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="silver",
-            defaults={
-                "name": "Silver",
-                "description": "Silver",
-                "category_id": "sponsorship",
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
-
-        org = Organization.objects.create(name="Acme", representative="bob")
-
-        # Org has silver, but we will try to set expiry for gold.
-        Membership.objects.create(
-            target_organization=org,
-            membership_type_id="silver",
-            expires_at=FAR_FUTURE,
-        )
-
-        FreeIPAPermissionGrant.objects.create(
-            permission=ASTRA_CHANGE_MEMBERSHIP,
-            principal_type=FreeIPAPermissionGrant.PrincipalType.user,
-            principal_name="reviewer",
-        )
-
-        reviewer = FreeIPAUser("reviewer", {"uid": ["reviewer"], "mail": ["reviewer@example.com"], "memberof_group": [], "c": ["US"]})
-        self._login_as_freeipa_user("reviewer")
-
-        new_expires_on = datetime.date(2030, 1, 31)
-
-        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
-                data={
-                    "expires_on": new_expires_on.isoformat(),
-                    "next": reverse("organization-detail", args=[org.pk]),
-                },
-                follow=True,
-            )
-
-        self.assertEqual(resp.status_code, 200)
-        messages = [m.message for m in get_messages(resp.wsgi_request)]
-        self.assertIn("That organization does not currently have an active sponsorship of that type.", messages)
-        # Silver membership should be untouched.
-        sponsorship = Membership.objects.get(target_organization=org)
-        self.assertEqual(sponsorship.membership_type_id, "silver")
-        self.assertEqual(sponsorship.expires_at, FAR_FUTURE)
 
     def test_organization_detail_bootstraps_committee_notes_without_api_notes_payload(self) -> None:
         from core.models import MembershipRequest, MembershipType, Note, Organization
@@ -3880,7 +3794,7 @@ class OrganizationUserViewsTests(TestCase):
         )
 
         expires_at = timezone.now() + datetime.timedelta(days=30)
-        Membership.objects.create(
+        sponsorship = Membership.objects.create(
             target_organization=org,
             membership_type=gold,
             expires_at=expires_at,
@@ -3918,34 +3832,35 @@ class OrganizationUserViewsTests(TestCase):
         )
         self.assertContains(
             resp,
-            f'data-organization-detail-sponsorship-set-expiry-url-template="{reverse("organization-sponsorship-set-expiry", args=[org.pk, "__membership_type_code__"])}"',
+            'data-organization-detail-membership-update-url-template="/membership/__membership_id__/update/"',
         )
         self.assertContains(
             resp,
-            f'data-organization-detail-sponsorship-terminate-url-template="{reverse("organization-sponsorship-terminate", args=[org.pk, "__membership_type_code__"])}"',
+            'data-organization-detail-membership-terminate-url-template="/membership/__membership_id__/terminate/"',
         )
         self.assertContains(resp, 'data-organization-detail-expiry-min-date="')
-        self.assertNotContains(resp, "Edit expiration")
+        self.assertNotContains(resp, "Edit membership")
         self.assertNotContains(resp, f"Manage membership: Gold Sponsor Member for {org.name}")
         self.assertNotContains(resp, "Danger zone")
-        self.assertNotContains(resp, "Save expiration")
-        self.assertNotContains(resp, f'action="{reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"])}"')
-        self.assertNotContains(resp, f'action="{reverse("organization-sponsorship-terminate", args=[org.pk, "gold"])}"')
+        self.assertNotContains(resp, "Save changes")
+        self.assertNotContains(resp, f'action="{reverse("membership-update", args=[sponsorship.pk])}"')
+        self.assertNotContains(resp, f'action="{reverse("membership-terminate", args=[sponsorship.pk])}"')
 
         self.assertEqual(detail_resp.status_code, 200)
         membership = detail_resp.json()["organization"]["memberships"][0]
+        self.assertEqual(membership["id"], sponsorship.pk)
         self.assertEqual(membership["membershipType"]["code"], "gold")
         self.assertTrue(membership["canManage"])
         self.assertEqual(membership["expiresAt"], expires_at.isoformat())
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
-            resp = self.client.get(reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]))
+            resp = self.client.get(reverse("membership-update", args=[sponsorship.pk]))
         self.assertEqual(resp.status_code, 404)
 
         new_expires_on = (timezone.now() + datetime.timedelta(days=90)).date().isoformat()
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                reverse("membership-update", args=[sponsorship.pk]),
                 data={"expires_on": new_expires_on},
                 follow=False,
             )
@@ -3966,7 +3881,7 @@ class OrganizationUserViewsTests(TestCase):
 
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             resp = self.client.post(
-                reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]),
+                reverse("membership-terminate", args=[sponsorship.pk]),
                 data={"confirm": org.name},
                 follow=False,
             )

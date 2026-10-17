@@ -5,8 +5,8 @@ import UserProfileMembershipPanel from "../UserProfileMembershipPanel.vue";
 import type { UserProfileMembershipNotes, UserProfileMembershipSection } from "../types";
 
 const membershipManagement = {
-  expiryUrlTemplate: "/membership/manage/__username__/__membership_type_code__/expiry/",
-  terminateUrlTemplate: "/membership/manage/__username__/__membership_type_code__/terminate/",
+  updateUrlTemplate: "/membership/__membership_id__/update/",
+  terminateUrlTemplate: "/membership/__membership_id__/terminate/",
   csrfToken: "csrf-token",
   nextUrl: "/user/alice/",
 };
@@ -228,6 +228,7 @@ describe("UserProfileMembershipPanel", () => {
             {
               kind: "membership",
               key: "membership-individual",
+              id: 5,
               requestId: 11,
               membershipType: { name: "Individual", code: "individual", description: "" },
               createdAt: "2024-01-15T12:00:00Z",
@@ -267,15 +268,18 @@ describe("UserProfileMembershipPanel", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("Edit expiration");
-    expect(wrapper.find('form[action="/membership/manage/alice/individual/expiry/"]').exists()).toBe(true);
-    const expiryReason = wrapper.get('form[action="/membership/manage/alice/individual/expiry/"] textarea[name="reason"]');
+    expect(wrapper.text()).toContain("Edit membership");
+    expect(wrapper.text()).not.toContain("Edit expiration");
+    // Individual memberships have no dues to change.
+    expect(wrapper.find('input[name="dues_usd"]').exists()).toBe(false);
+    expect(wrapper.find('form[action="/membership/5/update/"]').exists()).toBe(true);
+    const expiryReason = wrapper.get('form[action="/membership/5/update/"] textarea[name="expiration_reason"]');
     expect(expiryReason.attributes("required")).toBeUndefined();
-    expect(wrapper.find('form[action="/membership/manage/alice/individual/terminate/"]').exists()).toBe(true);
-    const terminate = wrapper.get('form[action="/membership/manage/alice/individual/terminate/"] button[type="submit"]');
+    expect(wrapper.find('form[action="/membership/5/terminate/"]').exists()).toBe(true);
+    const terminate = wrapper.get('form[action="/membership/5/terminate/"] button[type="submit"]');
     expect(terminate.attributes("disabled")).toBeDefined();
     expect(terminate.element.parentElement?.getAttribute("title")).toBe("Type the username to confirm first.");
-    await wrapper.get('form[action="/membership/manage/alice/individual/terminate/"] input[name="confirm"]').setValue("Alice");
+    await wrapper.get('form[action="/membership/5/terminate/"] input[name="confirm"]').setValue("Alice");
     expect(terminate.attributes("disabled")).toBeUndefined();
     expect(terminate.element.parentElement?.getAttribute("title")).toBe("Terminate this membership now");
     expect(wrapper.find('input[name="csrfmiddlewaretoken"]').attributes("value")).toBe("csrf-token");

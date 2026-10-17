@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 
-import GuardedButton from "../shared/components/GuardedButton.vue";
 import MembershipCard from "../shared/components/MembershipCard.vue";
-import { formatDateInputValue, formatFullDate, formatPreciseDateTime, membershipTierClass, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
+import MembershipManageModal from "../shared/components/MembershipManageModal.vue";
+import { formatFullDate, formatPreciseDateTime, membershipTierClass, membershipTypeDescription, pendingMembershipBadge } from "../shared/membershipPresentation";
 import { fillUrlTemplate } from "../shared/urlTemplates";
 import type {
   UserProfileMembershipEntry,
@@ -83,49 +83,12 @@ function managementModalId(index: number): string {
   return `expiry-modal-${index}`;
 }
 
-function managementInputId(index: number): string {
-  return `expires-on-${index}`;
-}
-
-function managementCollapseId(index: number): string {
-  return `${managementModalId(index)}-terminate-collapse`;
-}
-
-function managementTerminationInputId(index: number): string {
-  return `${managementModalId(index)}-terminate-confirm-input`;
-}
-
-function managementTerminationSubmitId(index: number): string {
-  return `${managementModalId(index)}-terminate-submit`;
-}
-
-function managementActionUrl(template: string, membershipTypeCode: string): string {
-  return fillUrlTemplate(
-    fillUrlTemplate(template, "__username__", props.membership.username),
-    "__membership_type_code__",
-    membershipTypeCode,
-  );
+function managementActionUrl(template: string, entry: UserProfileMembershipEntry): string {
+  return fillUrlTemplate(template, "__membership_id__", entry.id);
 }
 
 function managementMinValue(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-const terminationConfirmByKey = ref<Record<string, string>>({});
-
-function normalized(value: string): string {
-  return value.toLowerCase().trim();
-}
-
-function terminationMatches(entry: UserProfileMembershipEntry): boolean {
-  if (!entry.canManage) {
-    return false;
-  }
-  return normalized(terminationConfirmByKey.value[entry.key] || "") === normalized(props.membership.username);
-}
-
-function resetTermination(entry: UserProfileMembershipEntry): void {
-  terminationConfirmByKey.value[entry.key] = "";
 }
 </script>
 
@@ -161,131 +124,24 @@ function resetTermination(entry: UserProfileMembershipEntry): void {
           class="btn btn-sm btn-outline-secondary"
           data-toggle="modal"
           :data-target="`#${managementModalId(index + 1)}`"
-          title="Edit membership expiration date"
-        >Edit expiration</button>
+          title="Edit or terminate this membership"
+        >Edit membership</button>
       </div>
 
-      <div
+      <MembershipManageModal
         v-if="entry.canManage"
-        class="modal fade"
-        :id="managementModalId(index + 1)"
-        tabindex="-1"
-        role="dialog"
-        :aria-labelledby="`${managementModalId(index + 1)}-label`"
-        aria-hidden="true"
-      >
-        <div class="modal-dialog" role="document">
-          <div class="modal-content">
-            <div class="modal-header">
-              <div class="mr-3">
-                <h5 class="modal-title mb-0" :id="`${managementModalId(index + 1)}-label`">Manage membership: {{ entry.membershipType.name }} for {{ membership.username }}</h5>
-              </div>
-              <button type="button" class="close" data-dismiss="modal" aria-label="Close" title="Close dialog">
-                <span aria-hidden="true">&times;</span>
-              </button>
-            </div>
-
-            <div class="modal-body">
-              <div v-if="expiresLabel(entry)" class="mb-3">Current expiration: {{ expiresLabel(entry) }}</div>
-
-              <form method="post" :action="managementActionUrl(membershipManagement.expiryUrlTemplate, entry.membershipType.code)" novalidate>
-                <input type="hidden" name="csrfmiddlewaretoken" :value="membershipManagement.csrfToken">
-                <input v-if="membershipManagement.nextUrl" type="hidden" name="next" :value="membershipManagement.nextUrl">
-
-                <div class="form-group">
-                  <label :for="managementInputId(index + 1)">Expiration date</label>
-                  <input
-                    :id="managementInputId(index + 1)"
-                    name="expires_on"
-                    type="date"
-                    class="form-control"
-                    :value="formatDateInputValue(entry.expiresAt)"
-                    :min="managementMinValue()"
-                    required
-                  >
-                </div>
-
-                <div class="text-muted small mb-3">Expiration is an end-of-day date in UTC.</div>
-
-                <div class="form-group">
-                  <label :for="`${managementInputId(index + 1)}-reason`">Reason (optional)</label>
-                  <textarea
-                    :id="`${managementInputId(index + 1)}-reason`"
-                    name="reason"
-                    class="form-control"
-                    rows="2"
-                    placeholder="Recorded as a committee note"
-                  />
-                </div>
-
-                <div class="d-flex justify-content-between">
-                  <button type="button" class="btn btn-secondary" data-dismiss="modal" aria-label="Cancel" title="Close dialog without saving">Cancel</button>
-                  <button type="submit" class="btn btn-primary" title="Save expiration date">Save expiration</button>
-                </div>
-              </form>
-
-              <div class="mt-4 pt-3 border-top">
-                <div class="border border-danger rounded p-3 bg-light">
-                  <div class="font-weight-bold text-danger mb-1">Danger zone</div>
-                  <div class="small text-muted mb-3">Ends this membership early.</div>
-
-                  <div class="d-flex justify-content-end">
-                    <button
-                      type="button"
-                      class="btn btn-outline-danger"
-                      data-toggle="collapse"
-                      :data-target="`#${managementCollapseId(index + 1)}`"
-                      aria-expanded="false"
-                      :aria-controls="managementCollapseId(index + 1)"
-                      title="Show termination confirmation"
-                    >Terminate membership&hellip;</button>
-                  </div>
-
-                  <div class="collapse mt-3" :id="managementCollapseId(index + 1)">
-                    <div class="alert alert-danger mb-3" role="alert">This will end the membership early and cannot be undone.</div>
-
-                    <form method="post" :action="managementActionUrl(membershipManagement.terminateUrlTemplate, entry.membershipType.code)" class="m-0" novalidate>
-                      <input type="hidden" name="csrfmiddlewaretoken" :value="membershipManagement.csrfToken">
-                      <input v-if="membershipManagement.nextUrl" type="hidden" name="next" :value="membershipManagement.nextUrl">
-
-                      <div class="form-group">
-                        <label :for="managementTerminationInputId(index + 1)">Type the name to confirm</label>
-                        <input
-                          :id="managementTerminationInputId(index + 1)"
-                          v-model="terminationConfirmByKey[entry.key]"
-                          name="confirm"
-                          type="text"
-                          class="form-control"
-                          :class="{
-                            'is-valid': Boolean(terminationConfirmByKey[entry.key]) && terminationMatches(entry),
-                            'is-invalid': Boolean(terminationConfirmByKey[entry.key]) && !terminationMatches(entry),
-                          }"
-                          :placeholder="membership.username"
-                          autocomplete="off"
-                          :data-terminate-target="membership.username"
-                          required
-                        >
-                        <div class="invalid-feedback">Does not match. Type the name to enable termination (case-insensitive).</div>
-                      </div>
-
-                      <div class="d-flex justify-content-end">
-                        <button type="button" class="btn btn-outline-secondary" data-terminate-action="cancel" title="Cancel termination and collapse this section" @click="resetTermination(entry)">Cancel termination</button>
-                        <GuardedButton
-                          type="submit"
-                          class="btn btn-danger ml-2"
-                          :id="managementTerminationSubmitId(index + 1)"
-                          :blocked-reason="terminationMatches(entry) ? '' : 'Type the username to confirm first.'"
-                          title="Terminate this membership now"
-                        >Terminate membership</GuardedButton>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        :modal-id="managementModalId(index + 1)"
+        :membership-type="entry.membershipType"
+        :target-name="membership.username"
+        target-noun="username"
+        :expires-at="entry.expiresAt"
+        :expires-label="expiresLabel(entry)"
+        :expiry-min-date="managementMinValue()"
+        :update-url="managementActionUrl(membershipManagement.updateUrlTemplate, entry)"
+        :terminate-url="managementActionUrl(membershipManagement.terminateUrlTemplate, entry)"
+        :csrf-token="membershipManagement.csrfToken"
+        :next-url="membershipManagement.nextUrl"
+      />
     </li>
 
     <li v-if="!membership.entries.length && !membership.pendingEntries.length" class="list-group-item text-muted">

@@ -59,10 +59,10 @@ class Plan060WorkstreamBContractTests(TestCase):
         )
         return membership_type
 
-    def test_legacy_org_committee_routes_remain_arg_compatible_post_only_and_redirect_as_specified(self) -> None:
+    def test_org_committee_routes_are_post_only_and_redirect_as_specified(self) -> None:
         gold = self._create_membership_type(code="gold", category_id="sponsorship", group_cn="sponsor-group")
         org = Organization.objects.create(name="Acme", representative="bob")
-        Membership.objects.create(
+        sponsorship = Membership.objects.create(
             target_organization=org,
             membership_type=gold,
             expires_at=timezone.now() + datetime.timedelta(days=30),
@@ -88,42 +88,36 @@ class Plan060WorkstreamBContractTests(TestCase):
                 return representative
             return None
 
-        legacy_set_expiry_args = reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"])
-        legacy_set_expiry_kwargs = reverse(
-            "organization-sponsorship-set-expiry",
-            kwargs={"organization_id": org.pk, "membership_type_code": "gold"},
-        )
-        self.assertEqual(legacy_set_expiry_args, legacy_set_expiry_kwargs)
-
-        legacy_terminate_args = reverse("organization-sponsorship-terminate", args=[org.pk, "gold"])
-        legacy_terminate_kwargs = reverse(
-            "organization-sponsorship-terminate",
-            kwargs={"organization_id": org.pk, "membership_type_code": "gold"},
-        )
-        self.assertEqual(legacy_terminate_args, legacy_terminate_kwargs)
+        update_url = reverse("membership-update", args=[sponsorship.pk])
+        terminate_url = reverse("membership-terminate", args=[sponsorship.pk])
 
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            get_expiry = self.client.get(legacy_set_expiry_args)
-            get_terminate = self.client.get(legacy_terminate_args)
+            get_expiry = self.client.get(update_url)
+            get_terminate = self.client.get(terminate_url)
         self.assertEqual(get_expiry.status_code, 404)
         self.assertEqual(get_terminate.status_code, 404)
 
         referer_target = "/organizations/?from=contract"
         with patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user):
-            set_expiry_response = self.client.post(
-                legacy_set_expiry_args,
+            update_response = self.client.post(
+                update_url,
                 data={"expires_on": (timezone.now() + datetime.timedelta(days=45)).date().isoformat()},
                 HTTP_REFERER=referer_target,
                 follow=False,
             )
-        self.assertEqual(set_expiry_response.status_code, 302)
-        self.assertEqual(set_expiry_response["Location"], referer_target)
+        self.assertEqual(update_response.status_code, 302)
+        self.assertEqual(update_response["Location"], referer_target)
 
         with (
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
-            terminate_response = self.client.post(legacy_terminate_args, data={"confirm": org.name}, follow=False)
+            # The expiry change replaced the row; the reloaded page carries its new id.
+            terminate_response = self.client.post(
+                reverse("membership-terminate", args=[Membership.objects.get(target_organization=org).pk]),
+                data={"confirm": org.name},
+                follow=False,
+            )
         self.assertEqual(terminate_response.status_code, 302)
         self.assertEqual(
             terminate_response["Location"],
@@ -137,7 +131,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             category_id="individual",
             group_cn="almalinux-individual",
         )
-        Membership.objects.create(
+        target = Membership.objects.create(
             target_username="alice",
             membership_type=membership_type,
             expires_at=timezone.now() + datetime.timedelta(days=30),
@@ -179,7 +173,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             response = self.client.post(
-                reverse("membership-set-expiry", args=["alice", "individual"]),
+                reverse("membership-update", args=[target.pk]),
                 data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
@@ -206,7 +200,7 @@ class Plan060WorkstreamBContractTests(TestCase):
     def test_org_expiry_before_today_utc_is_rejected_and_membership_remains_active(self) -> None:
         gold = self._create_membership_type(code="gold", category_id="sponsorship", group_cn="sponsor-group")
         org = Organization.objects.create(name="Acme", representative="bob")
-        Membership.objects.create(
+        target = Membership.objects.create(
             target_organization=org,
             membership_type=gold,
             expires_at=timezone.now() + datetime.timedelta(days=30),
@@ -244,7 +238,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             response = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                reverse("membership-update", args=[target.pk]),
                 data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
@@ -273,7 +267,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             category_id="individual",
             group_cn="almalinux-individual",
         )
-        Membership.objects.create(
+        target = Membership.objects.create(
             target_username="alice",
             membership_type=membership_type,
             expires_at=timezone.now() + datetime.timedelta(days=30),
@@ -310,7 +304,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             response = self.client.post(
-                reverse("membership-set-expiry", args=["alice", "individual"]),
+                reverse("membership-update", args=[target.pk]),
                 data={"expires_on": today_utc.isoformat()},
                 follow=False,
             )
@@ -338,7 +332,7 @@ class Plan060WorkstreamBContractTests(TestCase):
     def test_org_expiry_today_utc_is_accepted_and_does_not_force_termination(self) -> None:
         gold = self._create_membership_type(code="gold", category_id="sponsorship", group_cn="sponsor-group")
         org = Organization.objects.create(name="Acme", representative="bob")
-        Membership.objects.create(
+        target = Membership.objects.create(
             target_organization=org,
             membership_type=gold,
             expires_at=timezone.now() + datetime.timedelta(days=30),
@@ -371,7 +365,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             response = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                reverse("membership-update", args=[target.pk]),
                 data={"expires_on": today_utc.isoformat()},
                 follow=False,
             )
@@ -401,7 +395,7 @@ class Plan060WorkstreamBContractTests(TestCase):
             category_id="individual",
             group_cn="almalinux-individual",
         )
-        Membership.objects.create(
+        target = Membership.objects.create(
             target_username="alice",
             membership_type=membership_type,
             expires_at=timezone.now() + datetime.timedelta(days=30),
@@ -438,17 +432,17 @@ class Plan060WorkstreamBContractTests(TestCase):
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             first_expiry = self.client.post(
-                reverse("membership-set-expiry", args=["alice", "individual"]),
+                reverse("membership-update", args=[target.pk]),
                 data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
             second_expiry = self.client.post(
-                reverse("membership-set-expiry", args=["alice", "individual"]),
+                reverse("membership-update", args=[target.pk]),
                 data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
             retry_terminate = self.client.post(
-                reverse("membership-terminate", args=["alice", "individual"]),
+                reverse("membership-terminate", args=[target.pk]),
                 data={"confirm": "alice"},
                 follow=False,
             )
@@ -471,7 +465,7 @@ class Plan060WorkstreamBContractTests(TestCase):
     def test_org_rejected_past_expiry_then_terminate_is_idempotent_for_logs_and_freeipa_calls(self) -> None:
         gold = self._create_membership_type(code="gold", category_id="sponsorship", group_cn="sponsor-group")
         org = Organization.objects.create(name="Acme", representative="bob")
-        Membership.objects.create(
+        target = Membership.objects.create(
             target_organization=org,
             membership_type=gold,
             expires_at=timezone.now() + datetime.timedelta(days=30),
@@ -504,17 +498,17 @@ class Plan060WorkstreamBContractTests(TestCase):
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_from_group,
         ):
             first_expiry = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                reverse("membership-update", args=[target.pk]),
                 data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
             second_expiry = self.client.post(
-                reverse("organization-sponsorship-set-expiry", args=[org.pk, "gold"]),
+                reverse("membership-update", args=[target.pk]),
                 data={"expires_on": yesterday_utc.isoformat()},
                 follow=False,
             )
             retry_terminate = self.client.post(
-                reverse("organization-sponsorship-terminate", args=[org.pk, "gold"]),
+                reverse("membership-terminate", args=[target.pk]),
                 data={"confirm": org.name},
                 follow=False,
             )

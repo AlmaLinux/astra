@@ -16,6 +16,8 @@ cannot silently skip the other.
 from datetime import datetime
 from typing import Final
 
+from django.urls import reverse
+
 from core.models import MembershipType
 
 # Every capability flag a membership entry exposes. Both surfaces must emit all
@@ -25,6 +27,19 @@ MEMBERSHIP_ENTRY_CAPABILITY_KEYS: Final[frozenset[str]] = frozenset({
     "canRequestTierChange",
     "canManage",
 })
+
+
+def membership_action_url_templates() -> dict[str, str]:
+    """The committee's manage-membership endpoints, with ``__membership_id__`` for an entry's ``id``."""
+    sentinel = 123456789
+    return {
+        "membership_update_url_template": reverse("membership-update", args=[sentinel]).replace(
+            str(sentinel), "__membership_id__"
+        ),
+        "membership_terminate_url_template": reverse("membership-terminate", args=[sentinel]).replace(
+            str(sentinel), "__membership_id__"
+        ),
+    }
 
 
 def serialize_datetime(value: object) -> str | None:
@@ -58,6 +73,7 @@ def serialize_membership_type(membership_type: MembershipType | dict[str, object
 
 def serialize_membership_entry(
     *,
+    membership_id: int,
     membership_type: MembershipType | dict[str, object],
     created_at: object,
     expires_at: object,
@@ -99,6 +115,8 @@ def serialize_membership_entry(
     return {
         "kind": "membership",
         "key": f"membership-{code}",
+        # Identifies the membership to the committee's manage-membership endpoints.
+        "id": membership_id,
         "requestId": int(request_id) if request_id and (can_act or can_view) else None,
         "membershipType": membership_type_data,
         "createdAt": serialize_datetime(created_at),

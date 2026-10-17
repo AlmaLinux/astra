@@ -99,12 +99,12 @@ test("auth-profile-membership-operator sees the management modal and typed-name 
   await page.goto(authResetState.actors.regular03.profile_route);
 
   await expect(page.locator("[data-user-profile-membership-root]")).toBeVisible();
-  await page.getByRole("button", { name: /edit expiration/i }).click();
+  await page.getByRole("button", { name: /edit membership/i }).click();
 
   const modal = page.locator("#expiry-modal-1");
   await expect(modal).toBeVisible();
   await expect(modal.getByLabel("Expiration date")).toBeVisible();
-  await expect(modal.getByRole("button", { name: /save expiration/i })).toBeVisible();
+  await expect(modal.getByRole("button", { name: /save changes/i })).toBeVisible();
 
   await modal.getByRole("button", { name: /terminate membership/i }).click();
   const confirmInput = modal.getByLabel("Type the name to confirm");

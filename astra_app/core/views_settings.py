@@ -80,7 +80,7 @@ from core.ipa_user_attrs import (
 )
 from core.ipa_utils import bool_from_ipa, bool_to_ipa
 from core.logging_extras import current_exception_log_fields, exception_log_fields
-from core.membership import get_valid_memberships, remove_user_from_group
+from core.membership import get_valid_memberships, revoke_membership_group_access
 from core.models import (
     AccountDeletionRequest,
     IPAUser,
@@ -2046,7 +2046,7 @@ def settings_membership_terminate(request: HttpRequest, *, membership_type_code:
         messages.error(request, "Unable to verify your current password.")
         return redirect(settings_url(tab="membership"))
 
-    if not remove_user_from_group(username=username, group_cn=membership_type.group_cn):
+    if not revoke_membership_group_access(active_membership):
         messages.error(request, "Failed to remove your membership from FreeIPA.")
         return redirect(settings_url(tab="membership"))
 

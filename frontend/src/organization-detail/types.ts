@@ -17,6 +17,7 @@ export interface OrganizationDetailInvoice {
 export interface OrganizationDetailMembership {
   kind: "membership";
   key: string;
+  id: number;
   requestId: number | null;
   membershipType: OrganizationDetailMembershipType;
   createdAt: string | null;
@@ -98,10 +99,9 @@ export interface OrganizationDetailBootstrap {
   membershipRequestDetailTemplate: string;
   membershipRequestUrl: string;
   membershipHistoryUrl: string;
-  sponsorshipSetExpiryUrlTemplate: string;
-  sponsorshipTerminateUrlTemplate: string;
+  membershipUpdateUrlTemplate: string;
+  membershipTerminateUrlTemplate: string;
   sponsorshipInvoiceRegenerateUrlTemplate: string;
-  sponsorshipSetDuesUrlTemplate: string;
   csrfToken: string;
   nextUrl: string;
   expiryMinDate: string;
@@ -119,10 +119,9 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
   const membershipRequestDetailTemplate = String(root.dataset.organizationDetailMembershipRequestDetailTemplate || "").trim();
   const membershipRequestUrl = String(root.dataset.organizationDetailMembershipRequestUrl || "").trim();
   const membershipHistoryUrl = String(root.dataset.organizationDetailMembershipHistoryUrl || "").trim();
-  const sponsorshipSetExpiryUrlTemplate = String(root.dataset.organizationDetailSponsorshipSetExpiryUrlTemplate || "").trim();
-  const sponsorshipTerminateUrlTemplate = String(root.dataset.organizationDetailSponsorshipTerminateUrlTemplate || "").trim();
+  const membershipUpdateUrlTemplate = String(root.dataset.organizationDetailMembershipUpdateUrlTemplate || "").trim();
+  const membershipTerminateUrlTemplate = String(root.dataset.organizationDetailMembershipTerminateUrlTemplate || "").trim();
   const sponsorshipInvoiceRegenerateUrlTemplate = String(root.dataset.organizationDetailSponsorshipInvoiceRegenerateUrlTemplate || "").trim();
-  const sponsorshipSetDuesUrlTemplate = String(root.dataset.organizationDetailSponsorshipSetDuesUrlTemplate || "").trim();
   const csrfToken = String(root.dataset.organizationDetailCsrfToken || "").trim();
   const nextUrl = String(root.dataset.organizationDetailNextUrl || "").trim();
   const expiryMinDate = String(root.dataset.organizationDetailExpiryMinDate || "").trim();
@@ -133,10 +132,9 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
     || !membershipRequestDetailTemplate
     || !membershipRequestUrl
     || !membershipHistoryUrl
-    || !sponsorshipSetExpiryUrlTemplate
-    || !sponsorshipTerminateUrlTemplate
+    || !membershipUpdateUrlTemplate
+    || !membershipTerminateUrlTemplate
     || !sponsorshipInvoiceRegenerateUrlTemplate
-    || !sponsorshipSetDuesUrlTemplate
     || !csrfToken
     || !nextUrl
     || !expiryMinDate
@@ -169,11 +167,9 @@ export function readOrganizationDetailBootstrap(root: HTMLElement): Organization
     membershipRequestDetailTemplate,
     membershipRequestUrl,
     membershipHistoryUrl,
-    sponsorshipSetExpiryUrlTemplate,
-    sponsorshipTerminateUrlTemplate,
-    sponsorshipInvoiceRegenerateUrlTemplate,
-    sponsorshipSetDuesUrlTemplate,
-    csrfToken,
+    membershipUpdateUrlTemplate,
+    membershipTerminateUrlTemplate,
+    sponsorshipInvoiceRegenerateUrlTemplate,    csrfToken,
     nextUrl,
     expiryMinDate,
     userProfileUrlTemplate,

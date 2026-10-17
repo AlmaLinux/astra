@@ -42,11 +42,11 @@ class UserProfileVueTests(TestCase):
         self.assertContains(response, 'data-user-profile-membership-request-detail-url-template="/membership/request/__request_id__/"')
         self.assertContains(
             response,
-            'data-user-profile-membership-set-expiry-url-template="/membership/manage/__username__/__membership_type_code__/expiry/"',
+            'data-user-profile-membership-update-url-template="/membership/__membership_id__/update/"',
         )
         self.assertContains(
             response,
-            'data-user-profile-membership-terminate-url-template="/membership/manage/__username__/__membership_type_code__/terminate/"',
+            'data-user-profile-membership-terminate-url-template="/membership/__membership_id__/terminate/"',
         )
         self.assertContains(response, 'data-user-profile-csrf-token="')
         self.assertContains(response, f'data-user-profile-next-url="/user/{username}/"')
@@ -204,6 +204,7 @@ class UserProfileVueTests(TestCase):
             "membership_can_request_any": True,
             "memberships": [
                 {
+                    "membership_id": 42,
                     "membership_type": membership_type_data,
                     "created_at": "2024-01-15T12:00:00+00:00",
                     "expires_at": "2026-04-30T00:00:00+00:00",
@@ -258,6 +259,7 @@ class UserProfileVueTests(TestCase):
         self.assertEqual(payload["groups"]["groups"][0]["role"], "sponsor")
         self.assertNotIn("label", payload["accountSetup"]["requiredActions"][0])
         self.assertNotIn("urlLabel", payload["accountSetup"]["requiredActions"][0])
+        self.assertEqual(payload["membership"]["entries"][0]["id"], 42)
         self.assertEqual(payload["membership"]["entries"][0]["membershipType"]["code"], "individual")
         self.assertEqual(payload["membership"]["entries"][0]["createdAt"], "2024-01-15T12:00:00+00:00")
         self.assertEqual(payload["membership"]["entries"][0]["expiresAt"], "2026-04-30T00:00:00+00:00")

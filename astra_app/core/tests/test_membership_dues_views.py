@@ -1,3 +1,4 @@
+import datetime
 from unittest.mock import patch
 
 from django.contrib.messages import get_messages
@@ -6,7 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.freeipa.user import FreeIPAUser
-from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, MembershipRequest, Organization
+from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, MembershipRequest, Note, Organization
 from core.permissions import (
     ASTRA_ADD_MEMBERSHIP,
     ASTRA_CHANGE_MEMBERSHIP,
@@ -44,34 +45,44 @@ class MembershipDuesViewTests(MembershipDuesTestMixin, TestCase):
         session["_freeipa_username"] = username
         session.save()
 
-    def _set_dues(self, **data):
+    def _membership(self) -> Membership:
+        return Membership.objects.get(target_organization=self.organization)
+
+    def _save(self, **data):
+        """Submit the manage membership dialog, by default keeping the current expiration date."""
+        data.setdefault("expires_on", f"{self._membership().expires_at.astimezone(datetime.UTC):%Y-%m-%d}")
         return self.client.post(
-            reverse("organization-sponsorship-set-dues", args=[self.organization.pk, "gold"]),
+            reverse("membership-update", args=[self._membership().pk]),
             data=data,
         )
 
     def _messages(self, response) -> list[str]:
         return [str(message) for message in get_messages(response.wsgi_request)]
 
+    def _logs(self, action: MembershipLog.Action) -> int:
+        return MembershipLog.objects.filter(action=action, actor_username="committee").count()
+
     def test_committee_sets_dues_from_the_manage_membership_dialog(self) -> None:
-        self._active_gold()
+        membership = self._active_gold()
         self._login("committee")
 
-        response = self._set_dues(dues_usd="0", dues_reason="Hosts our CI runners")
+        response = self._save(dues_usd="0", dues_reason="Hosts our CI runners")
 
         self.assertRedirects(response, reverse("organization-detail", args=[self.organization.pk]), fetch_redirect_response=False)
-        self.assertEqual(Membership.objects.get(target_organization=self.organization).dues_usd, 0)
-        self.assertEqual(MembershipLog.objects.filter(action=MembershipLog.Action.dues_changed, actor_username="committee").count(), 1)
-        self.assertIn("Sponsorship dues updated.", self._messages(response))
+        self.assertEqual(self._membership().dues_usd, 0)
+        self.assertEqual(self._membership().expires_at, membership.expires_at)
+        self.assertEqual(self._logs(MembershipLog.Action.dues_changed), 1)
+        self.assertEqual(self._logs(MembershipLog.Action.expiry_changed), 0)
+        self.assertIn("Sponsorship updated.", self._messages(response))
 
     def test_an_empty_amount_restores_the_standard_price(self) -> None:
         self._active_gold(dues_usd=5000)
         self._login("committee")
 
-        response = self._set_dues(dues_usd="", dues_reason="In-kind agreement ended")
+        response = self._save(dues_usd="", dues_reason="In-kind agreement ended")
 
-        self.assertIn("Sponsorship dues updated.", self._messages(response))
-        self.assertIsNone(Membership.objects.get(target_organization=self.organization).dues_usd)
+        self.assertIn("Sponsorship updated.", self._messages(response))
+        self.assertIsNone(self._membership().dues_usd)
         [note] = self._dues_notes()
         self.assertEqual((note.action["old_dues_usd"], note.action["new_dues_usd"]), (5000, 20000))
 
@@ -79,12 +90,18 @@ class MembershipDuesViewTests(MembershipDuesTestMixin, TestCase):
         self._active_gold()
         self._login("committee")
 
-        for data in ({"dues_usd": "0", "dues_reason": ""}, {"dues_usd": "25000", "dues_reason": "x"}, {"dues_usd": "abc", "dues_reason": "x"}):
+        for data in (
+            {"dues_usd": "0", "dues_reason": ""},
+            # The expiration change's reason doesn't explain a dues change.
+            {"dues_usd": "0", "expiration_reason": "Paid late"},
+            {"dues_usd": "25000", "dues_reason": "x"},
+            {"dues_usd": "abc", "dues_reason": "x"},
+        ):
             with self.subTest(data=data):
-                response = self._set_dues(**data)
+                response = self._save(**data)
                 self.assertEqual(response.status_code, 302)
                 self.assertTrue(self._messages(response))
-                self.assertIsNone(Membership.objects.get(target_organization=self.organization).dues_usd)
+                self.assertIsNone(self._membership().dues_usd)
 
     def test_only_members_who_can_edit_expiry_can_change_dues(self) -> None:
         self._active_gold()
@@ -92,8 +109,69 @@ class MembershipDuesViewTests(MembershipDuesTestMixin, TestCase):
         for username in ("reviewer", "rep1"):
             with self.subTest(username=username):
                 self._login(username)
-                self._set_dues(dues_usd="0", dues_reason="Trying my luck")
-                self.assertIsNone(Membership.objects.get(target_organization=self.organization).dues_usd)
+                self._save(dues_usd="0", dues_reason="Trying my luck")
+                self.assertIsNone(self._membership().dues_usd)
+
+    def test_expiry_and_dues_are_saved_together_each_with_its_own_reason(self) -> None:
+        self._active_gold()
+        self._login("committee")
+
+        response = self._save(
+            expires_on="2031-01-31", expiration_reason="Paid late", dues_usd="5000", dues_reason="New in-kind agreement"
+        )
+
+        self.assertIn("Sponsorship updated.", self._messages(response))
+        membership = self._membership()
+        self.assertEqual(membership.dues_usd, 5000)
+        self.assertEqual(membership.expires_at, datetime.datetime(2031, 1, 31, 23, 59, 59, tzinfo=datetime.UTC))
+        self.assertEqual(self._logs(MembershipLog.Action.dues_changed), 1)
+        self.assertEqual(self._logs(MembershipLog.Action.expiry_changed), 1)
+        self.assertEqual(
+            {note.action["type"]: note.content for note in Note.objects.filter(action__type__in=["dues_changed", "expiry_changed"])},
+            {"dues_changed": "New in-kind agreement", "expiry_changed": "Paid late"},
+        )
+
+    def test_a_dues_change_reason_is_not_recorded_on_the_expiry_change(self) -> None:
+        self._active_gold()
+        self._login("committee")
+
+        self._save(expires_on="2031-01-31", dues_usd="5000", dues_reason="New in-kind agreement")
+
+        [note] = Note.objects.filter(action__type="expiry_changed")
+        self.assertIsNone(note.content)
+
+    def test_an_expiry_change_keeps_the_sponsor_dues(self) -> None:
+        self._active_gold(dues_usd=5000)
+        self._login("committee")
+
+        # The dialog posts the unchanged amount, and no reason is needed without a dues change.
+        self._save(expires_on="2031-01-31", dues_usd="5000")
+
+        membership = self._membership()
+        self.assertEqual(membership.dues_usd, 5000)
+        self.assertEqual(membership.expires_at.date(), datetime.date(2031, 1, 31))
+        self.assertEqual(self._logs(MembershipLog.Action.dues_changed), 0)
+
+    def test_a_rejected_dues_change_also_discards_the_expiry_change(self) -> None:
+        membership = self._active_gold()
+        self._login("committee")
+
+        response = self._save(expires_on="2031-01-31", dues_usd="0", dues_reason="")
+
+        self.assertTrue(self._messages(response))
+        self.assertEqual(self._membership().expires_at, membership.expires_at)
+        self.assertIsNone(self._membership().dues_usd)
+        self.assertEqual(self._logs(MembershipLog.Action.expiry_changed), 0)
+
+    def test_saving_without_changes_records_nothing(self) -> None:
+        self._active_gold(dues_usd=5000)
+        self._login("committee")
+        logs_before = MembershipLog.objects.count()
+
+        response = self._save(dues_usd="5000")
+
+        self.assertIn("No changes to save.", self._messages(response))
+        self.assertEqual(MembershipLog.objects.count(), logs_before)
 
     def test_approve_api_accepts_committee_dues_with_a_reason(self) -> None:
         self._login("committee")
@@ -207,7 +285,7 @@ class MembershipDuesViewTests(MembershipDuesTestMixin, TestCase):
         self.assertEqual(entry["duesUsd"], 5000)
         self.assertFalse(entry["canManage"])
 
-        self._set_dues(dues_usd="0", dues_reason="We deserve it")
+        self._save(dues_usd="0", dues_reason="We deserve it")
         approve = self.client.post(
             reverse("api-membership-request-approve", args=[renewal.pk]),
             data={"dues_usd": "0", "dues_reason": "We deserve it"},

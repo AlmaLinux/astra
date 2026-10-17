@@ -336,8 +336,8 @@ def sync_organization_representative_membership_groups(
 
     if normalized_old_group_cn:
         try:
-            old_outcome = remove_organization_representative_from_group_if_present(
-                representative_username=normalized_representative,
+            old_outcome = remove_user_from_group_if_present(
+                username=normalized_representative,
                 group_cn=normalized_old_group_cn,
                 caller_mode=caller_mode,
                 missing_user_policy=missing_user_policy,
@@ -446,20 +446,25 @@ def rollback_organization_representative_groups(
             )
 
 
-def remove_organization_representative_from_group_if_present(
+def remove_user_from_group_if_present(
     *,
-    representative_username: str,
+    username: str,
     group_cn: str,
     caller_mode: FreeIPACallerMode,
     missing_user_policy: FreeIPAMissingUserPolicy,
 ) -> FreeIPAGroupRemovalOutcome:
-    normalized_username = str(representative_username or "").strip()
+    """Remove *username* from *group_cn* if they are in it.
+
+    Only representative sync uses the raising caller modes, so their failures are
+    reported as ``FreeIPARepresentativeSyncError``.
+    """
+    normalized_username = str(username or "").strip()
     normalized_group_cn = str(group_cn or "").strip()
     if not normalized_username or not normalized_group_cn:
         return FreeIPAGroupRemovalOutcome.noop_blank_input
 
-    representative = FreeIPAUser.get(normalized_username, respect_privacy=False)
-    if representative is None:
+    user = FreeIPAUser.get(normalized_username, respect_privacy=False)
+    if user is None:
         outcome = FreeIPAGroupRemovalOutcome.user_not_found
         if (
             missing_user_policy == FreeIPAMissingUserPolicy.treat_as_error
@@ -475,17 +480,17 @@ def remove_organization_representative_from_group_if_present(
                     ),
                     failed_group_cns=(normalized_group_cn,),
                     failure_details={
-                        normalized_group_cn: f"representative not found in FreeIPA: {normalized_username}",
+                        normalized_group_cn: f"user not found in FreeIPA: {normalized_username}",
                     },
                 )
             )
         return outcome
 
-    if normalized_group_cn not in representative.groups_list:
+    if normalized_group_cn not in user.groups_list:
         return FreeIPAGroupRemovalOutcome.already_not_member
 
     try:
-        representative.remove_from_group(group_name=normalized_group_cn)
+        user.remove_from_group(group_name=normalized_group_cn)
     except Exception as exc:
         if _should_raise_for_failure(caller_mode):
             raise FreeIPARepresentativeSyncError(
@@ -501,7 +506,7 @@ def remove_organization_representative_from_group_if_present(
                 )
             ) from exc
         logger.exception(
-            "remove_organization_representative_from_group_if_present failed username=%s group_cn=%s",
+            "remove_user_from_group_if_present failed username=%s group_cn=%s",
             normalized_username,
             normalized_group_cn,
             extra=current_exception_log_fields(),
@@ -509,6 +514,32 @@ def remove_organization_representative_from_group_if_present(
         return FreeIPAGroupRemovalOutcome.failed
 
     return FreeIPAGroupRemovalOutcome.removed
+
+
+def revoke_membership_group_access(membership: Membership) -> bool:
+    """Remove whoever holds *membership* in FreeIPA from its tier's group: the member, or the
+    organization's representative. False only when FreeIPA failed.
+
+    Nothing to revoke (a tier without a group, a holder not in FreeIPA or already out of the
+    group) is a success, so the membership can still be terminated.
+    """
+    organization = membership.target_organization
+    holder = organization.representative if organization is not None else membership.target_username
+    outcome = remove_user_from_group_if_present(
+        username=holder,
+        group_cn=membership.membership_type.group_cn,
+        caller_mode=FreeIPACallerMode.best_effort,
+        missing_user_policy=FreeIPAMissingUserPolicy.treat_as_noop,
+    )
+    if outcome == FreeIPAGroupRemovalOutcome.failed:
+        logger.error(
+            "revoke_membership_group_access failed membership_id=%s holder=%r group_cn=%r",
+            membership.pk,
+            holder,
+            membership.membership_type.group_cn,
+        )
+        return False
+    return True
 
 
 def get_valid_memberships(

@@ -157,6 +157,13 @@ class MembershipPayloadContractTests(TestCase):
             },
         )
 
+    def test_both_surfaces_identify_the_membership_for_committee_actions(self) -> None:
+        organization_entry = self._organization_membership_entry(username="bob")
+        profile_entry = self._user_profile_membership_entry(username="carol")
+
+        self.assertEqual(organization_entry["id"], Membership.objects.get(target_organization__name="Acme").pk)
+        self.assertEqual(profile_entry["id"], Membership.objects.get(target_username="carol").pk)
+
     def test_both_surfaces_emit_the_same_membership_entry_keys(self) -> None:
         organization_entry = self._organization_membership_entry(username="bob")
         profile_entry = self._user_profile_membership_entry(username="carol")
@@ -181,6 +188,7 @@ class MembershipPayloadContractTests(TestCase):
         """Guard the declaration itself: a new `can*` flag must join the frozenset."""
 
         entry = serialize_membership_entry(
+            membership_id=1,
             membership_type=MembershipType.objects.get(code="gold"),
             created_at=timezone.now(),
             expires_at=timezone.now(),

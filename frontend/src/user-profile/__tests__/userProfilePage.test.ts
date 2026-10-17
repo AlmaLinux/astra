@@ -25,8 +25,8 @@ const bootstrap: UserProfileBootstrap = {
   membershipRequestUrl: "/membership/request/",
   membershipRequestDetailUrlTemplate: "/membership/request/__request_id__/",
   membershipManagement: {
-    expiryUrlTemplate: "/membership/manage/__username__/__membership_type_code__/expiry/",
-    terminateUrlTemplate: "/membership/manage/__username__/__membership_type_code__/terminate/",
+    updateUrlTemplate: "/membership/__membership_id__/update/",
+    terminateUrlTemplate: "/membership/__membership_id__/terminate/",
     csrfToken: "csrf-token",
     nextUrl: "/user/alice/",
   },
