@@ -2,6 +2,7 @@ import datetime
 from typing import Any
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -120,6 +121,50 @@ class MembershipSideEffectsTests(TestCase):
                 )
 
                 self.assertEqual(Membership.objects.get(**target).created_at, self._day(400))
+
+    def test_only_an_approval_grants_or_changes_a_membership_type(self) -> None:
+        for name, target, held_type_id, other_type_id in self.targets:
+            for action in (MembershipLog.Action.expiry_changed, MembershipLog.Action.dues_changed):
+                with self.subTest(target=name, action=action):
+                    Membership.objects.filter(**target).delete()
+                    self._log(
+                        target, at=self.start, action=MembershipLog.Action.approved,
+                        membership_type_id=held_type_id, expires_at=self._day(365),
+                    )
+                    held = Membership.objects.get(**target)
+
+                    with self.assertRaises(ValidationError), transaction.atomic():
+                        self._log(
+                            target, at=self._day(10), action=action,
+                            membership_type_id=other_type_id, expires_at=self._day(500),
+                        )
+
+                    current = Membership.objects.get(**target)
+                    self.assertEqual((current.pk, current.membership_type_id, current.expires_at), (held.pk, held_type_id, self._day(365)))
+
+                    Membership.objects.filter(**target).delete()
+                    with self.assertRaises(ValidationError), transaction.atomic():
+                        self._log(
+                            target, at=self._day(10), action=action,
+                            membership_type_id=held_type_id, expires_at=self._day(500),
+                        )
+                    self.assertFalse(Membership.objects.filter(**target).exists())
+
+    def test_expiry_change_for_a_type_not_held_is_rejected_and_leaves_no_log(self) -> None:
+        self._log(
+            {"target_username": "alice"}, at=self.start, action=MembershipLog.Action.approved,
+            membership_type_id="individual", expires_at=self._day(365),
+        )
+
+        with self.assertRaises(ValidationError):
+            MembershipLog.create_for_expiry_change(
+                actor_username="committee",
+                membership_type=MembershipType.objects.get(code="supporter"),
+                expires_at=FAR_FUTURE,
+                target_username="alice",
+            )
+
+        self.assertFalse(MembershipLog.objects.filter(action=MembershipLog.Action.expiry_changed).exists())
 
     def test_users_hold_at_most_one_membership_per_category(self) -> None:
         membership = Membership.objects.create(target_username="alice", membership_type_id="individual", expires_at=FAR_FUTURE)

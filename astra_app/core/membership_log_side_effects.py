@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 from typing import TYPE_CHECKING
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
 if TYPE_CHECKING:
@@ -60,8 +61,8 @@ def resolve_term_start_at(
 def apply_membership_log_side_effects(*, log: MembershipLog) -> None:
     """Mirror a log entry onto the target's membership in the log's category.
 
-    A type change replaces the row; any other change edits it in place. Either way the
-    term start carries over while the membership is uninterrupted.
+    An approval of another type replaces the row; any other change edits it in place.
+    Either way the term start carries over while the membership is uninterrupted.
     """
     from core.models import Membership, MembershipLog, MembershipTypeCategory
 
@@ -88,6 +89,12 @@ def apply_membership_log_side_effects(*, log: MembershipLog) -> None:
             return
 
         existing = category_memberships.first()
+        # Only an approval grants a membership or changes its type; other actions edit the held one.
+        if log.action != MembershipLog.Action.approved and (
+            existing is None or existing.membership_type_id != log.membership_type_id
+        ):
+            raise ValidationError(f"There is no {log.membership_type.name} membership to change.")
+
         start_at = resolve_term_start_at(
             log=log,
             existing=existing,

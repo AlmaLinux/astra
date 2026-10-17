@@ -109,8 +109,13 @@ class MembershipStateTableTransactionTests(TransactionTestCase):
         organization = Organization.objects.create(name="Acme Org", representative="acme-rep")
         expires_at = timezone.now() + datetime.timedelta(days=45)
 
-        # Regression guard: this call runs side effects and must not require the
+        # Regression guard: these calls run side effects and must not require the
         # caller to manage transaction.atomic for organization targets.
+        MembershipLog.create_for_approval(
+            actor_username="reviewer",
+            membership_type=membership_type,
+            target_organization=organization,
+        )
         MembershipLog.create_for_expiry_change(
             actor_username="reviewer",
             membership_type=membership_type,
