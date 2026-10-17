@@ -18,7 +18,7 @@ _SNAPSHOT_USER_ATTRS = (
 
 
 def normalize_user_search_query(query: str) -> str:
-    return " ".join(str(query or "").strip().lower().split())
+    return " ".join(query.lower().split())
 
 
 def user_matches_search_query(
@@ -30,11 +30,10 @@ def user_matches_search_query(
     if not normalized_query:
         return False
 
-    normalized_username = str(username or "").strip().lower()
-    if normalized_query in normalized_username:
+    if normalized_query in username.lower():
         return True
 
-    normalized_full_name = str(full_name or "").strip().lower()
+    normalized_full_name = full_name.lower()
     if normalized_query in normalized_full_name:
         return True
 
@@ -151,7 +150,7 @@ def search_freeipa_users(
     if not normalized_query:
         return []
 
-    excluded = {str(username).strip() for username in (exclude_usernames or []) if str(username).strip()}
+    excluded = {username for username in (exclude_usernames or []) if username}
     fetch_limit = limit + len(excluded)
     if fetch_limit <= 0:
         return []
@@ -217,8 +216,8 @@ def search_freeipa_users(
         user = FreeIPAUser(username, user_data)
         if not user_matches_search_query(
             normalized_query=normalized_query,
-            username=str(user.username),
-            full_name=str(user.full_name),
+            username=user.username,
+            full_name=user.full_name,
         ):
             continue
 

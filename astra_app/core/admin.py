@@ -237,15 +237,13 @@ class MattermostWebhookEndpointAdminForm(forms.ModelForm):
             )
 
     def clean_events(self) -> list[str]:
-        raw = self.cleaned_data.get("events") or []
-        cleaned = [str(item).strip() for item in raw if str(item).strip()]
-        return list(dict.fromkeys(cleaned))
+        return list(dict.fromkeys(self.cleaned_data["events"]))
 
     @override
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean()
 
-        priority_level = str(cleaned.get("priority_level") or "").strip()
+        priority_level = cleaned.get("priority_level", "")
         requested_ack = bool(cleaned.get("priority_requested_ack"))
         persistent_notifications = bool(cleaned.get("priority_persistent_notifications"))
 
@@ -678,7 +676,7 @@ def _override_post_office_email_admin() -> None:
                 if isinstance(value, str):
                     recipient_count += len([item for item in value.split(",") if item.strip()])
                 elif value:
-                    recipient_count += len([str(item).strip() for item in value if str(item).strip()])
+                    recipient_count += len(value)
 
             if recipient_count > 1:
                 return format_html(
@@ -953,14 +951,14 @@ class IPAUserBaseForm(FreeIPAFormMixin, FasProfileCleanMixin, forms.ModelForm):
 
                 # FAS attributes (only when editing an existing FreeIPA user).
                 self.initial.setdefault("fasPronoun", _value_to_csv(_data_get(data, "fasPronoun", [])))
-                self.initial.setdefault("fasLocale", _normalize_str(_first(data, "fasLocale", "")) or "")
-                self.initial.setdefault("fasTimezone", _normalize_str(_first(data, "fasTimezone", "")) or "")
+                self.initial.setdefault("fasLocale", _normalize_str(_first(data, "fasLocale", "")))
+                self.initial.setdefault("fasTimezone", _normalize_str(_first(data, "fasTimezone", "")))
                 self.initial.setdefault("fasWebsiteUrl", _value_to_text(_data_get(data, "fasWebsiteUrl", [])))
                 self.initial.setdefault("fasRssUrl", _value_to_text(_data_get(data, "fasRssUrl", [])))
                 self.initial.setdefault("fasIRCNick", _value_to_text(_data_get(data, "fasIRCNick", [])))
-                self.initial.setdefault("fasGitHubUsername", _normalize_str(_first(data, "fasGitHubUsername", "")) or "")
-                self.initial.setdefault("fasGitLabUsername", _normalize_str(_first(data, "fasGitLabUsername", "")) or "")
-                self.initial.setdefault("fasRHBZEmail", _normalize_str(_first(data, "fasRHBZEmail", "")) or "")
+                self.initial.setdefault("fasGitHubUsername", _normalize_str(_first(data, "fasGitHubUsername", "")))
+                self.initial.setdefault("fasGitLabUsername", _normalize_str(_first(data, "fasGitLabUsername", "")))
+                self.initial.setdefault("fasRHBZEmail", _normalize_str(_first(data, "fasRHBZEmail", "")))
                 self.initial.setdefault("fasGPGKeyId", _value_to_text(_data_get(data, "fasGPGKeyId", [])))
                 self.initial.setdefault("fasIsPrivate", bool(freeipa.fas_is_private))
 
@@ -1815,9 +1813,8 @@ class IPAGroupAdmin(FreeIPAModelAdmin):
 
     @override
     def delete_model(self, request, obj) -> None:
-        group_cn = str(obj.cn or obj.pk or "").strip()
-        if group_cn and group_cn in protected_freeipa_group_cns():
-            raise FreeIPAOperationFailed(f"Group {group_cn!r} is protected and cannot be deleted")
+        if obj.cn in protected_freeipa_group_cns():
+            raise FreeIPAOperationFailed(f"Group {obj.cn!r} is protected and cannot be deleted")
         return super().delete_model(request, obj)
 
 @admin.register(IPAFASAgreement)
@@ -1902,9 +1899,7 @@ class MembershipTypeAdmin(admin.ModelAdmin):
 
             group_names = _freeipa_group_names()
 
-            current = (self.initial.get("group_cn") or "").strip()
-            if not current and self.instance and self.instance.group_cn:
-                current = self.instance.group_cn
+            current = self.initial.get("group_cn") or self.instance.group_cn
             if current and current not in group_names:
                 group_names.append(current)
 
@@ -2009,9 +2004,6 @@ class MembershipAdminForm(forms.ModelForm):
             }
         )
 
-    def clean_target_username(self) -> str:
-        return str(self.cleaned_data.get("target_username") or "").strip()
-
     @staticmethod
     def _starts_at_from_date(value: datetime.date) -> datetime.datetime:
         return datetime.datetime.combine(value, datetime.time(0, 0, 0), tzinfo=datetime.UTC)
@@ -2030,8 +2022,8 @@ class MembershipAdminForm(forms.ModelForm):
     def clean(self):
         cleaned_data = super().clean()
 
-        target_kind = str(cleaned_data.get("target_kind") or "").strip()
-        target_username = str(cleaned_data.get("target_username") or "").strip()
+        target_kind = cleaned_data.get("target_kind", "")
+        target_username = cleaned_data.get("target_username", "")
         target_organization = cleaned_data.get("target_organization")
         membership_type = cleaned_data.get("membership_type")
         starts_on = cleaned_data.get("starts_on")
@@ -2520,8 +2512,7 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
 
     @admin.display(description="Blockers")
     def blockers_summary(self, obj: AccountDeletionRequest) -> str:
-        blocker_codes = [str(code).strip() for code in obj.blocker_codes if str(code).strip()]
-        return ", ".join(blocker_codes) or "-"
+        return ", ".join(obj.blocker_codes) or "-"
 
     @override
     def has_add_permission(self, request: HttpRequest) -> bool:
@@ -2758,7 +2749,7 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
                 ).exists()
                 if not approval_notification_already_queued:
                     recipient_context = user_email_delivery_context(username=deletion_request.username)
-                    recipient_email = str(recipient_context["email"] or "").strip()
+                    recipient_email = recipient_context["email"]
                     if not recipient_email:
                         raise RuntimeError(
                             "Account deletion approval email could not be queued because no email address "
@@ -3770,9 +3761,7 @@ class OrganizationAdmin(admin.ModelAdmin):
             )
             usernames = [u for u in usernames if u not in taken_representatives]
 
-            current = str(self.initial.get("representative") or "").strip()
-            if not current and self.instance:
-                current = self.instance.representative
+            current = self.initial.get("representative") or self.instance.representative
 
             if current and current not in usernames:
                 usernames.append(current)
@@ -3797,7 +3786,7 @@ class OrganizationAdmin(admin.ModelAdmin):
                 return cleaned_data
 
             current_representative = self.instance.representative
-            new_representative = str(cleaned_data.get("representative") or "").strip()
+            new_representative = cleaned_data.get("representative", "")
             if current_representative == new_representative:
                 return cleaned_data
             try:
@@ -3963,7 +3952,7 @@ class OrganizationAdmin(admin.ModelAdmin):
 
         form._pending_representative_transition = {
             "organization_id": obj.pk,
-            "new_representative": str(form.cleaned_data.get("representative") or "").strip(),
+            "new_representative": form.cleaned_data["representative"],
         }
 
         update_fields = [field_name for field_name in form.changed_data if field_name != "representative"]
@@ -4038,14 +4027,12 @@ class FreeIPAPermissionGrantAdmin(admin.ModelAdmin):
             selected_type = (
                 str(raw_selected_type).strip()
                 if raw_selected_type is not None
-                else str(self.initial.get("principal_type") or self.instance.principal_type or "").strip()
+                else self.initial.get("principal_type") or self.instance.principal_type
             )
             if not selected_type:
                 selected_type = FreeIPAPermissionGrant.PrincipalType.user
 
-            current = str(self.initial.get("principal_name") or "").strip()
-            if not current and self.instance and self.instance.principal_name:
-                current = self.instance.principal_name
+            current = self.initial.get("principal_name") or self.instance.principal_name
 
             if selected_type == FreeIPAPermissionGrant.PrincipalType.group:
                 principal_names = _freeipa_group_names()

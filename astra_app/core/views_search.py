@@ -29,9 +29,9 @@ def global_search(request: HttpRequest) -> JsonResponse:
         # Some tests patch FreeIPAGroup objects with lightweight stubs that may
         # omit membership attributes.
         if hasattr(g, "members"):
-            members = [str(member).strip() for member in g.members if str(member).strip()]
+            members = g.members
         if hasattr(g, "sponsors"):
-            sponsors = [str(sponsor).strip() for sponsor in g.sponsors if str(sponsor).strip()]
+            sponsors = g.sponsors
 
         group_member_match = bool(matched_usernames & (set(members) | set(sponsors)))
         name_match = q_lower in g.cn.lower()

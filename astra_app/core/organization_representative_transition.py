@@ -35,7 +35,6 @@ def apply_organization_representative_transition(
     caller_label: str,
     persist_changes: Callable[[Organization], None],
 ) -> OrganizationRepresentativeTransitionResult:
-    normalized_new_representative = str(new_representative or "").strip()
     old_representative = ""
     targeted_group_cns_tuple: tuple[str, ...] = ()
     had_active_groups = False
@@ -58,15 +57,15 @@ def apply_organization_representative_transition(
                 targeted_group_cns.append(group_cn)
             targeted_group_cns_tuple = tuple(targeted_group_cns)
             had_active_groups = bool(targeted_group_cns_tuple)
-            changed = old_representative != normalized_new_representative
+            changed = old_representative != new_representative
 
-            locked_organization.representative = normalized_new_representative
+            locked_organization.representative = new_representative
 
             if changed and had_active_groups:
                 try:
                     sync_result = sync_organization_representative_groups(
                         old_representative=old_representative,
-                        new_representative=normalized_new_representative,
+                        new_representative=new_representative,
                         group_cns=targeted_group_cns_tuple,
                         caller_mode=FreeIPACallerMode.raise_on_error,
                         missing_user_policy=FreeIPAMissingUserPolicy.treat_as_error,
@@ -74,7 +73,7 @@ def apply_organization_representative_transition(
                 except FreeIPARepresentativeSyncError as exc:
                     rollback_organization_representative_groups(
                         old_representative=old_representative,
-                        new_representative=normalized_new_representative,
+                        new_representative=new_representative,
                         journal=exc.result.journal,
                     )
                     logger.warning(
@@ -104,7 +103,7 @@ def apply_organization_representative_transition(
             result = OrganizationRepresentativeTransitionResult(
                 organization=locked_organization,
                 old_representative=old_representative,
-                new_representative=normalized_new_representative,
+                new_representative=new_representative,
                 changed=changed,
                 had_active_groups=had_active_groups,
                 targeted_group_cns=targeted_group_cns_tuple,
@@ -117,7 +116,7 @@ def apply_organization_representative_transition(
         if changed and sync_journal is not None:
             rollback_organization_representative_groups(
                 old_representative=old_representative,
-                new_representative=normalized_new_representative,
+                new_representative=new_representative,
                 journal=sync_journal,
             )
             rollback_result = "attempted"

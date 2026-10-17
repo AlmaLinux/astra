@@ -58,12 +58,11 @@ class Command(BaseCommand):
         embargoed_members: list[dict[str, str]] = []
         seen_usernames: set[str] = set()
         for username in memberships:
-            uname = str(username or "").strip()
-            if not uname or uname in seen_usernames:
+            if not username or username in seen_usernames:
                 continue
-            seen_usernames.add(uname)
+            seen_usernames.add(username)
 
-            user = all_freeipa_users.get(uname)
+            user = all_freeipa_users.get(username)
             if user is None:
                 continue
 
@@ -78,8 +77,8 @@ class Command(BaseCommand):
             country_name = embargoed_match.label.rsplit(" (", maxsplit=1)[0]
             embargoed_members.append(
                 {
-                    "username": uname,
-                    "full_name": full_name or uname,
+                    "username": username,
+                    "full_name": full_name or username,
                     "country_code": embargoed_match.code,
                     "country_name": country_name,
                 }

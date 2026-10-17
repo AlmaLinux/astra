@@ -86,14 +86,12 @@ def send_mail_url(
         "template": template_name,
         **extra_context,
     }
-    reply_to_value = str(reply_to or "").strip()
-    if reply_to_value:
-        query_params["reply_to"] = reply_to_value
+    if reply_to:
+        query_params["reply_to"] = reply_to
     if action_status:
         query_params["action_status"] = action_status
-    cc_value = str(cc or "").strip()
-    if cc_value:
-        query_params["cc"] = cc_value
+    if cc:
+        query_params["cc"] = cc
     if attachment_tokens:
         query_params["attachment"] = list(attachment_tokens)
     send_mail_path = reverse("send-mail")
@@ -216,28 +214,21 @@ def settings_url(
 
     params: dict[str, str] = {}
 
-    tab_value = str(tab or "").strip()
-    if is_settings_tab(tab_value):
-        params["tab"] = tab_value
+    if tab and is_settings_tab(tab):
+        params["tab"] = tab
 
-    agreement_value = str(agreement or "").strip()
-    if agreement_value:
-        params["agreement"] = agreement_value
+    if agreement:
+        params["agreement"] = agreement
 
-    highlight_value = str(highlight or "").strip()
-    if highlight_value in _SETTINGS_HIGHLIGHTS:
-        params["highlight"] = highlight_value
+    if highlight in _SETTINGS_HIGHLIGHTS:
+        params["highlight"] = highlight
 
-    status_value = str(status or "").strip()
-    if status_value:
-        params["status"] = status_value
+    if status:
+        params["status"] = status
 
     # Only allow safe relative paths or the legacy `profile` value.
-    return_value = str(return_to or "").strip()
-    if return_value == "profile":
-        params["return"] = return_value
-    elif return_value.startswith("/") and not return_value.startswith("//"):
-        params["return"] = return_value
+    if return_to == "profile" or (return_to and return_to.startswith("/") and not return_to.startswith("//")):
+        params["return"] = return_to
 
     base = reverse("settings")
     if not params:
@@ -247,10 +238,7 @@ def settings_url(
 
 def agreement_settings_url(agreement_cn: str | None, *, return_to: str | None = None) -> str:
     """Return the canonical settings deep-link for agreement signing."""
-    agreement_cn_value = str(agreement_cn or "").strip()
-    if not agreement_cn_value:
-        return settings_url(tab="agreements", return_to=return_to)
-    return settings_url(tab="agreements", agreement=agreement_cn_value, return_to=return_to)
+    return settings_url(tab="agreements", agreement=agreement_cn, return_to=return_to)
 
 
 def chat_link_bootstrap_context() -> dict[str, str]:

@@ -179,9 +179,9 @@ def _apply_email_template_from_form(
     template_id = email_form.cleaned_data.get("email_template_id")
     template = EmailTemplate.objects.filter(pk=int(template_id)).first() if template_id else None
     election.voting_email_template = template
-    election.voting_email_subject = str(email_form.cleaned_data.get("subject") or "")
-    election.voting_email_html = str(email_form.cleaned_data.get("html_content") or "")
-    election.voting_email_text = str(email_form.cleaned_data.get("text_content") or "")
+    election.voting_email_subject = email_form.cleaned_data["subject"]
+    election.voting_email_html = email_form.cleaned_data["html_content"]
+    election.voting_email_text = email_form.cleaned_data["text_content"]
 
 
 def _save_candidates_and_groups(
@@ -198,8 +198,8 @@ def _save_candidates_and_groups(
                 form.instance.delete()
             continue
 
-        username = str(form.cleaned_data.get("freeipa_username") or "").strip()
-        if not username:
+        # Empty extra forms have no cleaned values.
+        if not form.cleaned_data.get("freeipa_username"):
             continue
 
         candidate = form.save(commit=False)
@@ -214,18 +214,14 @@ def _save_candidates_and_groups(
                 form.instance.delete()
             continue
 
-        group_name = str(form.cleaned_data.get("name") or "").strip()
-        if not group_name:
+        if not form.cleaned_data.get("name"):
             continue
 
         group = form.save(commit=False)
         group.election = election
         group.save()
 
-        selected_usernames = [
-            str(u).strip() for u in (form.cleaned_data.get("candidate_usernames") or [])
-        ]
-        selected_usernames = [u for u in selected_usernames if u]
+        selected_usernames = form.cleaned_data.get("candidate_usernames", [])
         candidates = list(
             Candidate.objects.filter(election=election, freeipa_username__in=selected_usernames).only("id")
         )
@@ -342,8 +338,8 @@ def election_edit(request, election_id: int):
                     if form.cleaned_data.get("DELETE"):
                         continue
 
-                    username = str(form.cleaned_data.get("freeipa_username") or "").strip()
-                    nominator = str(form.cleaned_data.get("nominated_by") or "").strip()
+                    username = form.cleaned_data.get("freeipa_username", "")
+                    nominator = form.cleaned_data.get("nominated_by", "")
                     if username:
                         candidate_usernames.append(username)
                     if nominator:
@@ -426,8 +422,8 @@ def election_edit(request, election_id: int):
                         continue
                     if form.cleaned_data.get("DELETE"):
                         continue
-                    username = str(form.cleaned_data.get("freeipa_username") or "").strip()
-                    nominator = str(form.cleaned_data.get("nominated_by") or "").strip()
+                    username = form.cleaned_data.get("freeipa_username", "")
+                    nominator = form.cleaned_data.get("nominated_by", "")
                     if username and username in validation.disqualified_candidates:
                         form.add_error(
                             "freeipa_username",

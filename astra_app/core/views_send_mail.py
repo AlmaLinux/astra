@@ -93,7 +93,7 @@ def _best_example_context(*, recipients: list[dict[str, str]], var_names: list[s
     for ctx in recipients:
         score = 0
         for var in var_names:
-            if str(ctx.get(var, "") or "").strip():
+            if ctx.get(var):
                 score += 1
         if score > best_score:
             best = ctx
@@ -103,8 +103,7 @@ def _best_example_context(*, recipients: list[dict[str, str]], var_names: list[s
 
     filled = dict(best)
     for var in var_names:
-        value = str(filled.get(var, "") or "").strip()
-        if not value:
+        if not filled.get(var):
             filled[var] = f"-{var}-"
     return filled
 
@@ -126,7 +125,7 @@ def _preview_from_recipients(
 
 
 def _normalize_identifier(value: str) -> str:
-    normalized = re.sub(r"[^0-9A-Za-z]+", "_", str(value or "").strip().lower())
+    normalized = re.sub(r"[^0-9A-Za-z]+", "_", value.lower())
     normalized = re.sub(r"_+", "_", normalized).strip("_")
     if not normalized:
         return "field"
@@ -398,7 +397,7 @@ def _user_select_choices() -> list[tuple[str, str]]:
 
 
 def _parse_username_list(raw: str) -> list[str]:
-    items = [s.strip() for s in str(raw or "").split(",")]
+    items = [s.strip() for s in raw.split(",")]
     out: list[str] = []
     for item in items:
         if item:
@@ -409,7 +408,7 @@ def _parse_username_list(raw: str) -> list[str]:
 def _parse_email_list(raw: str) -> list[str]:
     # Be liberal in what we accept here: users often paste addresses
     # separated by commas, whitespace/newlines, or semicolons.
-    tokens = re.split(r"[,\s;]+", str(raw or "").strip())
+    tokens = re.split(r"[,\s;]+", raw)
     emails: list[str] = []
     for token in tokens:
         if not token:
@@ -498,36 +497,30 @@ class SendMailForm(StyledForm):
 
     def clean_cc(self) -> list[str]:
         try:
-            return _parse_email_list(str(self.cleaned_data.get("cc") or ""))
+            return _parse_email_list(self.cleaned_data["cc"])
         except Exception as e:
             raise forms.ValidationError(f"Invalid CC address list: {e}") from e
 
     def clean_bcc(self) -> list[str]:
         try:
-            return _parse_email_list(str(self.cleaned_data.get("bcc") or ""))
+            return _parse_email_list(self.cleaned_data["bcc"])
         except Exception as e:
             raise forms.ValidationError(f"Invalid BCC address list: {e}") from e
 
     def clean_reply_to(self) -> list[str]:
         try:
-            return _parse_email_list(str(self.cleaned_data.get("reply_to") or ""))
+            return _parse_email_list(self.cleaned_data["reply_to"])
         except Exception as e:
             raise forms.ValidationError(f"Invalid Reply-To address list: {e}") from e
 
     def clean_manual_to(self) -> list[str]:
         try:
-            return _parse_email_list(str(self.cleaned_data.get("manual_to") or ""))
+            return _parse_email_list(self.cleaned_data["manual_to"])
         except Exception as e:
             raise forms.ValidationError(f"Invalid manual recipient list: {e}") from e
 
-    def clean_user_usernames(self) -> list[str]:
-        raw = self.cleaned_data.get("user_usernames")
-        if raw is None:
-            return []
-        return [str(v) for v in raw]
-
     def clean_extra_context_json(self) -> dict[str, str]:
-        raw = str(self.cleaned_data.get("extra_context_json") or "").strip()
+        raw = self.cleaned_data["extra_context_json"]
         if not raw:
             return {}
 
@@ -603,7 +596,7 @@ def _preview_for_manual(emails: list[str]) -> tuple[RecipientPreview, list[dict[
                 "first_name": "",
                 "last_name": "",
                 "full_name": "",
-                "email": str(email or "").strip(),
+                "email": email,
             }
         )
 
@@ -810,8 +803,8 @@ def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
     action_notice = _build_send_mail_action_notice(action_status=action_status)
 
     template_key = str(request.GET.get("template") or "").strip()
+    selected_template: EmailTemplate | None = None
     if template_key:
-        selected_template: EmailTemplate | None = None
         if template_key.isdigit():
             selected_template = EmailTemplate.objects.filter(pk=int(template_key)).first()
         if selected_template is None:
@@ -831,22 +824,23 @@ def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
 
     prefill_type = str(request.GET.get("type") or "").strip().lower()
     to_raw = str(request.GET.get("to") or "").strip()
+    prefill_usernames: list[str] = []
     if prefill_type == "csv":
-        initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_CSV
-        deep_link_autoload_recipients = True
+        selected_recipient_mode = SendMailForm.RECIPIENT_MODE_CSV
     elif to_raw:
         if prefill_type == "group":
-            initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_GROUP
+            selected_recipient_mode = SendMailForm.RECIPIENT_MODE_GROUP
             initial["group_cn"] = to_raw
-            deep_link_autoload_recipients = True
         elif prefill_type == "manual":
-            initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_MANUAL
+            selected_recipient_mode = SendMailForm.RECIPIENT_MODE_MANUAL
             initial["manual_to"] = to_raw
-            deep_link_autoload_recipients = True
         elif prefill_type == "users":
-            initial["recipient_mode"] = SendMailForm.RECIPIENT_MODE_USERS
-            initial["user_usernames"] = _parse_username_list(to_raw)
-            deep_link_autoload_recipients = True
+            selected_recipient_mode = SendMailForm.RECIPIENT_MODE_USERS
+            prefill_usernames = _parse_username_list(to_raw)
+            initial["user_usernames"] = prefill_usernames
+    if selected_recipient_mode:
+        initial["recipient_mode"] = selected_recipient_mode
+        deep_link_autoload_recipients = True
 
     cc_raw = str(request.GET.get("cc") or "").strip()
     if cc_raw:
@@ -872,32 +866,21 @@ def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
         initial["extra_context_json"] = json.dumps(extra_context)
 
     form = SendMailForm(initial=initial, group_choices=group_choices, user_choices=user_choices)
-    selected_recipient_mode = str(initial.get("recipient_mode") or "").strip().lower()
 
     if deep_link_autoload_recipients:
         try:
-            recipient_mode = str(initial.get("recipient_mode") or "").strip().lower()
-            if recipient_mode == SendMailForm.RECIPIENT_MODE_GROUP:
-                group_cn = str(initial.get("group_cn") or "").strip()
-                if not group_cn:
-                    raise ValueError("Select a group.")
-                preview, recipients = _preview_for_group(group_cn)
-            elif recipient_mode == SendMailForm.RECIPIENT_MODE_MANUAL:
-                manual_to_raw = str(initial.get("manual_to") or "")
-                manual_to = _parse_email_list(manual_to_raw)
+            if selected_recipient_mode == SendMailForm.RECIPIENT_MODE_GROUP:
+                preview, recipients = _preview_for_group(to_raw)
+            elif selected_recipient_mode == SendMailForm.RECIPIENT_MODE_MANUAL:
+                manual_to = _parse_email_list(to_raw)
                 if not manual_to:
                     raise ValueError("Add one or more recipient email addresses.")
                 preview, recipients = _preview_for_manual(manual_to)
-            elif recipient_mode == SendMailForm.RECIPIENT_MODE_USERS:
-                raw_usernames = initial.get("user_usernames")
-                if isinstance(raw_usernames, list):
-                    usernames = [str(username) for username in raw_usernames]
-                else:
-                    usernames = _parse_username_list(str(raw_usernames or ""))
-                if not usernames:
+            elif selected_recipient_mode == SendMailForm.RECIPIENT_MODE_USERS:
+                if not prefill_usernames:
                     raise ValueError("Select one or more users.")
-                preview, recipients = _preview_for_users(usernames)
-            elif recipient_mode == SendMailForm.RECIPIENT_MODE_CSV:
+                preview, recipients = _preview_for_users(prefill_usernames)
+            elif selected_recipient_mode == SendMailForm.RECIPIENT_MODE_CSV:
                 raw_payload = request.session.get(_CSV_SESSION_KEY)
                 if not raw_payload:
                     raise ValueError("Upload a CSV.")
@@ -927,9 +910,9 @@ def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
 
     templates = _send_mail_templates(recipient_mode=selected_recipient_mode)
     rendered_preview = _render_send_mail_preview(
-        subject=str(initial.get("subject") or ""),
-        html_content=str(initial.get("html_content") or ""),
-        text_content=str(initial.get("text_content") or ""),
+        subject=selected_template.subject if selected_template else "",
+        html_content=selected_template.html_content if selected_template else "",
+        text_content=selected_template.content if selected_template else "",
         context=preview.first_context if preview else {},
     )
 
@@ -998,18 +981,17 @@ def send_mail(request: HttpRequest) -> HttpResponse:
         form = SendMailForm(request.POST, request.FILES, group_choices=group_choices, user_choices=user_choices)
         selected_template_id = _selected_template_id_from_form(form=form)
         if form.is_valid():
-            group_cn = str(form.cleaned_data.get("group_cn") or "").strip()
-            csv_file = form.cleaned_data.get("csv_file")
-            recipient_mode = str(form.cleaned_data.get("recipient_mode") or "").strip().lower()
-            manual_to = form.cleaned_data.get("manual_to") or []
-            user_usernames = form.cleaned_data.get("user_usernames") or []
+            group_cn = form.cleaned_data["group_cn"]
+            csv_file = form.cleaned_data["csv_file"]
+            recipient_mode = form.cleaned_data["recipient_mode"]
+            manual_to = form.cleaned_data["manual_to"]
+            user_usernames = form.cleaned_data["user_usernames"]
 
-            cc = form.cleaned_data.get("cc") or []
-            bcc = form.cleaned_data.get("bcc") or []
-            reply_to = form.cleaned_data.get("reply_to") or []
+            cc = form.cleaned_data["cc"]
+            bcc = form.cleaned_data["bcc"]
+            reply_to = form.cleaned_data["reply_to"]
 
-            posted_extra_context = form.cleaned_data.get("extra_context_json") or {}
-            posted_extra_context = {**posted_extra_context, **system_context}
+            posted_extra_context = {**form.cleaned_data["extra_context_json"], **system_context}
 
             try:
                 if recipient_mode == SendMailForm.RECIPIENT_MODE_GROUP:
@@ -1061,12 +1043,12 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             if preview and preview.first_context:
                 request.session[_PREVIEW_CONTEXT_SESSION_KEY] = json.dumps(preview.first_context)
 
-            action = str(form.cleaned_data.get("action") or "").strip().lower()
-            subject = str(form.cleaned_data.get("subject") or "")
-            html_content = str(form.cleaned_data.get("html_content") or "")
-            text_content = str(form.cleaned_data.get("text_content") or "")
-            invitation_action = str(form.cleaned_data.get("invitation_action") or "").strip().lower()
-            invitation_org_id = str(form.cleaned_data.get("invitation_org_id") or "").strip()
+            action = form.cleaned_data["action"]
+            subject = form.cleaned_data["subject"]
+            html_content = form.cleaned_data["html_content"]
+            text_content = form.cleaned_data["text_content"]
+            invitation_action = form.cleaned_data["invitation_action"]
+            invitation_org_id = form.cleaned_data["invitation_org_id"]
 
             selected_template_id = form.cleaned_data.get("email_template_id")
             selected_template = None
@@ -1095,7 +1077,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "Select a template to save, or use Save as.")
 
             if action == "save_as":
-                raw_name = str(form.cleaned_data.get("save_as_name") or "").strip()
+                raw_name = form.cleaned_data["save_as_name"]
                 if not raw_name:
                     messages.error(request, "Provide a template name for Save as.")
                 else:
@@ -1125,7 +1107,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                     elif not invitation_org_id.isdigit():
                         messages.error(request, "Organization claim invitation is missing organization context.")
                     else:
-                        recipient_email = str(manual_to[0]).strip()
+                        recipient_email = manual_to[0]
                         try:
                             validate_email(recipient_email)
                         except ValidationError:
@@ -1171,16 +1153,14 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                     discard_uploaded_mail_attachments(attachments)
                     attachments = []
 
-                    deliverable = [
-                        recipient for recipient in recipients if str(recipient.get("email") or "").strip()
-                    ]
+                    deliverable = [recipient for recipient in recipients if recipient.get("email")]
                     skipped = len(recipients) - len(deliverable)
                     # Emails that need a membership-request note once they have ids.
                     deferred_note_emails: list[object] = []
 
                     def _prepare(recipient: dict[str, str]) -> Email | None:
                         queued_email = queue_composed_email(
-                            recipients=[str(recipient.get("email") or "").strip()],
+                            recipients=[recipient["email"]],
                             sender=settings.DEFAULT_FROM_EMAIL,
                             subject_source=subject,
                             text_source=text_content,
@@ -1355,7 +1335,7 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             text_content=text_content_value,
             context=first_context,
         )
-        if not any(str(rendered_preview.get(key) or "").strip() for key in ("subject", "html", "text")):
+        if not any(rendered_preview[key].strip() for key in ("subject", "html", "text")):
             try:
                 render_templated_email_preview(
                     subject=subject_value,

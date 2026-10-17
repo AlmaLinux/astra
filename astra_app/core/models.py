@@ -701,7 +701,7 @@ class Note(models.Model):
     @override
     def save(self, *args, **kwargs) -> None:
         # Treat empty/whitespace-only content as absent.
-        if self.content is not None and str(self.content).strip() == "":
+        if self.content is not None and self.content.strip() == "":
             self.content = None
         # Treat an empty dict/list as absent action.
         if self.action in ({}, []):
@@ -713,7 +713,7 @@ class Note(models.Model):
     def clean(self) -> None:
         super().clean()
 
-        content_present = self.content is not None and str(self.content).strip() != ""
+        content_present = self.content is not None and self.content.strip() != ""
         action_present = self.action is not None
         if not content_present and not action_present:
             raise ValidationError("A note must have content and/or an action.")

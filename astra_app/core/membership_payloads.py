@@ -149,5 +149,5 @@ def serialize_pending_membership_entry(
         "membershipType": serialize_membership_type(membership_type),
         "requestId": resolved_request_id,
         "status": str(status),
-        "organizationName": str(organization_name or ""),
+        "organizationName": organization_name,
     }

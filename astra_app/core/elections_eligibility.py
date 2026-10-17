@@ -2,6 +2,7 @@ import datetime
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Literal, TypedDict
 
 from django.conf import settings
 from django.core.cache import cache
@@ -118,7 +119,8 @@ def _compute_eligibility_facts_by_username(*, election: Election) -> dict[str, E
         membership_type__votes__gt=0,
     ).values("target_username", "created_at", "expires_at", "membership_type__votes")
     for row in memberships:
-        username = str(row.get("target_username") or "").strip().lower()
+        # Mirror memberships count as individual but may belong to an organization.
+        username = row["target_username"].lower()
         if not username:
             continue
 
@@ -272,33 +274,23 @@ def _freeipa_group_recursive_member_usernames(
     require_fresh: bool,
     missing_message: str,
 ) -> set[str]:
-    root = str(group_cn or "").strip()
-    if not root:
+    if not group_cn:
         return set()
 
     seen_groups: set[str] = set()
     members: set[str] = set()
-    pending: list[str] = [root]
+    pending: list[str] = [group_cn]
 
     while pending:
-        cn = str(pending.pop() or "").strip()
-        if not cn:
-            continue
+        cn = pending.pop()
         cn_key = cn.lower()
         if cn_key in seen_groups:
             continue
         seen_groups.add(cn_key)
 
         group = _get_required_group(group_cn=cn, require_fresh=require_fresh, missing_message=missing_message)
-        for username_raw in (group.members or []):
-            username = str(username_raw or "").strip()
-            if username:
-                members.add(username.lower())
-
-        for nested_cn_raw in (group.member_groups or []):
-            nested_cn = str(nested_cn_raw or "").strip()
-            if nested_cn:
-                pending.append(nested_cn)
+        members.update(username.lower() for username in group.members)
+        pending.extend(group.member_groups)
 
     return members
 
@@ -331,7 +323,6 @@ def eligible_voters_from_memberships(
 
 def eligible_vote_weight_for_username(*, election: Election, username: str) -> int:
     """Return the voting weight for a single username using the canonical eligibility logic."""
-    username = str(username or "").strip()
     if not username:
         return 0
 
@@ -364,9 +355,9 @@ def vote_weight_breakdown_for_username(*, election: Election, username: str) -> 
     Returns individual memberships before organization memberships and includes
     only memberships that contribute votes.
     """
-    username_lower = str(username or "").strip().lower()
-    if not username_lower:
+    if not username:
         return []
+    username_lower = username.lower()
 
     reference_datetime = _election_reference_datetime(election=election)
     cutoff = _membership_age_cutoff(reference_datetime=reference_datetime)
@@ -469,27 +460,10 @@ def election_committee_disqualification(
     if not committee_usernames:
         return set(), set()
 
-    candidate_conflicts = {
-        str(username or "").strip()
-        for username in candidate_usernames
-        if str(username or "").strip().lower() in committee_usernames
-    }
-    nominator_conflicts = {
-        str(username or "").strip()
-        for username in nominator_usernames
-        if str(username or "").strip().lower() in committee_usernames
-    }
+    candidate_conflicts = {username for username in candidate_usernames if username.lower() in committee_usernames}
+    nominator_conflicts = {username for username in nominator_usernames if username.lower() in committee_usernames}
 
     return candidate_conflicts, nominator_conflicts
-
-
-def _normalized_usernames(values: Iterable[str]) -> list[str]:
-    normalized: list[str] = []
-    for value in values:
-        username = str(value or "").strip()
-        if username:
-            normalized.append(username)
-    return normalized
 
 
 def start_eligible_voters(
@@ -580,8 +554,8 @@ def validate_candidates_for_election(
     eligible_group_cn: str | None = None,
     require_fresh: bool = False,
 ) -> CandidateValidationResult:
-    candidates = _normalized_usernames(candidate_usernames)
-    nominators = _normalized_usernames(nominator_usernames)
+    candidates = list(candidate_usernames)
+    nominators = list(nominator_usernames)
 
     user_nominators: list[str] = []
     for nominator in nominators:
@@ -629,11 +603,19 @@ def validate_candidates_for_election(
     )
 
 
-def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, object]]:
-    """Compute list of ineligible voters with structured reason data.
+class IneligibleVoter(TypedDict):
+    username: str
+    reason: Literal["no_membership", "expired", "too_new"]
+    # ISO date, or "Unknown" without a vote-bearing term.
+    term_start_date: str
+    election_start_date: str
+    # "" when unknown or not applicable.
+    days_at_start: int | Literal[""]
+    days_short: int | Literal[""]
 
-    Returns a sorted list of dicts with keys: username, reason, term_start_date,
-    election_start_date, days_at_start, days_short.
+
+def ineligible_voters_with_reasons(*, election: Election) -> list[IneligibleVoter]:
+    """Compute the sorted list of ineligible voters with structured reason data.
 
     Reason values:
     - "no_membership": user has no vote-bearing membership/sponsorship at all
@@ -668,14 +650,14 @@ def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, obje
     election_start_day = timezone.localtime(election.start_datetime).date()
     reference_day = timezone.localtime(reference_datetime).date()
 
-    result: list[dict[str, object]] = []
+    result: list[IneligibleVoter] = []
     for username in sorted(electorate):
         if username in eligible_usernames_lower:
             continue
 
         term_start_date: str = "Unknown"
-        days_at_start: int | str = ""
-        days_short: int | str = ""
+        days_at_start: int | Literal[""] = ""
+        days_short: int | Literal[""] = ""
 
         facts = facts_by_username.get(username)
         start_at = facts.term_start_at if facts is not None else None
@@ -685,6 +667,7 @@ def ineligible_voters_with_reasons(*, election: Election) -> list[dict[str, obje
             term_start_date = term_start_day.isoformat()
             days_at_start = (election_start_day - term_start_day).days
 
+        reason: Literal["no_membership", "expired", "too_new"]
         if facts is None or not facts.has_any_vote_eligible:
             reason = "no_membership"
         elif not facts.has_active_vote_eligible_at_reference:

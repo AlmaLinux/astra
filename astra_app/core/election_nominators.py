@@ -28,10 +28,9 @@ def organization_nominator_identifier(*, organization_id: int) -> str:
 
 
 def organization_nominator_label(*, organization_name: str) -> str:
-    name = str(organization_name or "").strip()
-    if not name:
+    if not organization_name:
         return "Organization"
-    return f"{name} (organization)"
+    return f"{organization_name} (organization)"
 
 
 def parse_nominator_identifier(value: str) -> ParsedNominatorIdentifier:

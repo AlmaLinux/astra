@@ -1,6 +1,6 @@
 import hashlib
-from datetime import timedelta
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Literal, NotRequired, TypedDict
 
 from django import template
 from django.conf import settings
@@ -18,6 +18,64 @@ from core.models import MembershipRequest, Note
 from core.views_utils import get_username
 
 register = template.Library()
+
+
+class EmailLogEntry(TypedDict):
+    date: datetime
+    status: str
+    message: str
+    exception_type: str
+
+
+class EmailModal(TypedDict):
+    """An email a note records, shown in a modal on the notes timeline."""
+
+    email_id: int
+    modal_id: str
+    from_email: str
+    to: list[str]
+    cc: list[str]
+    bcc: list[str]
+    reply_to: str
+    headers: list[tuple[str, str]]
+    subject: str
+    html: str
+    text: str
+    recipient_delivery_summary: str
+    recipient_delivery_summary_note: str
+    logs: list[EmailLogEntry]
+
+
+class TimelineEntry(TypedDict):
+    """One bubble on the notes timeline: a recorded action or a message."""
+
+    kind: Literal["action", "message"]
+    note: Note
+    is_self: bool
+    avatar_user: object | None
+    # None for the viewer's own messages, which use the default bubble colours.
+    bubble_style: str | None
+    is_custos: bool
+    display_username: str
+    membership_request_id: int | None
+    membership_request_url: str
+    # Actions only.
+    label: NotRequired[str]
+    icon: NotRequired[str]
+    request_resubmitted_diff_rows: NotRequired[list[dict[str, str]]]
+    email_modal_id: NotRequired[str]
+    # Messages only.
+    rendered_content: NotRequired[str]
+
+
+class TimelineGroup(TypedDict):
+    """Consecutive timeline entries by one author, shown under a single header."""
+
+    username: str
+    is_self: bool
+    membership_request_id: int | None
+    header_entry: TimelineEntry
+    entries: list[TimelineEntry]
 
 
 _BUBBLE_BG_COLORS: list[str] = [
@@ -121,7 +179,7 @@ def _render_email_contents(email: Email) -> tuple[str, str, str]:
     return email.subject, email.html_message, email.message
 
 
-def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
+def _email_modals_for_notes(notes: list[Note]) -> list[EmailModal]:
     email_ids = []
     seen: set[int] = set()
     for note in notes:
@@ -139,7 +197,7 @@ def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
     )
     emails_by_id = {email.id: email for email in emails}
 
-    modals: list[dict[str, Any]] = []
+    modals: list[EmailModal] = []
     for email_id in email_ids:
         email = emails_by_id.get(email_id)
         if email is None:
@@ -163,7 +221,7 @@ def _email_modals_for_notes(notes: list[Note]) -> list[dict[str, Any]]:
                 0 if log.pk is None else int(log.pk),
             ),
         )
-        logs = [
+        logs: list[EmailLogEntry] = [
             {
                 "date": log.date,
                 "status": log.get_status_display(),
@@ -381,12 +439,12 @@ def _timeline_entries_for_notes(
     email_modal_ids: dict[int, str] | None = None,
     request_resubmitted_new_snapshots_by_note_id: dict[int, list[dict[str, str]]] | None = None,
     avatar_users_by_username: dict[str, object] | None = None,
-) -> list[dict[str, Any]]:
+) -> list[TimelineEntry]:
     if avatar_users_by_username is None:
         avatar_users_by_username = _avatar_users_by_username(notes)
-    entries: list[dict[str, Any]] = []
+    entries: list[TimelineEntry] = []
     for n in notes:
-        is_self = current_username and n.username.lower() == current_username.lower()
+        is_self = bool(current_username) and n.username.lower() == current_username.lower()
         avatar_user = avatar_users_by_username.get(n.username.lower())
         is_custos = n.username == CUSTOS
         display_username = _note_display_username(n)
@@ -398,7 +456,7 @@ def _timeline_entries_for_notes(
             action = n.action
             label = note_action_label(action)
             icon = note_action_icon(action)
-            entry: dict[str, Any] = {
+            entry: TimelineEntry = {
                 "kind": "action",
                 "note": n,
                 "label": label,
@@ -438,7 +496,7 @@ def _timeline_entries_for_notes(
                 entry
             )
 
-        if n.content is not None and str(n.content).strip() != "":
+        if n.content is not None and n.content.strip() != "":
             bubble_style: str | None = None
             if not is_self and n.username:
                 if is_custos:
@@ -464,7 +522,7 @@ def _timeline_entries_for_notes(
     return entries
 
 
-def _group_timeline_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _group_timeline_entries(entries: list[TimelineEntry]) -> list[TimelineGroup]:
     """Group consecutive entries by the same author within a short time window.
 
     This is purely a presentation concern: it reduces repeated avatars + headers
@@ -478,16 +536,16 @@ def _group_timeline_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
     """
 
     max_gap = timedelta(seconds=60)
-    groups: list[dict[str, Any]] = []
+    groups: list[TimelineGroup] = []
 
-    current: dict[str, Any] | None = None
+    current: TimelineGroup | None = None
     last_ts = None
 
     for entry in entries:
         note: Note = entry["note"]
         username = note.username.lower()
-        is_self = bool(entry.get("is_self", False))
-        mr_id = entry.get("membership_request_id")
+        is_self = entry["is_self"]
+        mr_id = entry["membership_request_id"]
 
         ts = note.timestamp
 
@@ -504,7 +562,7 @@ def _group_timeline_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any
 
         same_author = current["username"] == username
         same_side = current["is_self"] == is_self
-        same_request = current.get("membership_request_id") == mr_id
+        same_request = current["membership_request_id"] == mr_id
         within_gap = (ts - last_ts) <= max_gap if last_ts is not None else False
 
         if same_author and same_side and same_request and within_gap:
@@ -563,10 +621,6 @@ def render_membership_request_notes(
     note_detail_url = reverse("api-membership-request-notes", args=[mr.pk])
 
     resolved_notes = list(notes) if notes is not None else []
-    approvals = 0
-    disapprovals = 0
-    current_user_vote = None
-    groups: list[dict[str, Any]] = []
     votes_by_user = last_votes(resolved_notes)
     approvals = sum(1 for vote in votes_by_user.values() if vote == "approve")
     disapprovals = sum(1 for vote in votes_by_user.values() if vote == "disapprove")

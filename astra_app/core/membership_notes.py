@@ -22,7 +22,7 @@ def add_note(
 
     note = Note(
         membership_request=membership_request,
-        username=str(username).strip(),
+        username=username,
         content=content,
         action=action,
     )

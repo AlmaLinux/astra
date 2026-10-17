@@ -589,27 +589,21 @@ def _ineligible_voters_context_data(
     ineligible_voters = elections_eligibility.ineligible_voters_with_reasons(election=election)
     if q:
         q_lower = q.lower()
-        ineligible_voters = [
-            v
-            for v in ineligible_voters
-            if q_lower in str(v.get("username") or "").lower()
-        ]
+        # Ineligible usernames are already lowercase.
+        ineligible_voters = [v for v in ineligible_voters if q_lower in v["username"]]
 
     ineligible_voter_details_by_username = {
-        str(v["username"]): {
-            "reason": str(v["reason"]),
-            "term_start_date": str(v["term_start_date"]),
-            "election_start_date": str(v["election_start_date"]),
+        v["username"]: {
+            "reason": v["reason"],
+            "term_start_date": v["term_start_date"],
+            "election_start_date": v["election_start_date"],
             "days_at_start": v["days_at_start"],
             "days_short": v["days_short"],
         }
         for v in ineligible_voters
-        if str(v.get("username") or "").strip()
     }
 
-    ineligible_grid_items = [
-        {"kind": "user", "username": str(v["username"])} for v in ineligible_voters if str(v.get("username") or "").strip()
-    ]
+    ineligible_grid_items = [{"kind": "user", "username": v["username"]} for v in ineligible_voters]
     _, ineligible_page_url_prefix = build_page_url_prefix(request.GET, page_param="ineligible_page")
     ineligible_page_ctx = paginate_and_build_context(
         ineligible_grid_items, page_number, 24, page_url_prefix=ineligible_page_url_prefix,
@@ -647,9 +641,7 @@ def election_detail_eligible_voters_api(request: HttpRequest, election_id: int) 
         return JsonResponse({"error": str(exc)}, status=exc.status_code)
 
     page_obj = context["page_obj"]
-    items = _serialize_group_user_list_items([
-        str(item["username"]) for item in page_obj.object_list if str(item.get("username") or "").strip()
-    ])
+    items = _serialize_group_user_list_items([item["username"] for item in page_obj.object_list])
 
     # Only a count, never which voters: participation stays private even to managers.
     pending_voter_count = (
@@ -692,9 +684,7 @@ def election_detail_ineligible_voters_api(request: HttpRequest, election_id: int
 
     ineligible_page_context = context["ineligible_page_context"]
     ineligible_page_obj = ineligible_page_context["page_obj"]
-    items = _serialize_group_user_list_items([
-        str(item["username"]) for item in ineligible_page_obj.object_list if str(item.get("username") or "").strip()
-    ])
+    items = _serialize_group_user_list_items([item["username"] for item in ineligible_page_obj.object_list])
 
     return JsonResponse(
         {

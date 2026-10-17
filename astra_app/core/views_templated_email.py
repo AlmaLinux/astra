@@ -25,7 +25,7 @@ from core.templated_email import (
 
 
 def _preview_and_variables(
-    *, form: EmailTemplateManageForm, template: EmailTemplate | None
+    *, form: EmailTemplateManageForm
 ) -> tuple[dict[str, str], list[tuple[str, str]]]:
     """Compute rendered preview + available variables from the current editor state."""
 
@@ -34,11 +34,10 @@ def _preview_and_variables(
         html_content = str(form.data.get("html_content") or "")
         text_content = str(form.data.get("text_content") or "")
     else:
-        subject = str(form.initial.get("subject") or ("" if template is None else template.subject or ""))
-        html_content = str(
-            form.initial.get("html_content") or ("" if template is None else template.html_content or "")
-        )
-        text_content = str(form.initial.get("text_content") or ("" if template is None else template.content or ""))
+        # Empty for a new template, else the template's own fields.
+        subject = form.initial.get("subject", "")
+        html_content = form.initial.get("html_content", "")
+        text_content = form.initial.get("text_content", "")
 
     ctx = placeholder_context_from_sources(subject, html_content, text_content)
     available_variables = list(ctx.items())
@@ -75,14 +74,8 @@ class EmailTemplateManageForm(StyledForm):
         widget=forms.Textarea(attrs={"rows": 12, "class": "form-control", "spellcheck": "true"}),
     )
 
-    def clean_name(self) -> str:
-        return str(self.cleaned_data.get("name") or "").strip()
-
-    def clean_description(self) -> str:
-        return str(self.cleaned_data.get("description") or "").strip()
-
     def clean_subject(self) -> str:
-        subject = str(self.cleaned_data.get("subject") or "").strip()
+        subject = self.cleaned_data["subject"]
         try:
             return validate_email_subject(subject)
         except ValueError as exc:
@@ -112,7 +105,7 @@ def _build_email_template_editor_payload(
     is_create: bool,
     is_locked: bool,
 ) -> dict[str, object]:
-    rendered_preview, available_variables = _preview_and_variables(form=form, template=template)
+    rendered_preview, available_variables = _preview_and_variables(form=form)
     return {
         "mode": "create" if is_create else "edit",
         "template": None
@@ -142,9 +135,9 @@ def _build_email_template_editor_payload(
                 for variable_name, example in available_variables
             ],
             "preview": {
-                "subject": str(rendered_preview.get("subject") or ""),
-                "html": str(rendered_preview.get("html") or ""),
-                "text": str(rendered_preview.get("text") or ""),
+                "subject": rendered_preview["subject"],
+                "html": rendered_preview["html"],
+                "text": rendered_preview["text"],
             },
         },
     }
@@ -208,9 +201,9 @@ def email_template_edit(request: HttpRequest, template_id: int | None = None):
                     created_template = EmailTemplate.objects.create(
                         name=name,
                         description=form.cleaned_data["description"],
-                        subject=str(form.cleaned_data.get("subject") or ""),
-                        content=str(form.cleaned_data.get("text_content") or ""),
-                        html_content=str(form.cleaned_data.get("html_content") or ""),
+                        subject=form.cleaned_data["subject"],
+                        content=form.cleaned_data["text_content"],
+                        html_content=form.cleaned_data["html_content"],
                     )
                     messages.success(request, f"Created template: {created_template.name}.")
                     return redirect("email-template-edit", template_id=created_template.pk)
@@ -228,9 +221,9 @@ def email_template_edit(request: HttpRequest, template_id: int | None = None):
                 else:
                     tpl.name = name
                     tpl.description = form.cleaned_data["description"]
-                    tpl.subject = str(form.cleaned_data.get("subject") or "")
-                    tpl.content = str(form.cleaned_data.get("text_content") or "")
-                    tpl.html_content = str(form.cleaned_data.get("html_content") or "")
+                    tpl.subject = form.cleaned_data["subject"]
+                    tpl.content = form.cleaned_data["text_content"]
+                    tpl.html_content = form.cleaned_data["html_content"]
                     tpl.save(update_fields=["name", "description", "subject", "content", "html_content"])
                     messages.success(request, f"Saved template: {tpl.name}.")
                     return redirect("email-template-edit", template_id=tpl.pk)

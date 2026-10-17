@@ -90,7 +90,7 @@ def parse_chat_identity(value: str, *, scheme_override: str | None = None) -> Pa
     if parsed_scheme:
         path = parsed.path.lstrip("/")
         team = ""
-        server_from_url = _normalize_str(parsed.netloc) or ""
+        server_from_url = _normalize_str(parsed.netloc)
 
         if scheme == ChatScheme.mattermost:
             # Stored Mattermost forms:
@@ -320,7 +320,7 @@ def parse_chat_channel(value: str, *, scheme_override: str | None = None) -> Par
     team: str
 
     if parsed_scheme:
-        server_from_url = _normalize_str(parsed.netloc) or ""
+        server_from_url = _normalize_str(parsed.netloc)
         server = server_from_url or default_server
         team = ""
 
@@ -492,7 +492,7 @@ def normalize_chat_channels_text(value: str, *, max_item_len: int = 64) -> str:
             default_server = _get_default_server(scheme) or ""
             default_team = _get_default_team() or ""
 
-            server = _normalize_str(parsed.netloc) or ""
+            server = _normalize_str(parsed.netloc)
             team = ""
 
             if scheme == ChatScheme.mattermost:

@@ -48,9 +48,6 @@ class GroupEditForm(StyledForm):
         ),
     )
 
-    def clean_description(self) -> str:
-        return str(self.cleaned_data.get("description") or "").strip()
-
     def clean_fas_url(self) -> str:
         return clean_fas_url_value(self.cleaned_data.get("fas_url"), field_label="URL")
 

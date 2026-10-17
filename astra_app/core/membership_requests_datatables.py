@@ -1,5 +1,6 @@
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
+from typing import NotRequired, TypedDict
 
 from django.db.models import Prefetch, Q, QuerySet
 from django.templatetags.static import static
@@ -12,8 +13,11 @@ from core.membership import membership_request_queryset, visible_committee_membe
 from core.membership_constants import MembershipCategoryCode
 from core.membership_dues import request_dues_payloads
 from core.membership_notes import CUSTOS, last_votes
-from core.models import Membership, MembershipLog, MembershipRequest, Note
+from core.models import Membership, MembershipLog, MembershipRequest, Note, Organization
 from core.templatetags.core_membership_notes import (
+    EmailModal,
+    TimelineEntry,
+    TimelineGroup,
     _avatar_users_by_username,
     _email_id_from_action,
     _email_modals_for_notes,
@@ -24,6 +28,22 @@ from core.templatetags.core_membership_notes import (
 )
 from core.templatetags.core_membership_responses import membership_response_value
 from core.views_utils import _normalize_str
+
+
+class MembershipRequestRow(TypedDict):
+    """A request in the committee queue, with what the row needs to render it."""
+
+    r: MembershipRequest
+    requested_by_username: str
+    requested_by_full_name: str
+    requested_by_deleted: bool
+    # Organization targets; None once the organization is deleted.
+    organization: NotRequired[Organization | None]
+    # User targets.
+    full_name: NotRequired[str]
+    # Added for the pending and on-hold queues.
+    is_renewal: NotRequired[bool]
+    dues: NotRequired[dict[str, int | None] | None]
 
 
 def _format_membership_timestamp_display(value: datetime | None) -> str:
@@ -125,7 +145,7 @@ def _build_membership_request_rows(
     visible_membership_requests: Callable[..., list[MembershipRequest]],
     resolve_requested_by_func: Callable[..., tuple[str, bool]],
     include_rows: bool,
-) -> tuple[list[MembershipRequest], list[dict[str, object]]]:
+) -> tuple[list[MembershipRequest], list[MembershipRequestRow]]:
     visible_requests = visible_membership_requests(
         requests,
         live_usernames=users_by_username.keys(),
@@ -133,7 +153,7 @@ def _build_membership_request_rows(
     if not include_rows:
         return visible_requests, []
 
-    rows: list[dict[str, object]] = []
+    rows: list[MembershipRequestRow] = []
     for membership_request in visible_requests:
         requested_log = membership_request.requested_logs[0] if membership_request.requested_logs else None
         requested_by_username = requested_log.actor_username if requested_log is not None else ""
@@ -557,7 +577,7 @@ def build_on_hold_membership_request_queue(
 
 def build_datatables_payload(
     *,
-    rows: Sequence[dict[str, object]],
+    rows: Sequence[MembershipRequestRow],
     records_total: int,
     draw: int,
 ) -> dict[str, object]:
@@ -576,10 +596,10 @@ def build_datatables_payload(
 
 def serialize_membership_request_row(
     *,
-    row: dict[str, object],
+    row: MembershipRequestRow,
 ) -> dict[str, object]:
     membership_request = row["r"]
-    requested_by_username = str(row.get("requested_by_username") or "")
+    requested_by_username = row["requested_by_username"]
     requested_by_show = bool(
         requested_by_username
         and (
@@ -597,8 +617,8 @@ def serialize_membership_request_row(
         "requested_by": {
             "show": requested_by_show,
             "username": requested_by_username,
-            "full_name": str(row.get("requested_by_full_name") or ""),
-            "deleted": bool(row.get("requested_by_deleted", False)),
+            "full_name": row["requested_by_full_name"],
+            "deleted": row["requested_by_deleted"],
         },
         "membership_type": {
             "id": membership_request.membership_type_id,
@@ -606,13 +626,13 @@ def serialize_membership_request_row(
             "name": membership_request.membership_type.name,
             "category": membership_request.membership_type.category_id,
         },
-        "is_renewal": bool(row.get("is_renewal", False)),
+        "is_renewal": row.get("is_renewal", False),
         "dues": row.get("dues"),
         "responses": build_response_items(membership_request=membership_request),
     }
 
 
-def build_target_payload(*, row: dict[str, object]) -> dict[str, object]:
+def build_target_payload(*, row: MembershipRequestRow) -> dict[str, object]:
     membership_request = row["r"]
     if membership_request.is_organization_target:
         organization = row.get("organization")
@@ -626,13 +646,14 @@ def build_target_payload(*, row: dict[str, object]) -> dict[str, object]:
         }
 
     requested_username = membership_request.requested_username
-    full_name = str(row.get("full_name") or "")
+    full_name = row["full_name"]
     return {
         "kind": "user",
         "label": full_name or requested_username,
         "secondary_label": requested_username if full_name else "",
         "username": requested_username,
-        "deleted": bool(row.get("target_deleted", False)),
+        # User rows are only built for users still in FreeIPA.
+        "deleted": False,
     }
 
 
@@ -739,10 +760,10 @@ def build_note_details(
 
 def serialize_note_group(
     *,
-    group: dict[str, object],
+    group: TimelineGroup,
     include_membership_request_links: bool,
     avatar_url_by_username: dict[str, str],
-    contacted_email_by_id: dict[int, dict[str, object]],
+    contacted_email_by_id: dict[int, EmailModal],
 ) -> dict[str, object]:
     header_entry = group["header_entry"]
     note = header_entry["note"]
@@ -750,80 +771,81 @@ def serialize_note_group(
     normalized_username = username.lower()
     avatar_url = ""
     avatar_kind = "default"
-    if header_entry.get("is_custos"):
+    if header_entry["is_custos"]:
         avatar_kind = "custos"
         avatar_url = static("core/images/almalinux-logo.svg")
     elif normalized_username and normalized_username in avatar_url_by_username:
         avatar_kind = "user"
         avatar_url = avatar_url_by_username[normalized_username]
 
-    payload = {
+    payload: dict[str, object] = {
         "username": username,
-        "display_username": str(header_entry.get("display_username") or username),
-        "is_self": bool(group.get("is_self", False)),
-        "is_custos": bool(header_entry.get("is_custos", False)),
+        "display_username": header_entry["display_username"],
+        "is_self": group["is_self"],
+        "is_custos": header_entry["is_custos"],
         "avatar_kind": avatar_kind,
         "avatar_url": avatar_url,
-        "timestamp": note.timestamp.isoformat() if note.timestamp is not None else None,
+        "timestamp": note.timestamp.isoformat(),
         "timestamp_display": _format_membership_timestamp_display(note.timestamp),
         "entries": [
             serialize_note_entry(entry=entry, contacted_email_by_id=contacted_email_by_id)
-            for entry in group.get("entries", [])
+            for entry in group["entries"]
         ],
     }
     if include_membership_request_links:
-        payload["membership_request_id"] = header_entry.get("membership_request_id")
+        payload["membership_request_id"] = header_entry["membership_request_id"]
     return payload
 
 
-def _serialize_contacted_email_detail(email_modal: dict[str, object]) -> dict[str, object]:
+def _serialize_contacted_email_detail(email_modal: EmailModal) -> dict[str, object]:
     return {
-        "email_id": int(email_modal["email_id"]),
-        "from_email": str(email_modal.get("from_email") or ""),
-        "to": list(email_modal.get("to") or []),
-        "cc": list(email_modal.get("cc") or []),
-        "bcc": list(email_modal.get("bcc") or []),
-        "reply_to": str(email_modal.get("reply_to") or ""),
-        "headers": [list(header) for header in list(email_modal.get("headers") or [])],
-        "subject": str(email_modal.get("subject") or ""),
-        "html": str(email_modal.get("html") or ""),
-        "text": str(email_modal.get("text") or ""),
-        "recipient_delivery_summary": str(email_modal.get("recipient_delivery_summary") or ""),
-        "recipient_delivery_summary_note": str(email_modal.get("recipient_delivery_summary_note") or ""),
+        "email_id": email_modal["email_id"],
+        "from_email": email_modal["from_email"],
+        "to": email_modal["to"],
+        "cc": email_modal["cc"],
+        "bcc": email_modal["bcc"],
+        "reply_to": email_modal["reply_to"],
+        "headers": [list(header) for header in email_modal["headers"]],
+        "subject": email_modal["subject"],
+        "html": email_modal["html"],
+        "text": email_modal["text"],
+        "recipient_delivery_summary": email_modal["recipient_delivery_summary"],
+        "recipient_delivery_summary_note": email_modal["recipient_delivery_summary_note"],
         "logs": [
             {
-                "date": log["date"].isoformat() if isinstance(log.get("date"), datetime) else None,
-                "date_display": _format_membership_timestamp_display(log.get("date")),
-                "status": str(log.get("status") or ""),
-                "message": str(log.get("message") or ""),
-                "exception_type": str(log.get("exception_type") or ""),
+                "date": log["date"].isoformat(),
+                "date_display": _format_membership_timestamp_display(log["date"]),
+                "status": log["status"],
+                "message": log["message"],
+                "exception_type": log["exception_type"],
             }
-            for log in list(email_modal.get("logs") or [])
+            for log in email_modal["logs"]
         ],
     }
 
 
 def serialize_note_entry(
     *,
-    entry: dict[str, object],
-    contacted_email_by_id: dict[int, dict[str, object]],
+    entry: TimelineEntry,
+    contacted_email_by_id: dict[int, EmailModal],
 ) -> dict[str, object]:
     note = entry["note"]
     payload: dict[str, object] = {
-        "kind": str(entry.get("kind") or "message"),
-        "bubble_style": str(entry.get("bubble_style") or ""),
+        "kind": entry["kind"],
+        # None means the viewer's own bubble, which uses the default colours.
+        "bubble_style": entry["bubble_style"] or "",
     }
-    if payload["kind"] == "action":
-        payload["label"] = str(entry.get("label") or "")
-        payload["icon"] = str(entry.get("icon") or "fa-bolt")
-        payload["request_resubmitted_diff_rows"] = list(entry.get("request_resubmitted_diff_rows") or [])
+    if entry["kind"] == "action":
+        payload["label"] = entry["label"]
+        payload["icon"] = entry["icon"]
+        payload["request_resubmitted_diff_rows"] = entry.get("request_resubmitted_diff_rows", [])
         payload["note_id"] = note.pk
-        email_id = _email_id_from_action(note.action if isinstance(note.action, dict) else None)
+        email_id = _email_id_from_action(note.action)
         if email_id is not None and email_id in contacted_email_by_id:
             payload["contacted_email"] = _serialize_contacted_email_detail(contacted_email_by_id[email_id])
         return payload
 
-    payload["rendered_html"] = str(entry.get("rendered_content") or "")
-    payload["is_self"] = bool(entry.get("is_self", False))
-    payload["is_custos"] = bool(entry.get("is_custos", False))
+    payload["rendered_html"] = entry["rendered_content"]
+    payload["is_self"] = entry["is_self"]
+    payload["is_custos"] = entry["is_custos"]
     return payload

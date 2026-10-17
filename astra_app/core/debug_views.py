@@ -197,7 +197,7 @@ def signals_log_debug_view(request: HttpRequest) -> HttpResponse:
 def signals_send_debug_view(request: HttpRequest) -> JsonResponse:
     """Manually dispatch a debug signal by canonical event key."""
 
-    event_key = _normalize_str(request.POST.get("event_key") or "")
+    event_key = _normalize_str(request.POST.get("event_key"))
     signal = astra_signals.CANONICAL_SIGNALS.get(event_key)
     if signal is None:
         return JsonResponse(

@@ -93,10 +93,9 @@ def membership_target_filter(
         raise ValueError("Provide exactly one of username or organization.")
 
     if username is not None:
-        normalized_username = str(username or "").strip()
-        if not normalized_username:
+        if not username:
             return None
-        return {"target_username": normalized_username}
+        return {"target_username": username}
 
     return {"target_organization": organization}
 
@@ -121,18 +120,16 @@ def latest_membership_request_for_target(
 
     queryset = membership_request_queryset()
     if has_username:
-        normalized_username = str(username or "").strip()
-        if not normalized_username:
+        if not username:
             return None
-        queryset = queryset.filter(requested_username=normalized_username)
+        queryset = queryset.filter(requested_username=username)
     elif has_organization:
         queryset = queryset.filter(requested_organization=organization)
     else:
         queryset = queryset.filter(requested_organization_id=organization_id)
 
-    normalized_membership_category_id = str(membership_category_id or "").strip()
-    if normalized_membership_category_id:
-        queryset = queryset.filter(membership_type__category_id=normalized_membership_category_id)
+    if membership_category_id:
+        queryset = queryset.filter(membership_type__category_id=membership_category_id)
 
     if statuses is not None:
         queryset = queryset.filter(status__in=tuple(statuses))
@@ -157,13 +154,12 @@ def term_membership_request(
     )
 
 
-def _normalized_group_cns(group_cns: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def _group_cns(group_cns: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
     targeted_group_cns: list[str] = []
     skipped_group_cns: list[str] = []
     seen: set[str] = set()
 
-    for raw_group_cn in group_cns:
-        group_cn = str(raw_group_cn or "").strip()
+    for group_cn in group_cns:
         if not group_cn:
             skipped_group_cns.append(group_cn)
             continue
@@ -199,15 +195,13 @@ def compute_membership_requestability_context(
         if eligibility is not None
         else get_membership_request_eligibility(username=username, organization=organization)
     )
-    requestable_rows = [
-        (str(category_id), str(code))
-        for category_id, code in requestable_membership_types_for_target(
+    requestable_rows: list[tuple[str, str]] = list(
+        requestable_membership_types_for_target(
             username=username,
             organization=organization,
             eligibility=resolved_eligibility,
         ).values_list("category_id", "code")
-        if str(category_id or "").strip() and str(code or "").strip()
-    ]
+    )
 
     requestable_codes_by_category: dict[str, set[str]] = {}
     for category_id, code in requestable_rows:
@@ -244,12 +238,10 @@ def sync_organization_representative_groups(
     caller_mode: FreeIPACallerMode,
     missing_user_policy: FreeIPAMissingUserPolicy,
 ) -> FreeIPARepresentativeSyncResult:
-    normalized_old = str(old_representative or "").strip()
-    normalized_new = str(new_representative or "").strip()
-    targeted_group_cns, skipped_group_cns = _normalized_group_cns(group_cns)
+    targeted_group_cns, skipped_group_cns = _group_cns(group_cns)
 
-    old_user = FreeIPAUser.get(normalized_old, respect_privacy=False) if normalized_old else None
-    new_user = FreeIPAUser.get(normalized_new, respect_privacy=False) if normalized_new else None
+    old_user = FreeIPAUser.get(old_representative, respect_privacy=False) if old_representative else None
+    new_user = FreeIPAUser.get(new_representative, respect_privacy=False) if new_representative else None
     old_groups = set(old_user.groups_list) if old_user is not None else set()
     new_groups = set(new_user.groups_list) if new_user is not None else set()
 
@@ -260,19 +252,19 @@ def sync_organization_representative_groups(
 
     for group_cn in targeted_group_cns:
         try:
-            if normalized_old:
+            if old_representative:
                 if old_user is None:
                     if missing_user_policy == FreeIPAMissingUserPolicy.treat_as_error:
-                        raise RuntimeError(f"old representative not found in FreeIPA: {normalized_old}")
+                        raise RuntimeError(f"old representative not found in FreeIPA: {old_representative}")
                 elif group_cn in old_groups:
                     old_user.remove_from_group(group_name=group_cn)
                     old_groups.discard(group_cn)
                     old_removed_group_cns.append(group_cn)
 
-            if normalized_new:
+            if new_representative:
                 if new_user is None:
                     if missing_user_policy == FreeIPAMissingUserPolicy.treat_as_error:
-                        raise RuntimeError(f"new representative not found in FreeIPA: {normalized_new}")
+                        raise RuntimeError(f"new representative not found in FreeIPA: {new_representative}")
                 elif group_cn not in new_groups:
                     new_user.add_to_group(group_name=group_cn)
                     new_groups.add(group_cn)
@@ -298,12 +290,20 @@ def sync_organization_representative_groups(
     if failed_group_cns and caller_mode == FreeIPACallerMode.log_and_continue:
         logger.warning(
             "sync_organization_representative_groups completed with failures old=%r new=%r failed=%r",
-            normalized_old,
-            normalized_new,
+            old_representative,
+            new_representative,
             failed_group_cns,
         )
 
     return result
+
+
+def is_freeipa_noop_error(*, error: Exception, is_add: bool) -> bool:
+    """Whether FreeIPA rejected a group change because it was already in effect."""
+    text = str(error).lower()
+    if is_add:
+        return "already" in text and "member" in text
+    return "not" in text and "member" in text
 
 
 def sync_organization_representative_membership_groups(
@@ -323,22 +323,11 @@ def sync_organization_representative_membership_groups(
     policy differences.
     """
 
-    normalized_representative = str(representative_username or "").strip()
-    normalized_old_group_cn = str(old_group_cn_to_remove or "").strip() or None
-
-    def is_freeipa_noop_error(*, error: Exception, is_add: bool) -> bool:
-        text = str(error or "").strip().lower()
-        if not text:
-            return False
-        if is_add:
-            return "already" in text and "member" in text
-        return "not" in text and "member" in text
-
-    if normalized_old_group_cn:
+    if old_group_cn_to_remove:
         try:
             old_outcome = remove_user_from_group_if_present(
-                username=normalized_representative,
-                group_cn=normalized_old_group_cn,
+                username=representative_username,
+                group_cn=old_group_cn_to_remove,
                 caller_mode=caller_mode,
                 missing_user_policy=missing_user_policy,
             )
@@ -346,7 +335,7 @@ def sync_organization_representative_membership_groups(
             if is_freeipa_noop_error(error=exc, is_add=False):
                 logger.info(
                     "astra.membership.freeipa_group.not_member group_cn=%r outcome=noop",
-                    normalized_old_group_cn,
+                    old_group_cn_to_remove,
                     extra={
                         "event": "astra.freeipa.group.mutation",
                         "component": "membership",
@@ -358,8 +347,8 @@ def sync_organization_representative_membership_groups(
                     "%s: on_commit old-group cleanup failed request_id=%s org_rep=%r group_cn=%r",
                     log_prefix,
                     membership_request_id,
-                    normalized_representative,
-                    normalized_old_group_cn,
+                    representative_username,
+                    old_group_cn_to_remove,
                     extra=current_exception_log_fields(),
                 )
         else:
@@ -368,14 +357,14 @@ def sync_organization_representative_membership_groups(
                     "%s: on_commit old-group cleanup returned failed request_id=%s org_rep=%r group_cn=%r",
                     log_prefix,
                     membership_request_id,
-                    normalized_representative,
-                    normalized_old_group_cn,
+                    representative_username,
+                    old_group_cn_to_remove,
                 )
 
     try:
         sync_organization_representative_groups(
             old_representative="",
-            new_representative=normalized_representative,
+            new_representative=representative_username,
             group_cns=group_cns,
             caller_mode=caller_mode,
             missing_user_policy=missing_user_policy,
@@ -398,7 +387,7 @@ def sync_organization_representative_membership_groups(
                 "%s: on_commit representative sync failed request_id=%s org_rep=%r group_cn=%r",
                 log_prefix,
                 membership_request_id,
-                normalized_representative,
+                representative_username,
                 ",".join(group_cns),
                 extra=current_exception_log_fields(),
             )
@@ -410,37 +399,34 @@ def rollback_organization_representative_groups(
     new_representative: str,
     journal: FreeIPARepresentativeSyncJournal,
 ) -> None:
-    normalized_old = str(old_representative or "").strip()
-    normalized_new = str(new_representative or "").strip()
-
     for group_cn in journal.new_added_group_cns:
-        if not normalized_new or not group_cn:
+        if not new_representative:
             continue
         try:
-            new_user = FreeIPAUser.get(normalized_new, respect_privacy=False)
+            new_user = FreeIPAUser.get(new_representative, respect_privacy=False)
             if new_user is None:
                 continue
             new_user.remove_from_group(group_name=group_cn)
         except Exception:
             logger.exception(
                 "rollback_organization_representative_groups failed to remove new representative from group new=%r group_cn=%r",
-                normalized_new,
+                new_representative,
                 group_cn,
                 extra=current_exception_log_fields(),
             )
 
     for group_cn in journal.old_removed_group_cns:
-        if not normalized_old or not group_cn:
+        if not old_representative:
             continue
         try:
-            old_user = FreeIPAUser.get(normalized_old, respect_privacy=False)
+            old_user = FreeIPAUser.get(old_representative, respect_privacy=False)
             if old_user is None:
                 continue
             old_user.add_to_group(group_name=group_cn)
         except Exception:
             logger.exception(
                 "rollback_organization_representative_groups failed to re-add old representative to group old=%r group_cn=%r",
-                normalized_old,
+                old_representative,
                 group_cn,
                 extra=current_exception_log_fields(),
             )
@@ -458,12 +444,10 @@ def remove_user_from_group_if_present(
     Only representative sync uses the raising caller modes, so their failures are
     reported as ``FreeIPARepresentativeSyncError``.
     """
-    normalized_username = str(username or "").strip()
-    normalized_group_cn = str(group_cn or "").strip()
-    if not normalized_username or not normalized_group_cn:
+    if not username or not group_cn:
         return FreeIPAGroupRemovalOutcome.noop_blank_input
 
-    user = FreeIPAUser.get(normalized_username, respect_privacy=False)
+    user = FreeIPAUser.get(username, respect_privacy=False)
     if user is None:
         outcome = FreeIPAGroupRemovalOutcome.user_not_found
         if (
@@ -473,42 +457,42 @@ def remove_user_from_group_if_present(
             raise FreeIPARepresentativeSyncError(
                 FreeIPARepresentativeSyncResult(
                     journal=FreeIPARepresentativeSyncJournal(
-                        targeted_group_cns=(normalized_group_cn,),
+                        targeted_group_cns=(group_cn,),
                         skipped_group_cns=(),
                         old_removed_group_cns=(),
                         new_added_group_cns=(),
                     ),
-                    failed_group_cns=(normalized_group_cn,),
+                    failed_group_cns=(group_cn,),
                     failure_details={
-                        normalized_group_cn: f"user not found in FreeIPA: {normalized_username}",
+                        group_cn: f"user not found in FreeIPA: {username}",
                     },
                 )
             )
         return outcome
 
-    if normalized_group_cn not in user.groups_list:
+    if group_cn not in user.groups_list:
         return FreeIPAGroupRemovalOutcome.already_not_member
 
     try:
-        user.remove_from_group(group_name=normalized_group_cn)
+        user.remove_from_group(group_name=group_cn)
     except Exception as exc:
         if _should_raise_for_failure(caller_mode):
             raise FreeIPARepresentativeSyncError(
                 FreeIPARepresentativeSyncResult(
                     journal=FreeIPARepresentativeSyncJournal(
-                        targeted_group_cns=(normalized_group_cn,),
+                        targeted_group_cns=(group_cn,),
                         skipped_group_cns=(),
                         old_removed_group_cns=(),
                         new_added_group_cns=(),
                     ),
-                    failed_group_cns=(normalized_group_cn,),
-                    failure_details={normalized_group_cn: str(exc)},
+                    failed_group_cns=(group_cn,),
+                    failure_details={group_cn: str(exc)},
                 )
             ) from exc
         logger.exception(
             "remove_user_from_group_if_present failed username=%s group_cn=%s",
-            normalized_username,
-            normalized_group_cn,
+            username,
+            group_cn,
             extra=current_exception_log_fields(),
         )
         return FreeIPAGroupRemovalOutcome.failed
@@ -613,27 +597,25 @@ def get_valid_memberships_by_organization_ids(*, organization_ids: Iterable[int]
 
 
 def remove_user_from_group(*, username: str, group_cn: str) -> bool:
-    normalized_username = str(username or "").strip()
-    normalized_group_cn = str(group_cn or "").strip()
-    if not normalized_username or not normalized_group_cn:
+    if not username or not group_cn:
         return False
 
-    user = FreeIPAUser.get(normalized_username, respect_privacy=False)
+    user = FreeIPAUser.get(username, respect_privacy=False)
     if user is None:
         logger.warning(
             "remove_user_from_group: user not found username=%s group_cn=%s",
-            normalized_username,
-            normalized_group_cn,
+            username,
+            group_cn,
         )
         return False
 
     try:
-        user.remove_from_group(group_name=normalized_group_cn)
+        user.remove_from_group(group_name=group_cn)
     except Exception:
         logger.exception(
             "remove_user_from_group: failed to remove user from group username=%s group_cn=%s",
-            normalized_username,
-            normalized_group_cn,
+            username,
+            group_cn,
             extra=current_exception_log_fields(),
         )
         return False
@@ -656,11 +638,7 @@ def resolve_request_ids_by_membership_type(
     if membership_type_ids is None:
         membership_type_ids = Membership.objects.filter(**target_filter).values_list("membership_type_id", flat=True)
 
-    membership_type_id_set = {
-        str(membership_type_id or "").strip()
-        for membership_type_id in membership_type_ids
-        if str(membership_type_id or "").strip()
-    }
+    membership_type_id_set = set(membership_type_ids)
     if not membership_type_id_set:
         return {}
 
@@ -772,11 +750,7 @@ def _normalize_live_usernames(
     elif live_usernames is None:
         live_usernames = (user.username for user in FreeIPAUser.all())
 
-    return {
-        normalized
-        for normalized in (str(username).strip().lower() for username in live_usernames)
-        if normalized
-    }
+    return {username.lower() for username in live_usernames}
 
 
 def visible_committee_membership_requests(

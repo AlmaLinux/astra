@@ -339,7 +339,7 @@ def _update_user_attrs(
         return [v for v in values if _delattr_name(v) != remove_attr]
 
     def _is_internal_error(exc: Exception) -> bool:
-        return "internal error" in (str(exc) or "").lower()
+        return "internal error" in str(exc).lower()
 
     while True:
         attempts += 1

@@ -25,6 +25,7 @@ from core.logging_extras import current_exception_log_fields
 from core.membership import (
     FreeIPACallerMode,
     FreeIPAMissingUserPolicy,
+    is_freeipa_noop_error,
     sync_organization_representative_membership_groups,
 )
 from core.membership_constants import MembershipCategoryCode
@@ -107,19 +108,16 @@ def ignore_open_membership_requests_for_target(
 ) -> int:
     """Ignore any pending or on-hold requests for a target that is being deleted."""
 
-    normalized_actor_username = str(actor_username or "").strip() or CUSTOS
-
     if (username is None) == (organization is None):
         raise ValueError("Provide exactly one of username or organization.")
 
     if username is not None:
-        normalized_username = str(username or "").strip()
-        if not normalized_username:
+        if not username:
             return 0
         open_requests = (
             MembershipRequest.objects.select_related("membership_type", "requested_organization")
             .filter(
-                requested_username=normalized_username,
+                requested_username=username,
                 status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
             )
             .order_by("pk")
@@ -138,7 +136,7 @@ def ignore_open_membership_requests_for_target(
     for membership_request in open_requests:
         ignore_membership_request(
             membership_request=membership_request,
-            actor_username=normalized_actor_username,
+            actor_username=actor_username or CUSTOS,
         )
         ignored_count += 1
 
@@ -237,15 +235,6 @@ def _try_record_email_note(
             action={"type": "contacted", "kind": email_kind, "email_id": email_id},
             log_prefix=log_prefix,
         )
-
-
-def _is_freeipa_noop_error(*, error: Exception, is_add: bool) -> bool:
-    text = str(error or "").strip().lower()
-    if not text:
-        return False
-    if is_add:
-        return "already" in text and "member" in text
-    return "not" in text and "member" in text
 
 
 def _send_membership_request_notification(
@@ -487,8 +476,7 @@ def _execute_membership_grant(
     membership_request: MembershipRequest | None = None,
     on_group_add_success: Callable[[], None] | None = None,
 ) -> MembershipLog:
-    normalized_target_username = str(target_username or "").strip()
-    if (not normalized_target_username) == (target_organization is None):
+    if (not target_username) == (target_organization is None):
         raise ValueError("Provide exactly one of target_username or target_organization")
 
     request_id = membership_request.pk if membership_request is not None else None
@@ -561,7 +549,7 @@ def _execute_membership_grant(
             raise ValidationError("This membership type is not linked to a group")
 
         missing_agreements = missing_required_agreements_for_user_in_group(
-            normalized_target_username,
+            target_username,
             membership_type.group_cn,
         )
         if missing_agreements:
@@ -572,20 +560,20 @@ def _execute_membership_grant(
             )
 
         try:
-            user = FreeIPAUser.get(normalized_target_username, respect_privacy=False)
+            user = FreeIPAUser.get(target_username, respect_privacy=False)
         except Exception:
             logger.exception(
                 "%s: FreeIPAUser.get failed request_id=%s target=%r",
                 log_prefix,
                 request_id,
-                normalized_target_username,
+                target_username,
                 extra=current_exception_log_fields(),
             )
             raise
         if user is None:
             raise ValidationError("Unable to load the requested user from FreeIPA")
 
-        group_add_payload = (normalized_target_username, membership_type.group_cn)
+        group_add_payload = (target_username, membership_type.group_cn)
 
         log = MembershipLog.create_for_approval(
             actor_username=actor_username,
@@ -593,7 +581,7 @@ def _execute_membership_grant(
             approved_at=approved_at,
             previous_expires_at=previous_expires_at,
             dues_usd=dues_usd,
-            target_username=normalized_target_username,
+            target_username=target_username,
             membership_request=membership_request,
         )
 
@@ -626,7 +614,7 @@ def _execute_membership_grant(
             try:
                 user_for_group_add.add_to_group(group_name=group_cn_to_add)
             except Exception as exc:
-                if _is_freeipa_noop_error(error=exc, is_add=True):
+                if is_freeipa_noop_error(error=exc, is_add=True):
                     callback_should_run = True
                     logger.info(
                         "astra.membership.freeipa_group.already_member group_cn=%s outcome=noop",
@@ -732,7 +720,7 @@ def grant_direct_membership(
         membership_type=membership_type,
         decided_at=starts_at,
         requested_at=starts_at,
-        target_username=str(target_username or "").strip(),
+        target_username=target_username,
         target_organization=target_organization,
     )
     approval_log = _execute_membership_grant(
@@ -1171,9 +1159,8 @@ def approve_membership_request(
     )
     if original_status == MembershipRequest.Status.on_hold:
         note_action: dict[str, str] = {"type": "on_hold_override_approved", "by": actor_username}
-        justification = str(on_hold_override_justification or "").strip()
-        if justification:
-            note_action["actors_note"] = justification
+        if on_hold_override_justification:
+            note_action["actors_note"] = on_hold_override_justification
         _try_add_note(
             membership_request=membership_request,
             username=actor_username,
@@ -1210,8 +1197,7 @@ def approve_on_hold_membership_request(
     if membership_request.status != MembershipRequest.Status.on_hold:
         raise ValidationError("Only on-hold requests can be approved with override")
 
-    normalized_justification = str(justification or "").strip()
-    if not normalized_justification:
+    if not justification:
         raise ValidationError("Override justification is required")
 
     return approve_membership_request(
@@ -1219,7 +1205,7 @@ def approve_on_hold_membership_request(
         actor_username=actor_username,
         send_approved_email=send_approved_email,
         allow_on_hold_override=True,
-        on_hold_override_justification=normalized_justification,
+        on_hold_override_justification=justification,
     )
 
 
@@ -1244,8 +1230,7 @@ def reject_membership_request(
     if membership_request.status not in {MembershipRequest.Status.pending, MembershipRequest.Status.on_hold}:
         raise ValidationError("Only pending or on-hold requests can be rejected")
 
-    reason = str(rejection_reason or "").strip()
-    if reason:
+    if rejection_reason:
         existing = membership_request.responses
         if isinstance(existing, list):
             responses = list(existing)
@@ -1254,7 +1239,7 @@ def reject_membership_request(
 
         # Preserve the applicant's original answers; store the committee's reason
         # as an additional response item so it is visible on request detail pages.
-        responses.append({"Rejection reason": reason})
+        responses.append({"Rejection reason": rejection_reason})
         membership_request.responses = responses
 
     target = _build_membership_target(membership_request)
@@ -1272,7 +1257,7 @@ def reject_membership_request(
                 target=target,
                 membership_type=membership_type,
                 template_name=settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
-                extra_context=freeform_message_email_context(key="rejection_reason", value=reason),
+                extra_context=freeform_message_email_context(key="rejection_reason", value=rejection_reason),
                 log_context={
                     "request_id": membership_request.pk,
                     "action": "rejected",
@@ -1293,7 +1278,7 @@ def reject_membership_request(
         actor_username=actor_username,
         membership_type=membership_type,
         action=MembershipLog.Action.rejected,
-        rejection_reason=reason,
+        rejection_reason=rejection_reason,
     )
 
     _try_add_note(
@@ -1455,9 +1440,8 @@ def put_membership_request_on_hold(
     if membership_request.status != MembershipRequest.Status.pending:
         raise ValidationError("Only pending requests can be put on hold")
 
-    message = str(rfi_message or "").strip()
     # The standard RFI email exists to ask something; a custom email is written separately in Send Mail.
-    if send_rfi_email and not message:
+    if send_rfi_email and not rfi_message:
         raise ValidationError("Enter the message for the request for information.")
 
     membership_request.status = MembershipRequest.Status.on_hold
@@ -1475,7 +1459,7 @@ def put_membership_request_on_hold(
                 membership_type=membership_type,
                 template_name=settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
                 extra_context={
-                    **freeform_message_email_context(key="rfi_message", value=message),
+                    **freeform_message_email_context(key="rfi_message", value=rfi_message),
                     "application_url": application_url,
                 },
                 log_context={
@@ -1510,7 +1494,7 @@ def put_membership_request_on_hold(
         # Persist the RFI message on the log so it can be surfaced later (e.g.
         # in the committee minutes). The field is a generic reason column shared
         # with rejections.
-        rejection_reason=message,
+        rejection_reason=rfi_message,
     )
 
     _try_add_note(

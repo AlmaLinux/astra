@@ -36,11 +36,9 @@ def parse_datetime_local_value(raw_value: str | datetime.datetime) -> datetime.d
 
 
 def is_self_nomination(*, candidate_username: str, nominator_username: str) -> bool:
-    candidate = str(candidate_username or "").strip().lower()
-    nominator = str(nominator_username or "").strip().lower()
-    if not candidate or not nominator:
+    if not candidate_username or not nominator_username:
         return False
-    return candidate == nominator
+    return candidate_username.lower() == nominator_username.lower()
 
 
 class ElectionDetailsForm(StyledModelForm):
@@ -130,7 +128,7 @@ class ElectionDetailsForm(StyledModelForm):
         if self.is_bound:
             raw = str(self.data.get("eligible_group_cn") or "").strip()
         else:
-            raw = str(self.initial.get("eligible_group_cn") or "").strip()
+            raw = self.initial.get("eligible_group_cn") or ""
             if not raw and self.instance.pk is not None:
                 raw = self.instance.eligible_group_cn
 
@@ -140,7 +138,7 @@ class ElectionDetailsForm(StyledModelForm):
         self.fields["eligible_group_cn"].choices = choices
 
     def clean_eligible_group_cn(self) -> str:
-        cn = str(self.cleaned_data.get("eligible_group_cn") or "").strip()
+        cn = self.cleaned_data["eligible_group_cn"]
         if not cn:
             return ""
 
@@ -217,8 +215,9 @@ class CandidateWizardForm(StyledModelForm):
     def clean(self) -> dict[str, object]:
         cleaned = super().clean()
 
-        candidate = str(cleaned.get("freeipa_username") or "").strip()
-        nominator = str(cleaned.get("nominated_by") or "").strip()
+        # Missing when the field failed its own validation.
+        candidate = cleaned.get("freeipa_username") or ""
+        nominator = cleaned.get("nominated_by") or ""
         if is_self_nomination(candidate_username=candidate, nominator_username=nominator):
             self.add_error("nominated_by", "Candidates cannot nominate themselves.")
 

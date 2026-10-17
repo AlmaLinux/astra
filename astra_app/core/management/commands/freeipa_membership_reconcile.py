@@ -208,12 +208,11 @@ class Command(BaseCommand):
         freeipa_users_by_username: dict[str, FreeIPAUser | None] = {}
 
         def get_freeipa_user(username: str) -> FreeIPAUser | None:
-            normalized = str(username or "").strip()
-            if not normalized:
+            if not username:
                 return None
-            if normalized not in freeipa_users_by_username:
-                freeipa_users_by_username[normalized] = FreeIPAUser.get(normalized)
-            return freeipa_users_by_username[normalized]
+            if username not in freeipa_users_by_username:
+                freeipa_users_by_username[username] = FreeIPAUser.get(username)
+            return freeipa_users_by_username[username]
 
         for membership_type in membership_types.order_by("code"):
             group_cn = membership_type.group_cn
@@ -229,9 +228,9 @@ class Command(BaseCommand):
                 ).active(at=now)
 
                 for username in active_memberships.values_list("target_username", flat=True):
-                    normalized = str(username or "").strip()
-                    if normalized:
-                        expected.add(normalized)
+                    # Mirror memberships count as individual but may belong to an organization.
+                    if username:
+                        expected.add(username)
 
             # Organization members: representatives of orgs with an active
             # Membership row for this type (source of truth: Membership table).
@@ -306,7 +305,7 @@ class Command(BaseCommand):
                 logger.error("freeipa_membership_reconcile: group_not_found group=%s", group_cn)
                 continue
 
-            actual = {str(member or "").strip() for member in group.members if str(member or "").strip()}
+            actual = set(group.members)
             missing = sorted(expected - actual, key=str.lower)
             extra = sorted(actual - expected, key=str.lower)
             if targeted_mode:

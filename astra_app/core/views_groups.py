@@ -50,20 +50,10 @@ def _can_use_group_management_search(request: HttpRequest) -> bool:
         if not group.fas_group:
             continue
 
-        try:
-            sponsors = {str(sponsor).strip() for sponsor in group.sponsors if str(sponsor).strip()}
-        except AttributeError:
-            sponsors = set()
-
-        if username in sponsors:
+        if username in group.sponsors:
             return True
 
-        try:
-            sponsor_groups = {str(group_name).strip() for group_name in group.sponsor_groups if str(group_name).strip()}
-        except AttributeError:
-            sponsor_groups = set()
-
-        if {group_name.lower() for group_name in sponsor_groups} & user_groups_lower:
+        if {group_name.lower() for group_name in group.sponsor_groups} & user_groups_lower:
             return True
 
     return False

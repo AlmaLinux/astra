@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
@@ -22,7 +23,7 @@ from core.avatar_providers import resolve_avatar_urls_for_users
 from core.country_codes import country_code_status_from_user_data, country_name_from_code
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
-from core.freeipa_directory import snapshot_freeipa_users
+from core.freeipa_directory import normalize_user_search_query, snapshot_freeipa_users, user_matches_search_query
 from core.ipa_user_attrs import _data_get, _first, _get_full_user, _split_list_field, _value_to_text
 from core.membership import (
     build_pending_request_context,
@@ -41,16 +42,16 @@ from core.membership_payloads import (
 )
 from core.models import MembershipRequest, MembershipType
 from core.permissions import can_view_user_directory, membership_review_permissions
-from core.templatetags._grid_tag_utils import parse_grid_query
 from core.templatetags._user_helpers import try_get_full_name
-from core.templatetags.core_user_grid import build_user_grid_page
 from core.views_utils import (
     _normalize_str,
     agreement_settings_url,
     chat_link_bootstrap_context,
     get_username,
     normalize_freeipa_username,
+    pagination_window,
     settings_url,
+    try_get_username_from_user,
 )
 
 logger = logging.getLogger(__name__)
@@ -640,7 +641,7 @@ def _profile_context_for_user(
         "website_urls": website_urls,
         "website_url_values": [url.strip() for url in website_url_values if url.strip()],
         "rss_urls": rss_urls,
-        "rss_url_values": [url.strip() for url in _as_list(_data_get(data, "fasRssUrl", [])) if url.strip()],
+        "rss_url_values": _as_list(_data_get(data, "fasRssUrl", [])),
         "rhbz_email": _first(data, "fasRHBZEmail", "") or "",
         "github_username": _first(data, "fasGitHubUsername", "") or "",
         "gitlab_username": _first(data, "fasGitLabUsername", "") or "",
@@ -688,7 +689,9 @@ def _build_user_profile_summary_data(context: dict[str, object]) -> dict[str, ob
     summary = _build_user_profile_summary_bootstrap(context)
     summary.pop("currentTimeLabel", None)
     summary.pop("profileCountry", None)
-    summary["countryCode"] = str(context["country_code"] or "") if bool(context["viewer_is_membership_committee"]) else ""
+    summary["countryCode"] = (
+        (cast(str | None, context["country_code"]) or "") if context["viewer_is_membership_committee"] else ""
+    )
     summary["socialProfiles"] = cast(list[dict[str, object]], context["social_profile_urls"])
     summary["websiteUrls"] = cast(list[str], context["website_url_values"])
     summary["rssUrls"] = cast(list[str], context["rss_url_values"])
@@ -1036,17 +1039,25 @@ def users_api(request: HttpRequest) -> JsonResponse:
 
         return ""
 
-    q, page_number, _base_query, _page_url_prefix = parse_grid_query(request)
     users_list = snapshot_freeipa_users()
+    normalized_query = normalize_user_search_query(_normalize_str(request.GET.get("q")))
+    if normalized_query:
+        users_list = [
+            user
+            for user in users_list
+            if user_matches_search_query(
+                normalized_query=normalized_query,
+                username=try_get_username_from_user(user),
+                full_name=try_get_full_name(user),
+            )
+        ]
+    users_sorted = sorted(users_list, key=lambda user: try_get_username_from_user(user).lower())
 
-    users_page, paginator, page_obj, page_numbers, show_first, show_last = build_user_grid_page(
-        users_list=users_list,
-        q=q,
-        page_number=page_number,
-        per_page=28,
-    )
+    paginator = Paginator(users_sorted, 28)
+    page_obj = paginator.get_page(_normalize_str(request.GET.get("page")) or None)
+    page_numbers, show_first, show_last = pagination_window(paginator, page_obj.number)
 
-    users_page_list = list(users_page)
+    users_page_list = list(page_obj.object_list)
     avatar_url_by_username, avatar_resolution_count, avatar_fallback_count = resolve_avatar_urls_for_users(
         users_page_list,
         width=50,

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_invitation_email(value: str) -> str:
-    return str(value or "").strip().lower()
+    return value.strip().lower()
 
 
 def invitation_template_names() -> list[str]:
@@ -146,9 +146,8 @@ def resolve_invitation_template_selection(
     if not template_names:
         return None, "no_templates"
 
-    selected = str(selected_name or "").strip()
-    if selected:
-        template_name = selected if selected in template_names else None
+    if selected_name:
+        template_name = selected_name if selected_name in template_names else None
     elif allow_default:
         template_name = template_names[0]
     else:
@@ -301,11 +300,7 @@ def classify_invitation_upload_rows(
                     if existing_invitation is not None and existing_invitation.accepted_at:
                         status = "existing"
                         reason = "Accepted invitation"
-                        matches = [
-                            str(username or "").strip().lower()
-                            for username in existing_invitation.freeipa_matched_usernames
-                            if str(username or "").strip()
-                        ]
+                        matches = list(existing_invitation.freeipa_matched_usernames)
                     else:
                         status = "resend" if existing_invitation is not None else "new"
 
@@ -331,10 +326,9 @@ def dismiss_account_invitations(
     now: datetime,
 ) -> int:
     updated = 0
-    normalized_actor_username = str(actor_username or "").strip()
     for invitation in invitations:
         invitation.dismissed_at = now
-        invitation.dismissed_by_username = normalized_actor_username
+        invitation.dismissed_by_username = actor_username
         invitation.save(update_fields=["dismissed_at", "dismissed_by_username"])
         updated += 1
     return updated
@@ -476,8 +470,8 @@ def confirm_existing_usernames(usernames: list[str]) -> tuple[list[str], bool]:
     seen: set[str] = set()
 
     for username in usernames:
-        normalized = str(username or "").strip().lower()
-        if not normalized or normalized in seen:
+        normalized = username.lower()
+        if normalized in seen:
             continue
         try:
             user = FreeIPAUser.get(normalized, respect_privacy=False)

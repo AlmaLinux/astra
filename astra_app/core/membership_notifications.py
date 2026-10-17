@@ -42,9 +42,8 @@ def organization_membership_request_url(
     base_url: str | None = None,
 ) -> str:
     path = reverse("organization-membership-request", kwargs={"organization_id": organization_id})
-    normalized_type_code = str(membership_type_code or "").strip()
-    if normalized_type_code:
-        path = f"{path}?{urlencode({'membership_type': normalized_type_code})}"
+    if membership_type_code:
+        path = f"{path}?{urlencode({'membership_type': membership_type_code})}"
 
     return build_public_absolute_url(path=path, on_missing="relative", base_url=base_url)
 

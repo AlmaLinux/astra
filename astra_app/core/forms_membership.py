@@ -247,8 +247,8 @@ class MembershipRequestForm(StyledForm):
         specs = self.question_specs_for_membership_type(membership_type)
 
         for spec in specs:
-            raw = cleaned.get(spec.field_name)
-            value = str(raw or "").strip()
+            # Missing when the field failed its own validation.
+            value = cleaned.get(spec.field_name, "")
             cleaned[spec.field_name] = value
             if spec.required and not value:
                 self.add_error(spec.field_name, "This field is required.")
@@ -260,7 +260,7 @@ class MembershipRequestForm(StyledForm):
         specs = self.question_specs_for_membership_type(membership_type)
         out: list[dict[str, str]] = []
         for spec in specs:
-            value = str(self.cleaned_data.get(spec.field_name) or "").strip()
+            value = self.cleaned_data.get(spec.field_name, "")
             if value or spec.required:
                 out.append({spec.name: value})
         return out
@@ -322,7 +322,7 @@ class MembershipRequestUpdateResponsesForm(StyledForm):
         self._append_css_class("w-100")
 
     def responses(self) -> list[dict[str, str]]:
-        raw_responses = [{spec.name: str(self.cleaned_data.get(spec.field_name) or "")} for spec in self._question_specs]
+        raw_responses = [{spec.name: self.cleaned_data.get(spec.field_name, "")} for spec in self._question_specs]
         normalized_responses = normalize_membership_request_responses(
             responses=raw_responses,
             is_mirror_membership=self._is_mirror_request,

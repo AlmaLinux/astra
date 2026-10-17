@@ -39,30 +39,29 @@ def get_freeipa_group_for_elections(*, cn: str, require_fresh: bool = False) -> 
     distinguishes missing groups from transient failures.
     """
 
-    group_cn = str(cn or "").strip()
-    if not group_cn:
+    if not cn:
         raise FreeIPAMisconfiguredError("FreeIPA group cn is required")
 
     if _elections_freeipa_circuit_open():
         raise FreeIPAUnavailableError("FreeIPA circuit breaker is open")
 
-    cache_key = _group_cache_key(group_cn)
+    cache_key = _group_cache_key(cn)
     if not require_fresh:
         cached_data = cache.get(cache_key)
         if cached_data is not None:
-            return FreeIPAGroup(group_cn, cached_data)
+            return FreeIPAGroup(cn, cached_data)
 
     try:
         result = _with_freeipa_service_client_retry(
             FreeIPAGroup.get_client,
-            lambda client: client.group_find(o_cn=group_cn, o_all=True, o_no_members=False),
+            lambda client: client.group_find(o_cn=cn, o_all=True, o_no_members=False),
         )
     except Exception as exc:
         if isinstance(exc, FreeIPAUnavailableError) or _is_freeipa_availability_error(exc):
             _record_elections_freeipa_availability_failure()
             logger.exception(
                 "FreeIPA elections group lookup failed cn=%s: %s",
-                group_cn,
+                cn,
                 exc,
                 extra=current_exception_log_fields(),
             )
@@ -70,16 +69,16 @@ def get_freeipa_group_for_elections(*, cn: str, require_fresh: bool = False) -> 
         raise
 
     if not isinstance(result, dict) or result.get("count", 0) <= 0:
-        raise FreeIPAMisconfiguredError(f"FreeIPA group not found: {group_cn}")
+        raise FreeIPAMisconfiguredError(f"FreeIPA group not found: {cn}")
 
     group_data = (result.get("result") or [None])[0]
     if not isinstance(group_data, dict):
-        raise FreeIPAMisconfiguredError(f"FreeIPA group not found: {group_cn}")
+        raise FreeIPAMisconfiguredError(f"FreeIPA group not found: {cn}")
 
     _reset_elections_freeipa_circuit_failures()
 
     cache.set(cache_key, group_data)
-    return FreeIPAGroup(group_cn, group_data)
+    return FreeIPAGroup(cn, group_data)
 
 
 def resolve_materialized_team_leads_usernames() -> set[str]:
@@ -500,7 +499,6 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             raise
 
     def add_sponsor_group(self, group_cn: str) -> None:
-        group_cn = str(group_cn).strip()
         if not group_cn:
             return
         try:
@@ -526,7 +524,6 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             raise
 
     def remove_sponsor_group(self, group_cn: str) -> None:
-        group_cn = str(group_cn).strip()
         if not group_cn:
             return
         try:
@@ -585,7 +582,6 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             raise
 
     def add_member_group(self, group_cn: str) -> None:
-        group_cn = str(group_cn).strip()
         if not group_cn:
             return
         try:
@@ -608,7 +604,6 @@ class FreeIPAGroup(_FreeIPAClientMixin):
             raise
 
     def remove_member_group(self, group_cn: str) -> None:
-        group_cn = str(group_cn).strip()
         if not group_cn:
             return
         try:

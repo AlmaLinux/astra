@@ -30,6 +30,10 @@ from core.membership_response_normalization import normalize_membership_request_
 from core.models import Membership, MembershipRequest, MembershipType, Organization
 from core.permissions import ASTRA_ADD_MEMBERSHIP, ASTRA_CHANGE_MEMBERSHIP, ASTRA_VIEW_MEMBERSHIP
 from core.templatetags.core_membership_responses import serialize_membership_response
+from core.views_membership.committee import (
+    MembershipRequestCommitteeContext,
+    build_membership_request_detail_committee_context,
+)
 from core.views_utils import (
     _normalize_str,
     block_action_without_coc,
@@ -82,10 +86,9 @@ def _serialize_membership_request_form_option_groups(
     *,
     bound_field: forms.BoundField,
 ) -> list[dict[str, object]]:
-    category_map_raw = str(bound_field.field.widget.attrs.get("data-category-map") or "").strip()
-    category_map: dict[str, str] = {}
-    if category_map_raw:
-        category_map = json.loads(category_map_raw)
+    # Set by MembershipRequestForm on its membership type field.
+    category_map_raw = bound_field.field.widget.attrs.get("data-category-map")
+    category_map: dict[str, str] = json.loads(category_map_raw) if category_map_raw else {}
 
     groups: list[dict[str, object]] = []
     current_value = "" if bound_field.value() is None else str(bound_field.value())
@@ -99,7 +102,7 @@ def _serialize_membership_request_form_option_groups(
                     "label": str(option_label),
                     "selected": str(option_value) == current_value,
                     "disabled": False,
-                    "category": str(category_map.get(str(option_value)) or ""),
+                    "category": category_map.get(str(option_value), ""),
                 }
                 for option_value, option_label in group_choices
             ]
@@ -117,7 +120,7 @@ def _serialize_membership_request_form_option_groups(
                         "label": option_label,
                         "selected": option_value == current_value,
                         "disabled": False,
-                        "category": str(category_map.get(option_value) or ""),
+                        "category": category_map.get(option_value, ""),
                     }
                 ],
             }
@@ -329,7 +332,6 @@ def _renewal_prefill_responses(
     organization: Organization | None,
 ) -> dict[str, str]:
     """Return initial form values from the latest request for this renewal target/type."""
-    membership_type_code = str(membership_type_code or "").strip()
     if not membership_type_code:
         return {}
 
@@ -337,10 +339,9 @@ def _renewal_prefill_responses(
     if organization is not None:
         requests = requests.filter(requested_organization=organization)
     else:
-        normalized_username = str(username or "").strip()
-        if not normalized_username:
+        if not username:
             return {}
-        requests = requests.filter(requested_username=normalized_username)
+        requests = requests.filter(requested_username=username)
 
     latest = requests.select_related("membership_type").only("responses", "membership_type__category_id").order_by(
         "-requested_at",
@@ -520,15 +521,15 @@ def membership_request_form_detail_api(
 
 
 def _user_can_access_membership_request(*, username: str, membership_request: MembershipRequest) -> bool:
-    normalized_username = str(username or "").strip().lower()
-    if not normalized_username:
+    # get_username() already lowercases.
+    if not username:
         return False
 
     if membership_request.requested_username:
-        return membership_request.requested_username.lower() == normalized_username
+        return membership_request.requested_username.lower() == username
 
     org = membership_request.requested_organization
-    return org is not None and org.representative.lower() == normalized_username
+    return org is not None and org.representative.lower() == username
 
 
 def _load_membership_request_for_detail(*, pk: int) -> MembershipRequest:
@@ -644,35 +645,24 @@ def _serialize_membership_request_responses(*, membership_request: MembershipReq
     ]
 
 
-def _membership_request_detail_committee_context(*, request: HttpRequest, membership_request: MembershipRequest) -> dict[str, object]:
-    from core.views_membership.committee import (
-        build_membership_request_detail_committee_context,
-    )
-
-    return build_membership_request_detail_committee_context(
-        request=request,
-        membership_request=membership_request,
-    )
-
-
 def _committee_detail_payload(
     *,
     request: HttpRequest,
     membership_request: MembershipRequest,
-    context: dict[str, object],
+    context: MembershipRequestCommitteeContext,
 ) -> dict[str, object]:
 
-    embargoed_country_code = str(context.get("embargoed_country_code") or "")
-    embargoed_country_label = str(context.get("embargoed_country_label") or embargoed_country_code)
+    embargoed_country_code = context["embargoed_country_code"]
+    embargoed_country_label = context["embargoed_country_label"]
     compliance_warning: dict[str, str] | None = None
-    if embargoed_country_code:
+    if embargoed_country_code and embargoed_country_label:
         compliance_warning = {
             "country_code": embargoed_country_code,
             "country_label": embargoed_country_label,
             "message": f"This user's declared country, {embargoed_country_label}, is on the list of embargoed countries.",
         }
 
-    requested_by_username = str(context.get("requested_by_username") or "")
+    requested_by_username = context["requested_by_username"]
 
     return {
         "reopen": {
@@ -681,15 +671,15 @@ def _committee_detail_payload(
         "compliance_warning": compliance_warning,
         "dues": request_dues_payloads([membership_request]).get(membership_request.pk),
         "actions": {
-            "canRequestInfo": bool(context.get("membership_request_can_request_info", False)),
-            "showOnHoldApprove": bool(context.get("show_on_hold_approve", False)),
+            "canRequestInfo": context["membership_request_can_request_info"],
+            "showOnHoldApprove": context["show_on_hold_approve"],
             "canSetDues": request.user.has_perm(ASTRA_CHANGE_MEMBERSHIP),
         },
         "requested_by": {
             "show": bool(requested_by_username),
             "username": requested_by_username,
-            "full_name": str(context.get("requested_by_full_name") or ""),
-            "deleted": bool(context.get("requested_by_deleted", False)),
+            "full_name": context["requested_by_full_name"],
+            "deleted": context["requested_by_deleted"],
         },
     }
 
@@ -698,18 +688,18 @@ def _committee_detail_bootstrap(
     *,
     request: HttpRequest,
     membership_request: MembershipRequest,
-    context: dict[str, object],
+    context: MembershipRequestCommitteeContext,
 ) -> dict[str, object]:
     return {
-        "contact_url": str(context.get("contact_url") or ""),
+        "contact_url": context["contact_url"],
         "reopen_url": reverse("api-membership-request-reopen", args=[membership_request.pk]),
         "note_summary_url": reverse("api-membership-request-notes-summary", args=[membership_request.pk]),
         "note_detail_url": reverse("api-membership-request-notes", args=[membership_request.pk]),
         "note_add_url": reverse("api-membership-request-notes-add", args=[membership_request.pk]),
         "note_next_url": request.get_full_path(),
-        "notes_can_view": bool(context.get("membership_can_view", False)),
-        "notes_can_write": bool(context.get("membership_can_write", False)),
-        "notes_can_vote": bool(context.get("membership_can_vote", False)),
+        "notes_can_view": context["membership_can_view"],
+        "notes_can_write": context["membership_can_write"],
+        "notes_can_vote": context["membership_can_vote"],
         "approve_url": reverse("api-membership-request-approve", args=[membership_request.pk]),
         "approve_on_hold_url": reverse("api-membership-request-approve-on-hold", args=[membership_request.pk]),
         "reject_url": reverse("api-membership-request-reject", args=[membership_request.pk]),
@@ -852,7 +842,9 @@ def _build_membership_request_detail_state(request: HttpRequest, *, pk: int) -> 
     }
 
     if viewer_mode == "committee":
-        committee_context = _membership_request_detail_committee_context(request=request, membership_request=membership_request)
+        committee_context = build_membership_request_detail_committee_context(
+            request=request, membership_request=membership_request
+        )
         committee_payload = _committee_detail_payload(
             request=request,
             membership_request=membership_request,

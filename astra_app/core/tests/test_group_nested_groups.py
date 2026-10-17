@@ -5,7 +5,6 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.freeipa.group import FreeIPAGroup
-from core.freeipa.user import FreeIPAUser
 
 
 class GroupNestedGroupsDisplayTests(TestCase):
@@ -66,22 +65,7 @@ class GroupNestedGroupsDisplayTests(TestCase):
                 "grand": grand,
             }.get(cn)
 
-        def _fake_user_get(username: str) -> FreeIPAUser:
-            return FreeIPAUser(
-                username,
-                {
-                    "uid": [username],
-                    "givenname": [username.title()],
-                    "sn": ["User"],
-                    "mail": [f"{username}@example.com"],
-                    "memberof_group": [],
-                },
-            )
-
-        with (
-            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_group_get),
-            patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
-        ):
+        with patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_group_get):
             resp = self.client.get("/group/parent/")
             info_resp = self.client.get(reverse("api-group-detail-info", args=["parent"]))
 
@@ -134,22 +118,7 @@ class GroupNestedGroupsDisplayTests(TestCase):
                 "legacy": legacy,
             }.get(cn)
 
-        def _fake_user_get(username: str) -> FreeIPAUser:
-            return FreeIPAUser(
-                username,
-                {
-                    "uid": [username],
-                    "givenname": [username.title()],
-                    "sn": ["User"],
-                    "mail": [f"{username}@example.com"],
-                    "memberof_group": [],
-                },
-            )
-
-        with (
-            patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_group_get),
-            patch("core.templatetags.core_user_widget.FreeIPAUser.get", side_effect=_fake_user_get),
-        ):
+        with patch("core.freeipa.group.FreeIPAGroup.get", side_effect=_fake_group_get):
             resp = self.client.get("/group/parent/")
             info_resp = self.client.get(reverse("api-group-detail-info", args=["parent"]))
 

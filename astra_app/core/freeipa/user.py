@@ -328,7 +328,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
             if not users_data:
                 return
 
-        wanted = {str(u).strip().lower() for u in usernames if u}
+        wanted = {u.lower() for u in usernames}
         for user_data in users_data:
             if not isinstance(user_data, dict):
                 continue
@@ -409,7 +409,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
 
     @classmethod
     def find_by_email(cls, email: str) -> FreeIPAUser | None:
-        email = (email or "").strip().lower()
+        email = email.strip().lower()
         if not email:
             return None
 
@@ -450,11 +450,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
 
     @classmethod
     def find_lightweight_by_usernames(cls, usernames: Collection[str]) -> dict[str, FreeIPAUser]:
-        normalized_usernames = sorted({
-            str(username or "").strip().lower()
-            for username in usernames
-            if str(username or "").strip()
-        })
+        normalized_usernames = sorted({username.lower() for username in usernames if username})
         if not normalized_usernames:
             return {}
 
@@ -526,7 +522,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
 
     @classmethod
     def find_usernames_by_email(cls, email: str) -> list[str]:
-        normalized = (email or "").strip().lower()
+        normalized = email.strip().lower()
         if not normalized:
             return []
 
@@ -746,7 +742,7 @@ class FreeIPAUser(_FreeIPAClientMixin):
         except Exception:
             return perms
 
-        groups = [str(g or "").strip().lower() for g in self.groups_list if str(g or "").strip()]
+        groups = [group.lower() for group in self.groups_list]
         if not groups:
             return perms
 

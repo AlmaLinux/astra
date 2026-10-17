@@ -10,21 +10,19 @@ def user_label(username: str, *, user: FreeIPAUser | None = None) -> str:
     Fall back to just the username if FreeIPA is unavailable or lacks a name.
     """
 
-    u = str(username or "").strip()
-    if not u:
+    if not username:
         return ""
 
     full_name = "" if user is None else user.full_name
-    if full_name and full_name != u:
-        return f"{full_name} ({u})"
-    return u
+    if full_name and full_name != username:
+        return f"{full_name} ({username})"
+    return username
 
 
 def user_choice(username: str, *, user: FreeIPAUser | None = None) -> tuple[str, str]:
-    u = str(username or "").strip()
-    if not u:
+    if not username:
         return ("", "")
-    return (u, user_label(u, user=user))
+    return (username, user_label(username, user=user))
 
 
 def user_choice_from_freeipa(username: str) -> tuple[str, str]:
@@ -54,8 +52,7 @@ def user_choice_with_fallback(username: str, users_by_username: Mapping[str, Fre
 def user_choices_from_users(usernames: list[str], *, users_by_username: Mapping[str, FreeIPAUser]) -> list[tuple[str, str]]:
     choices: list[tuple[str, str]] = []
     for username in usernames:
-        u = str(username or "").strip()
-        if not u:
+        if not username:
             continue
-        choices.append(user_choice(u, user=users_by_username.get(u)))
+        choices.append(user_choice(username, user=users_by_username.get(username)))
     return choices

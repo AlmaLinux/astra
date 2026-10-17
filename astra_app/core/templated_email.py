@@ -42,10 +42,9 @@ _REQUIRED_TEMPLATE_VAR_PATTERN = re.compile(r"{{\s*(?P<var>[A-Za-z0-9_]+)\b")
 
 
 def validate_email_subject(subject: str) -> str:
-    value = str(subject or "")
-    if "\r" in value or "\n" in value:
+    if "\r" in subject or "\n" in subject:
         raise ValueError("Email subjects cannot contain line breaks.")
-    return value
+    return subject
 
 
 def configured_email_template_names() -> frozenset[str]:
@@ -183,8 +182,7 @@ def stage_inline_images_for_sending(
         prefix = match.group("prefix")
         suffix = match.group("suffix")
         quote = match.group("q")
-        raw_arg = match.group("urlq") or match.group("urlb") or ""
-        raw_arg = str(raw_arg).strip()
+        raw_arg = (match.group("urlq") or match.group("urlb") or "").strip()
         if not raw_arg:
             return match.group(0)
 
@@ -211,7 +209,7 @@ def stage_inline_images_for_sending(
                         "event": "astra.email.inline_image.missing",
                         "component": "email",
                         "outcome": "warning",
-                        "template_name": str(template_name or "").strip() or "unknown",
+                        "template_name": template_name or "unknown",
                         "image_ref": raw_arg,
                         "correlation_id": "email.templated.queue",
                     },
@@ -242,7 +240,7 @@ def stage_inline_images_for_sending(
             return f"{prefix}{quote}{local_path}{quote}{suffix}"
         return f"{prefix}{local_path}{suffix}"
 
-    rewritten = _INLINE_IMAGE_TAG_REWRITE_PATTERN.sub(repl, str(html_content or ""))
+    rewritten = _INLINE_IMAGE_TAG_REWRITE_PATTERN.sub(repl, html_content)
     return rewritten, temp_paths
 
 
@@ -500,7 +498,7 @@ def bulk_save_emails(
 
 def _iter_pluralize_vars(*sources: str) -> Iterable[str]:
     for s in sources:
-        for m in _PLURALIZE_PATTERN.finditer(str(s or "")):
+        for m in _PLURALIZE_PATTERN.finditer(s):
             yield m.group("var")
 
 
@@ -591,7 +589,7 @@ def _apply_pluralize_placeholders(*, template: str, render_context: Mapping[str,
 def placeholder_context_from_sources(*sources: str) -> dict[str, str]:
     names: set[str] = set()
     for s in sources:
-        for m in _VAR_PATTERN.finditer(str(s or "")):
+        for m in _VAR_PATTERN.finditer(s):
             names.add(m.group(1))
     return {name: f"-{name}-" for name in sorted(names)}
 
@@ -610,13 +608,13 @@ def preview_rewrite_inline_image_tags_to_urls(value: str) -> str:
         bare = match.group("urlb")
         return bare or ""
 
-    return _INLINE_IMAGE_TAG_PATTERN.sub(repl, str(value or ""))
+    return _INLINE_IMAGE_TAG_PATTERN.sub(repl, value)
 
 
 def preview_drop_inline_image_tags(value: str) -> str:
     """Drop `{% inline_image '...' %}` entirely (useful for plain-text previews)."""
 
-    return _INLINE_IMAGE_TAG_PATTERN.sub("", str(value or ""))
+    return _INLINE_IMAGE_TAG_PATTERN.sub("", value)
 
 
 def placeholderize_empty_values(context: Mapping[str, object]) -> dict[str, object]:
@@ -686,7 +684,7 @@ def execute_email_template_save(
         return template
 
     return create_email_template_unique(
-        raw_name=str(raw_name or ""),
+        raw_name=raw_name or "",
         subject=subject,
         html_content=html_content,
         text_content=text_content,

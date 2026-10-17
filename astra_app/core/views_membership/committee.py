@@ -1,6 +1,7 @@
 import json
 import logging
 from collections.abc import Mapping, Sequence
+from typing import TypedDict
 
 from django.conf import settings
 from django.contrib import messages
@@ -54,7 +55,6 @@ from core.permissions import (
     ASTRA_ADD_SEND_MAIL,
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
-    ASTRA_VIEW_MEMBERSHIP,
     has_any_membership_manage_permission,
     json_permission_required,
     json_permission_required_any,
@@ -734,20 +734,29 @@ def membership_notes_aggregate_add_api(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"ok": False, "error": "Failed to add note."}, status=500)
 
 
-@permission_required(ASTRA_VIEW_MEMBERSHIP, login_url=reverse_lazy("users"))
-def membership_request_detail(request: HttpRequest, pk: int) -> HttpResponse:
-    req = get_object_or_404(membership_request_queryset(), pk=pk)
-    return render_membership_request_detail_for_committee(request=request, membership_request=req)
+class MembershipRequestCommitteeContext(TypedDict):
+    """What the committee sees on a request's detail page beyond the request itself."""
+
+    # The declared country of the target, or its representative, when embargoed.
+    embargoed_country_code: str | None
+    embargoed_country_label: str | None
+    requested_by_username: str
+    requested_by_full_name: str
+    requested_by_deleted: bool
+    contact_url: str
+    show_on_hold_approve: bool
+    membership_request_can_request_info: bool
+    membership_can_view: bool
+    membership_can_write: bool
+    membership_can_vote: bool
 
 
 def build_membership_request_detail_committee_context(
     *,
     request: HttpRequest,
     membership_request: MembershipRequest,
-) -> dict[str, object]:
+) -> MembershipRequestCommitteeContext:
     req = membership_request
-    request_target_label = req.requested_username if req.is_user_target else (req.organization_display_name or "organization")
-
     show_on_hold_approve = req.status == MembershipRequest.Status.on_hold and request.user.has_perm(ASTRA_ADD_MEMBERSHIP)
 
     contact_url = ""
@@ -765,32 +774,20 @@ def build_membership_request_detail_committee_context(
                 reply_to=settings.MEMBERSHIP_COMMITTEE_EMAIL,
             )
 
-    target_user = None
-    target_full_name = ""
-    target_deleted = False
+    if req.requested_username:
+        country_holder_username = req.requested_username
+    else:
+        org = req.requested_organization
+        country_holder_username = org.representative if org is not None else ""
     embargoed_country_code: str | None = None
     embargoed_country_label: str | None = None
-    if req.requested_username:
-        target_user = FreeIPAUser.get(req.requested_username, respect_privacy=False)
-        target_deleted = target_user is None
-        if target_user is not None:
-            target_full_name = target_user.full_name
-            embargoed_match = embargoed_country_match_from_user_data(user_data=target_user._user_data)
+    if country_holder_username:
+        country_holder = FreeIPAUser.get(country_holder_username, respect_privacy=False)
+        if country_holder is not None:
+            embargoed_match = embargoed_country_match_from_user_data(user_data=country_holder._user_data)
             if embargoed_match is not None:
                 embargoed_country_code = embargoed_match.code
                 embargoed_country_label = embargoed_match.label
-    else:
-        org = req.requested_organization
-        representative_username = org.representative if org is not None else ""
-        if representative_username:
-            representative_user = FreeIPAUser.get(representative_username, respect_privacy=False)
-            if representative_user is not None:
-                embargoed_match = embargoed_country_match_from_user_data(
-                    user_data=representative_user._user_data,
-                )
-                if embargoed_match is not None:
-                    embargoed_country_code = embargoed_match.code
-                    embargoed_country_label = embargoed_match.label
 
     requested_log = (
         req.logs.filter(action=MembershipLog.Action.requested)
@@ -806,10 +803,6 @@ def build_membership_request_detail_committee_context(
     can_vote = review_permissions.get("membership_can_add", False) or review_permissions.get("membership_can_change", False) or review_permissions.get("membership_can_delete", False)
 
     return {
-        "req": req,
-        "target_user": target_user,
-        "target_full_name": target_full_name,
-        "target_deleted": target_deleted,
         "embargoed_country_code": embargoed_country_code,
         "embargoed_country_label": embargoed_country_label,
         "requested_by_username": requested_by_username,
@@ -817,34 +810,11 @@ def build_membership_request_detail_committee_context(
         "requested_by_deleted": requested_by_deleted,
         "contact_url": contact_url,
         "show_on_hold_approve": show_on_hold_approve,
-        "membership_request_target_label": request_target_label,
-        "membership_request_api_approve_url": reverse("api-membership-request-approve", args=[req.pk]),
-        "membership_request_api_approve_on_hold_url": reverse("api-membership-request-approve-on-hold", args=[req.pk]),
-        "membership_request_api_reject_url": reverse("api-membership-request-reject", args=[req.pk]),
-        "membership_request_api_rfi_url": reverse("api-membership-request-rfi", args=[req.pk]),
-        "membership_request_api_ignore_url": reverse("api-membership-request-ignore", args=[req.pk]),
         "membership_request_can_request_info": request.user.has_perm(ASTRA_ADD_SEND_MAIL),
-        "membership_request_rejected_email_template_name": settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME,
-        "membership_request_rfi_email_template_name": settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME,
-        "membership_request_notes_summary_url": reverse("api-membership-request-notes-summary", args=[req.pk]),
-        "membership_request_notes_detail_url": reverse("api-membership-request-notes", args=[req.pk]),
-        "membership_request_notes_add_url": reverse("api-membership-request-notes-add", args=[req.pk]),
         "membership_can_view": review_permissions.get("membership_can_view", False),
         "membership_can_write": can_write,
         "membership_can_vote": can_vote,
     }
-
-
-def render_membership_request_detail_for_committee(
-    *,
-    request: HttpRequest,
-    membership_request: MembershipRequest,
-) -> HttpResponse:
-    return render(
-        request,
-        "core/membership_request_detail.html",
-        build_membership_request_detail_committee_context(request=request, membership_request=membership_request),
-    )
 
 
 MEMBERSHIP_REQUEST_BULK_ALLOWED_STATUSES: dict[str, set[str]] = {
@@ -1229,7 +1199,7 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
             messages.error(request, "Invalid rejection reason.")
             return redirect(redirect_to)
 
-        reason = str(form.cleaned_data.get("reason") or "").strip()
+        reason = form.cleaned_data["reason"]
 
         email_error = _execute_reject_membership_request(
             membership_request=req,
@@ -1417,7 +1387,7 @@ def membership_request_reject_api(request: HttpRequest, pk: int) -> JsonResponse
     if not form.is_valid():
         return _membership_action_json_error("Invalid rejection reason.", status=400)
 
-    reason = str(form.cleaned_data.get("reason") or "").strip()
+    reason = form.cleaned_data["reason"]
     email_error = _execute_reject_membership_request(
         membership_request=req,
         actor_username=get_username(request),
@@ -1761,7 +1731,6 @@ __all__ = [
     "membership_request_approve",
     "membership_request_ignore_api",
     "membership_request_approve_on_hold",
-    "membership_request_detail",
     "membership_request_ignore",
     "membership_request_reject_api",
     "membership_request_reject",

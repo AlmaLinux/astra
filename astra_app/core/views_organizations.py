@@ -191,7 +191,7 @@ def _build_claim_invitation_context(
     send_claim_invitation_url = ""
     if organization.status == Organization.Status.unclaimed:
         claim_url = build_organization_claim_url(organization=organization, request=request)
-        recipient_email = str(organization.primary_contact_email() or "").strip()
+        recipient_email = organization.primary_contact_email()
         if request.user.has_perm(ASTRA_ADD_SEND_MAIL) and recipient_email:
             can_send_claim_invitation = True
             send_claim_invitation_url = send_mail_url(
@@ -493,11 +493,7 @@ def _filter_organization_queryset_by_search(
             orgs = orgs.none()
 
     if name_query:
-        matched_representatives = {
-            str(username).strip()
-            for username in (matched_representative_usernames or ())
-            if str(username).strip()
-        }
+        matched_representatives = set(matched_representative_usernames or ())
 
         name_or_representative_filter = Q(name__icontains=name_query)
         if matched_representatives:
@@ -765,7 +761,7 @@ def _serialize_organizations_card(
 
     return {
         "title": title,
-        "q": str(q or ""),
+        "q": q,
         "items": items_payload,
         "empty_label": empty_label,
         "pagination": pagination,
@@ -1362,7 +1358,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
 
         try:
             if can_select_representatives and "representative" in form.fields:
-                representative = str(form.cleaned_data.get("representative") or "").strip()
+                representative = form.cleaned_data["representative"]
 
                 def persist_edited_organization(locked_organization: Organization) -> None:
                     for field_name in changed_fields:

@@ -118,7 +118,7 @@ class OrganizationEditForm(StyledModelForm):
     @override
     def __init__(self, *args, **kwargs) -> None:
         self.can_select_representatives: bool = bool(kwargs.pop("can_select_representatives", False))
-        representative_search_url = str(kwargs.pop("representative_search_url", "") or "").strip()
+        representative_search_url = kwargs.pop("representative_search_url", "")
         super().__init__(*args, **kwargs)
 
         self.fields["business_contact_name"].required = True
@@ -166,8 +166,7 @@ class OrganizationEditForm(StyledModelForm):
             if self.is_bound:
                 current = str(self.data.get("representative") or "").strip()
             else:
-                initial = self.initial.get("representative")
-                current = str(initial or "").strip()
+                current = self.initial.get("representative", "")
             self.fields["representative"].choices = [user_choice_from_freeipa(current)] if current else []
 
     def clean_country_code(self) -> str:

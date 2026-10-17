@@ -60,9 +60,9 @@ class MembershipHelperTests(TestCase):
         with self.assertRaises(ValueError):
             membership_target_filter(username="alice", organization=org)
 
-        self.assertIsNone(membership_target_filter(username="   "))
+        self.assertIsNone(membership_target_filter(username=""))
         self.assertEqual(
-            membership_target_filter(username=" alice "),
+            membership_target_filter(username="alice"),
             {"target_username": "alice"},
         )
         self.assertEqual(

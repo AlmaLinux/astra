@@ -29,12 +29,11 @@ def user_email_context(*, username: str) -> dict[str, str]:
     We intentionally do not expose `displayname` to templates.
     """
 
-    normalized_username = str(username or "").strip()
-    if not normalized_username:
+    if not username:
         return {"username": "", "first_name": "", "last_name": "", "full_name": "", "email": ""}
 
     try:
-        user = FreeIPAUser.get(normalized_username)
+        user = FreeIPAUser.get(username)
     except Exception as exc:
         reason_code = exc.__class__.__name__
         logger.warning(
@@ -52,10 +51,10 @@ def user_email_context(*, username: str) -> dict[str, str]:
         user = None
     if user is None:
         return {
-            "username": normalized_username,
+            "username": username,
             "first_name": "",
             "last_name": "",
-            "full_name": normalized_username,
+            "full_name": username,
             "email": "",
         }
 
@@ -79,12 +78,11 @@ def user_email_delivery_context(*, username: str) -> dict[str, str]:
     always resolve the real address when available.
     """
 
-    normalized_username = str(username or "").strip()
-    if not normalized_username:
+    if not username:
         return {"username": "", "first_name": "", "last_name": "", "full_name": "", "email": ""}
 
     try:
-        user = FreeIPAUser.get(normalized_username, respect_privacy=False)
+        user = FreeIPAUser.get(username, respect_privacy=False)
     except Exception as exc:
         reason_code = exc.__class__.__name__
         logger.warning(
@@ -102,10 +100,10 @@ def user_email_delivery_context(*, username: str) -> dict[str, str]:
 
     if user is None:
         return {
-            "username": normalized_username,
+            "username": username,
             "first_name": "",
             "last_name": "",
-            "full_name": normalized_username,
+            "full_name": username,
             "email": "",
         }
 

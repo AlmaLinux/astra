@@ -43,11 +43,11 @@ def _require_e2e_fake_freeipa_enabled() -> None:
 
 
 def _normalize_username(username: str) -> str:
-    return str(username or "").strip().lower()
+    return username.strip().lower()
 
 
 def _normalize_agreement_cn(cn: str) -> str:
-    return str(cn or "").strip()
+    return cn.strip()
 
 
 def _build_e2e_user_registry() -> dict[str, dict[str, object]]:
@@ -407,7 +407,7 @@ class E2EFreeIPAClient:
             if agreement is None:
                 raise exceptions.BadRequest("agreement not found")
             group_cn = _normalize_agreement_cn(str(rpc_params.get("group") or rpc_params.get("groups") or ""))
-            groups = [str(value).strip() for value in cast(list[str], agreement.get("member_group", [])) if str(value).strip()]
+            groups = list(cast(list[str], agreement.get("member_group", [])))
             if group_cn and group_cn not in groups:
                 groups.append(group_cn)
             _set_membership_values(agreement, "member_group", groups)
@@ -421,11 +421,7 @@ class E2EFreeIPAClient:
             if agreement is None:
                 raise exceptions.BadRequest("agreement not found")
             group_cn = _normalize_agreement_cn(str(rpc_params.get("group") or rpc_params.get("groups") or ""))
-            groups = [
-                str(value).strip()
-                for value in cast(list[str], agreement.get("member_group", []))
-                if str(value).strip() and str(value).strip() != group_cn
-            ]
+            groups = [value for value in cast(list[str], agreement.get("member_group", [])) if value != group_cn]
             _set_membership_values(agreement, "member_group", groups)
             _write_e2e_agreement_registry(registry)
             return _agreement_membership_response()
@@ -437,7 +433,7 @@ class E2EFreeIPAClient:
             if agreement is None:
                 raise exceptions.BadRequest("agreement not found")
             username = _normalize_username(str(rpc_params.get("user") or rpc_params.get("users") or ""))
-            users = [str(value).strip() for value in cast(list[str], agreement.get("memberuser_user", [])) if str(value).strip()]
+            users = list(cast(list[str], agreement.get("memberuser_user", [])))
             if username and username not in {_normalize_username(value) for value in users}:
                 users.append(username)
             _set_membership_values(agreement, "memberuser_user", users)
@@ -452,9 +448,7 @@ class E2EFreeIPAClient:
                 raise exceptions.BadRequest("agreement not found")
             username = _normalize_username(str(rpc_params.get("user") or rpc_params.get("users") or ""))
             users = [
-                str(value).strip()
-                for value in cast(list[str], agreement.get("memberuser_user", []))
-                if str(value).strip() and _normalize_username(str(value)) != username
+                value for value in cast(list[str], agreement.get("memberuser_user", [])) if _normalize_username(value) != username
             ]
             _set_membership_values(agreement, "memberuser_user", users)
             _write_e2e_agreement_registry(registry)
@@ -480,11 +474,7 @@ class E2EFreeIPAClient:
                 if _normalize_username(value)
             ]
             user_registry = _e2e_registry()
-            sponsors = [
-                str(value).strip()
-                for value in cast(list[str], group.get("membermanager_user", []))
-                if str(value).strip()
-            ]
+            sponsors = list(cast(list[str], group.get("membermanager_user", [])))
             sponsor_set = {_normalize_username(value) for value in sponsors}
 
             for username in usernames:
@@ -514,9 +504,7 @@ class E2EFreeIPAClient:
                 if _normalize_username(value)
             }
             sponsors = [
-                str(value).strip()
-                for value in cast(list[str], group.get("membermanager_user", []))
-                if str(value).strip() and _normalize_username(str(value)) not in usernames
+                value for value in cast(list[str], group.get("membermanager_user", [])) if _normalize_username(value) not in usernames
             ]
 
             _set_membership_values(group, "membermanager_user", sponsors)
@@ -627,7 +615,7 @@ class E2EFreeIPAClient:
     def group_add(self, cn: str, *args: object, **kwargs: object) -> dict[str, object]:
         del args
         registry = _e2e_group_registry()
-        group_cn = str(cn or "").strip()
+        group_cn = cn.strip()
         description = str(kwargs.get("o_description") or "").strip()
         fas_group = bool(kwargs.get("fasgroup"))
         group = {
@@ -654,7 +642,7 @@ class E2EFreeIPAClient:
 
     def group_add_member(self, cn: str, *args: object, **kwargs: object) -> dict[str, object]:
         del args
-        group_cn = str(cn or "").strip()
+        group_cn = cn.strip()
         registry = _e2e_group_registry()
         group = registry.get(group_cn)
         if group is None:
@@ -666,7 +654,7 @@ class E2EFreeIPAClient:
             if _normalize_username(str(value))
         ]
         user_registry = _e2e_registry()
-        members = [str(value).strip() for value in cast(list[str], group.get("member_user", [])) if str(value).strip()]
+        members = list(cast(list[str], group.get("member_user", [])))
         member_set = {_normalize_username(value) for value in members}
 
         for username in usernames:
@@ -679,11 +667,7 @@ class E2EFreeIPAClient:
                 members.append(username)
                 member_set.add(username)
 
-            current_groups = [
-                str(value).strip()
-                for value in cast(list[str], user.get("memberof_group", []))
-                if str(value).strip()
-            ]
+            current_groups = list(cast(list[str], user.get("memberof_group", [])))
             if group_cn not in current_groups:
                 current_groups.append(group_cn)
             user["memberof_group"] = current_groups
@@ -696,7 +680,7 @@ class E2EFreeIPAClient:
 
     def group_remove_member(self, cn: str, *args: object, **kwargs: object) -> dict[str, object]:
         del args
-        group_cn = str(cn or "").strip()
+        group_cn = cn.strip()
         registry = _e2e_group_registry()
         group = registry.get(group_cn)
         if group is None:
@@ -709,9 +693,7 @@ class E2EFreeIPAClient:
         }
         user_registry = _e2e_registry()
         group["member_user"] = [
-            str(value).strip()
-            for value in cast(list[str], group.get("member_user", []))
-            if str(value).strip() and _normalize_username(str(value)) not in usernames
+            value for value in cast(list[str], group.get("member_user", [])) if _normalize_username(value) not in usernames
         ]
 
         for username in usernames:
@@ -720,11 +702,7 @@ class E2EFreeIPAClient:
                 continue
 
             user = cast(dict[str, object], record["user"])
-            user["memberof_group"] = [
-                str(value).strip()
-                for value in cast(list[str], user.get("memberof_group", []))
-                if str(value).strip() and str(value).strip() != group_cn
-            ]
+            user["memberof_group"] = [value for value in cast(list[str], user.get("memberof_group", [])) if value != group_cn]
 
         registry[group_cn] = group
         _write_e2e_group_registry(registry)
@@ -749,7 +727,7 @@ class E2EFreeIPAClient:
 
         email = str(kwargs.get("o_mail") or "").strip().lower()
         if email:
-            matches = [user for entry in _e2e_registry().values() if email in {str(value).strip().lower() for value in cast(list[str], cast(dict[str, object], entry["user"])["mail"])} for user in [cast(dict[str, object], entry["user"])]]
+            matches = [user for entry in _e2e_registry().values() if email in {value.lower() for value in cast(list[str], cast(dict[str, object], entry["user"])["mail"])} for user in [cast(dict[str, object], entry["user"])]]
             return {"count": len(matches), "result": matches}
 
         criteria = _normalize_username(str(kwargs.get("a_criteria") or ""))

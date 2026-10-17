@@ -204,7 +204,7 @@ class FreeIPAUserRequestTimeLookupTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.all", side_effect=AssertionError("lightweight username lookup must not fall back to FreeIPAUser.all")),
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=AssertionError("lightweight username lookup must not fall back to FreeIPAUser.get")),
         ):
-            users_by_username = FreeIPAUser.find_lightweight_by_usernames([" Alice ", "alice", "bob", ""])
+            users_by_username = FreeIPAUser.find_lightweight_by_usernames(["Alice", "alice", "bob", ""])
 
         self.assertEqual(set(users_by_username), {"alice", "bob"})
         self.assertEqual(users_by_username["alice"].full_name, "Alice Example")

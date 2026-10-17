@@ -22,16 +22,15 @@ ACCOUNT_DELETION_STATUS_EVENT_KEYS: dict[str, str] = {
 
 
 def get_account_deletion_blockers(username: str) -> tuple[list[str], list[str]]:
-    normalized_username = str(username or "").strip()
     blocker_codes: list[str] = []
     warnings: list[str] = []
 
-    if Organization.objects.filter(representative=normalized_username).exists():
+    if Organization.objects.filter(representative=username).exists():
         blocker_codes.append("organization_representative")
         warnings.append("Manual review required because you are an organization representative.")
 
     if VotingCredential.objects.filter(
-        freeipa_username=normalized_username,
+        freeipa_username=username,
         election__status=Election.Status.open,
     ).exists():
         blocker_codes.append("open_election")
@@ -41,9 +40,9 @@ def get_account_deletion_blockers(username: str) -> tuple[list[str], list[str]]:
 
 
 def invalidate_sessions_for_freeipa_username(username: str) -> int:
-    normalized_username = str(username or "").strip().casefold()
-    if not normalized_username:
+    if not username:
         return 0
+    normalized_username = username.casefold()
 
     invalidated = 0
     for session in Session.objects.filter(expire_date__gte=timezone.now()).iterator():
@@ -104,14 +103,9 @@ def schedule_account_deletion_signal(
     account_deletion_request_id: int,
     actor: str,
 ) -> None:
-    normalized_event_key = str(event_key or "").strip()
-    normalized_actor = str(actor or "").strip().lower()
-    if not normalized_event_key:
-        raise ValueError("event_key is required")
-
-    signal = CANONICAL_SIGNALS.get(normalized_event_key)
+    signal = CANONICAL_SIGNALS.get(event_key)
     if signal is None:
-        raise ValueError(f"Unknown account deletion event key: {normalized_event_key}")
+        raise ValueError(f"Unknown account deletion event key: {event_key!r}")
 
     def _send_signal() -> None:
         account_deletion_request = AccountDeletionRequest.objects.filter(pk=account_deletion_request_id).first()
@@ -120,7 +114,7 @@ def schedule_account_deletion_signal(
         signal.send(
             sender=AccountDeletionRequest,
             account_deletion_request=account_deletion_request,
-            actor=normalized_actor,
+            actor=actor,
         )
 
     transaction.on_commit(_send_signal)

@@ -35,7 +35,7 @@ _GITLAB_USERNAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,253}[A-Za-z0-
 def _normalize_profile_handle(value: object, *, expected_host: str) -> str:
     """Normalize a profile input to a handle when a full URL is provided."""
 
-    raw = _normalize_str(value).strip()
+    raw = _normalize_str(value)
     if not raw:
         return ""
 
