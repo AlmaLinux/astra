@@ -47,6 +47,7 @@ function makeUserProfileRoot(): HTMLDivElement {
   root.dataset.userProfileMembershipNotesCanWrite = "false";
   root.dataset.userProfileGroupDetailUrlTemplate = "/group/__group_name__/";
   root.dataset.userProfileAgreementsUrlTemplate = "/settings/?tab=agreements&agreement=__agreement_cn__";
+  root.dataset.userProfileAgreementDetailUrlTemplate = "/agreements/__agreement_cn__/";
   return root;
 }
 

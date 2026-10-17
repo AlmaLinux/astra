@@ -139,6 +139,7 @@ export interface UserProfileBootstrap {
   membershipNotes: UserProfileMembershipNotes;
   groupDetailUrlTemplate: string;
   agreementsUrlTemplate: string;
+  agreementDetailUrlTemplate: string;
 }
 
 function readBoolean(value: string): boolean {
@@ -169,6 +170,7 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
   const membershipNotesCanWrite = readBoolean(String(root.dataset.userProfileMembershipNotesCanWrite || "").trim());
   const groupDetailUrlTemplate = String(root.dataset.userProfileGroupDetailUrlTemplate || "").trim();
   const agreementsUrlTemplate = String(root.dataset.userProfileAgreementsUrlTemplate || "").trim();
+  const agreementDetailUrlTemplate = String(root.dataset.userProfileAgreementDetailUrlTemplate || "").trim();
   if (
     !apiUrl
     || !chatIrcDefaultServer
@@ -190,6 +192,7 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
     || !membershipNotesAddUrl
     || !groupDetailUrlTemplate
     || !agreementsUrlTemplate
+    || !agreementDetailUrlTemplate
   ) {
     return null;
   }
@@ -226,5 +229,6 @@ export function readUserProfileBootstrap(root: HTMLElement): UserProfileBootstra
     },
     groupDetailUrlTemplate,
     agreementsUrlTemplate,
+    agreementDetailUrlTemplate,
   };
 }

@@ -19,6 +19,7 @@ describe("UserProfileGroupsPanel", () => {
         bootstrap,
         groupDetailUrlTemplate: "/group/__group_name__/",
         agreementsUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
+        agreementDetailUrlTemplate: "/agreements/__agreement_cn__/",
       },
     });
 
@@ -29,6 +30,20 @@ describe("UserProfileGroupsPanel", () => {
     expect(wrapper.text()).toContain("sig-core");
     expect(wrapper.find('a[href="/group/infra/"]').exists()).toBe(true);
     expect(wrapper.findAll("a").some((link) => link.attributes("href") === "/settings/?tab=agreements&agreement=Export%20Policy")).toBe(true);
+  });
+
+  it("links signed agreements to their document for any viewer", () => {
+    const wrapper = mount(UserProfileGroupsPanel, {
+      props: {
+        bootstrap: { ...bootstrap, isSelf: false },
+        groupDetailUrlTemplate: "/group/__group_name__/",
+        agreementsUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
+        agreementDetailUrlTemplate: "/agreements/__agreement_cn__/",
+      },
+    });
+
+    const link = wrapper.findAll("a").find((candidate) => candidate.attributes("href") === "/agreements/Code%20of%20Conduct/");
+    expect(link?.text()).toBe("Code of Conduct");
   });
 
   it("shows empty state when no groups or agreements exist", () => {
@@ -43,6 +58,7 @@ describe("UserProfileGroupsPanel", () => {
         } satisfies UserProfileGroupsBootstrap,
         groupDetailUrlTemplate: "/group/__group_name__/",
         agreementsUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
+        agreementDetailUrlTemplate: "/agreements/__agreement_cn__/",
       },
     });
 

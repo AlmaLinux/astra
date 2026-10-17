@@ -38,6 +38,7 @@ describe("mountUserProfilePage", () => {
     root.setAttribute("data-user-profile-membership-notes-can-write", "false");
     root.setAttribute("data-user-profile-group-detail-url-template", "/group/__group_name__/");
     root.setAttribute("data-user-profile-agreements-url-template", "/settings/?tab=agreements&agreement=__agreement_cn__");
+    root.setAttribute("data-user-profile-agreement-detail-url-template", "/agreements/__agreement_cn__/");
     document.body.appendChild(root);
 
     const app = mountUserProfilePage(root);

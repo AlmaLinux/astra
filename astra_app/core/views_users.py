@@ -976,6 +976,7 @@ def user_profile(request: HttpRequest, username: str) -> HttpResponse:
             **membership_action_url_templates(),
             "group_detail_url_template": reverse("group-detail", args=["__group_name__"]),
             "agreements_url_template": f"{settings_url(tab='agreements')}&agreement=__agreement_cn__",
+            "agreement_detail_url_template": reverse("agreement-detail", args=["__agreement_cn__"]),
             "settings_country_code_url": settings_url(tab="profile", highlight="country_code"),
             "settings_emails_url": settings_url(tab="emails"),
             "csrf_token": get_token(request),

@@ -43,6 +43,7 @@ const bootstrap: UserProfileBootstrap = {
   },
   groupDetailUrlTemplate: "/group/__group_name__/",
   agreementsUrlTemplate: "/settings/?tab=agreements&agreement=__agreement_cn__",
+  agreementDetailUrlTemplate: "/agreements/__agreement_cn__/",
 };
 
 function makePayload(overrides: Partial<UserProfileResponse> = {}): UserProfileResponse {

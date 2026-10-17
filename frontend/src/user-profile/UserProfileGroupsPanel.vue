@@ -7,6 +7,7 @@ const props = defineProps<{
   bootstrap: UserProfileGroupsBootstrap;
   groupDetailUrlTemplate: string;
   agreementsUrlTemplate: string;
+  agreementDetailUrlTemplate: string;
 }>();
 
 function groupDetailUrl(groupName: string): string {
@@ -15,6 +16,10 @@ function groupDetailUrl(groupName: string): string {
 
 function agreementSettingsUrl(agreementCn: string): string {
   return fillUrlTemplate(props.agreementsUrlTemplate, "__agreement_cn__", agreementCn);
+}
+
+function agreementDetailUrl(agreementCn: string): string {
+  return fillUrlTemplate(props.agreementDetailUrlTemplate, "__agreement_cn__", agreementCn);
 }
 </script>
 
@@ -52,7 +57,7 @@ function agreementSettingsUrl(agreementCn: string): string {
       >
         <div class="d-flex align-items-center">
           <i class="fa fa-check-circle profile-group-icon" />
-          <div class="profile-group-name">{{ agreement }}</div>
+          <div class="profile-group-name"><a :href="agreementDetailUrl(agreement)">{{ agreement }}</a></div>
         </div>
         <span class="badge badge-success">Signed</span>
       </li>

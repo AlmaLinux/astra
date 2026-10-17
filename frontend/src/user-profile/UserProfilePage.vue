@@ -222,6 +222,7 @@ onBeforeUnmount(() => {
             :bootstrap="payload.groups"
             :group-detail-url-template="bootstrap.groupDetailUrlTemplate"
             :agreements-url-template="bootstrap.agreementsUrlTemplate"
+            :agreement-detail-url-template="bootstrap.agreementDetailUrlTemplate"
           />
         </div>
       </div>

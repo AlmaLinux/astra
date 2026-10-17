@@ -63,6 +63,7 @@ class UserProfileVueTests(TestCase):
         self.assertContains(response, 'data-user-profile-membership-notes-can-write="false"')
         self.assertContains(response, 'data-user-profile-group-detail-url-template="/group/__group_name__/"')
         self.assertContains(response, 'data-user-profile-agreements-url-template="/settings/?tab=agreements&amp;agreement=__agreement_cn__"')
+        self.assertContains(response, 'data-user-profile-agreement-detail-url-template="/agreements/__agreement_cn__/"')
         self.assertContains(response, 'data-user-profile-chat-irc-default-server="irc.libera.chat"')
         self.assertContains(response, 'data-user-profile-chat-matrix-default-server="matrix.org"')
         self.assertContains(response, 'data-user-profile-chat-mattermost-default-server="chat.almalinux.org"')
