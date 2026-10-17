@@ -229,8 +229,8 @@ def _load_committee_membership(request: HttpRequest, membership_id: int) -> tupl
         .first()
     )
     if membership is None:
-        # Every sponsorship change replaces the membership row (see Membership.replace_within_category),
-        # so a page loaded before another change posts an id that no longer exists.
+        # A type change replaces the row and expiry or termination ends it, so a page loaded
+        # before one of those posts an id that is gone or no longer active.
         messages.error(request, "That membership has changed or expired since the page was loaded.")
         return redirect(_resolve_post_redirect(request, default=reverse("users"), use_referer=True))
 
@@ -292,7 +292,7 @@ def membership_update(request: HttpRequest, membership_id: int) -> HttpResponse:
             if is_sponsorship and "dues_usd" in request.POST:
                 dues_usd = payable_dues_usd(membership.membership_type, parse_dues_usd(request.POST["dues_usd"]))
                 if dues_usd != effective_dues_usd(membership):
-                    # Before the expiry change, which replaces membership's term.
+                    # Before the expiry change: the dues log copies the expiry from `membership`.
                     change_membership_dues(
                         membership=membership,
                         dues_usd=dues_usd,

@@ -537,7 +537,7 @@ class AdminMembershipCRUDTests(TestCase):
         membership = Membership.objects.get(target_organization=organization, membership_type=membership_type)
         self.assertEqual(membership.created_at, new_start)
         self.assertEqual(membership.expires_at, new_end)
-        self.assertFalse(Membership.objects.filter(pk=original_membership_pk).exists())
+        self.assertEqual(membership.pk, original_membership_pk)
 
         approved_log.refresh_from_db()
         self.assertEqual(approved_log.created_at, new_start)

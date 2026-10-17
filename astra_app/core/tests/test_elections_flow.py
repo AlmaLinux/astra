@@ -773,7 +773,8 @@ class ElectionBulkCredentialIssuanceTests(TestCase):
             code="voter2",
             name="Voter type 2",
             votes=2,
-            category_id="individual",
+            # One membership per category: summing weights needs a second individual category.
+            category_id="contributor",
         )
         nonvoter = MembershipType.objects.create(
             code="nonvoter",

@@ -385,17 +385,14 @@ def emit_membership_request_signal_on_commit(
     transaction.on_commit(_send_user_signal)
 
 
-def welcome_invoice_membership(
-    *,
-    membership_request: MembershipRequest,
-    previous_expires_at: datetime.datetime | None,
-) -> Membership | None:
-    """Return the just-granted membership whose invoice belongs with the welcome email.
+def approval_invoice_membership(*, membership_request: MembershipRequest) -> Membership | None:
+    """Return the just-granted membership whose invoice belongs with the approval email.
 
-    Sponsors are only invoiced once approved: a newly granted term ships its invoice
-    with the welcome email, renewals already got theirs with the reminders.
+    Sponsors are only invoiced once approved. A renewal's invoice is usually the one
+    its reminders already carried (same number and PDF); sending it again covers
+    renewals no reminder reached.
     """
-    if previous_expires_at is not None or membership_request.requested_organization is None:
+    if membership_request.requested_organization is None:
         return None
     membership = Membership.objects.select_related("membership_type", "target_organization").get(
         target_organization=membership_request.requested_organization,
@@ -735,9 +732,8 @@ def grant_direct_membership(
         on_group_add_success=on_group_add_success,
     )
 
-    membership_filters = approval_log.target_identity.for_membership_filter()
     membership = Membership.objects.select_related("membership_type", "target_organization").get(
-        **membership_filters,
+        **approval_log.target_identity.for_membership_filter(),
         membership_type=membership_type,
     )
 
@@ -753,10 +749,7 @@ def grant_direct_membership(
             target_username=target_username,
             target_organization=target_organization,
         )
-        membership = Membership.objects.select_related("membership_type", "target_organization").get(
-            **membership_filters,
-            membership_type=membership_type,
-        )
+        membership.refresh_from_db()
 
     return membership
 
@@ -776,7 +769,6 @@ def update_direct_membership_dates(
         membership.refresh_from_db()
 
     if membership.expires_at != expires_at:
-        membership_filters = membership.target_identity.for_membership_filter()
         MembershipLog.create_for_expiry_change(
             actor_username=actor_username,
             membership_type=membership.membership_type,
@@ -784,10 +776,7 @@ def update_direct_membership_dates(
             target_username=membership.target_username,
             target_organization=membership.target_organization,
         )
-        membership = Membership.objects.select_related("membership_type", "target_organization").get(
-            **membership_filters,
-            membership_type=membership.membership_type,
-        )
+        membership.refresh_from_db()
 
     return membership
 
@@ -1126,10 +1115,7 @@ def approve_membership_request(
         target = _build_membership_target(membership_request)
         if target.email:
             _ensure_configured_email_template_exists(template_name=template_name)
-        invoice_membership = welcome_invoice_membership(
-            membership_request=membership_request,
-            previous_expires_at=previous_expires_at,
-        )
+        invoice_membership = approval_invoice_membership(membership_request=membership_request)
         try:
             sent_email = _send_membership_request_notification(
                 target=target,

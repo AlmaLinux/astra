@@ -611,7 +611,7 @@ class MembershipHelperTests(TestCase):
             code="exact",
             defaults={
                 "name": "Exact",
-                "category_id": "individual",
+                "category_id": "contributor",
                 "sort_order": 1,
                 "enabled": True,
             },

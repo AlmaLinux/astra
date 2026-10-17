@@ -252,19 +252,18 @@ class Command(BaseCommand):
             memberof_group=["packagers", settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],
         )
 
-        owner_membership = Membership.objects.create(
+        Membership.objects.create(
             target_username=PROFILE_OWNER_USERNAME,
             membership_type_id="mirror",
+            created_at=now - datetime.timedelta(days=45),
             expires_at=now + datetime.timedelta(days=14),
         )
-        Membership.objects.filter(pk=owner_membership.pk).update(created_at=now - datetime.timedelta(days=45))
-
-        private_membership = Membership.objects.create(
+        Membership.objects.create(
             target_username=PRIVATE_PROFILE_USERNAME,
             membership_type_id="individual",
+            created_at=now - datetime.timedelta(days=90),
             expires_at=now + datetime.timedelta(days=120),
         )
-        Membership.objects.filter(pk=private_membership.pk).update(created_at=now - datetime.timedelta(days=90))
 
         owner_request = MembershipRequest.objects.create(
             requested_username=PROFILE_OWNER_USERNAME,

@@ -145,8 +145,8 @@ class MembershipTypeCategory(models.Model):
     """Broad category of membership types (individual, mirror, sponsorship).
 
     Controls which target types (users and/or organizations) are valid for
-    membership types in this category, and enforces the one-per-category
-    invariant for organizations via a denormalized FK on Membership.
+    membership types in this category. A member holds at most one membership
+    per category (see Membership.save).
     """
 
     name = models.CharField(max_length=64, primary_key=True)
@@ -738,7 +738,9 @@ class Membership(models.Model):
     # Committee-set dues for an in-kind sponsor, below the tier default; None charges
     # the default. Only changed through MembershipLog (see core.membership_dues).
     dues_usd = models.PositiveIntegerField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    # Start of the uninterrupted membership in this category (election eligibility counts
+    # from it), so it is set from the membership log rather than when the row is written.
+    created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     objects = MembershipQuerySet.as_manager()
@@ -769,24 +771,22 @@ class Membership(models.Model):
 
     @override
     def save(self, *args, **kwargs) -> None:
-        if self.target_organization_id is not None:
-            with transaction.atomic():
-                Organization.objects.select_for_update().only("pk").get(pk=self.target_organization_id)
-                same_category_qs = self.__class__.objects.filter(
-                    target_organization_id=self.target_organization_id,
-                    membership_type__category_id=self.membership_type.category_id,
+        category_id = self.membership_type.category_id
+        with transaction.atomic():
+            # The category lives on the type, so no DB constraint can keep one membership per
+            # category; the category lock serializes writers so this check can't race.
+            MembershipTypeCategory.objects.select_for_update().only("pk").get(pk=category_id)
+            if (
+                Membership.objects.filter(
+                    **self.target_identity.for_membership_filter(),
+                    membership_type__category_id=category_id,
                 )
-                if self.pk is not None:
-                    same_category_qs = same_category_qs.exclude(pk=self.pk)
-                if same_category_qs.exists():
-                    raise IntegrityError(
-                        "One membership per category is allowed for each organization."
-                    )
+                .exclude(pk=self.pk)
+                .exists()
+            ):
+                raise IntegrityError("One membership per category is allowed for each member.")
 
-                super().save(*args, **kwargs)
-            return
-
-        super().save(*args, **kwargs)
+            super().save(*args, **kwargs)
 
     @property
     def target_identity(self) -> MembershipTargetIdentity:
@@ -807,61 +807,6 @@ class Membership(models.Model):
     @property
     def target_identifier(self) -> str:
         return self.target_identity.identifier
-
-    @classmethod
-    def replace_within_category(
-        cls,
-        *,
-        organization: Organization,
-        new_membership_type: MembershipType,
-        expires_at: datetime.datetime,
-        created_at: datetime.datetime | None = None,
-        dues_usd: int | None = None,
-    ) -> tuple[Membership, Membership | None]:
-        """Atomically replace an org's membership within the same category (DD-02).
-
-        Returns (new_membership, old_membership_or_None).
-        The old membership is deleted first to preserve one-per-category.
-        """
-        with transaction.atomic():
-            Organization.objects.select_for_update().only("pk").get(pk=organization.pk)
-            category_id = new_membership_type.category_id
-            old = (
-                cls.objects.filter(
-                    target_organization=organization,
-                    membership_type__category_id=category_id,
-                )
-                .select_for_update()
-                .first()
-            )
-            if old is not None:
-                old_copy = Membership(
-                    pk=old.pk,
-                    target_organization_id=old.target_organization_id,
-                    membership_type_id=old.membership_type_id,
-                    expires_at=old.expires_at,
-                    dues_usd=old.dues_usd,
-                )
-                # Manually copy created_at since auto_now_add would overwrite on
-                # a new unsaved instance.
-                old_copy.created_at = old.created_at
-                old.delete()
-            else:
-                old_copy = None
-
-            new = cls(
-                target_organization=organization,
-                membership_type=new_membership_type,
-                expires_at=expires_at,
-                dues_usd=dues_usd,
-            )
-            new.save()
-
-            if created_at is not None and new.created_at != created_at:
-                cls.objects.filter(pk=new.pk).update(created_at=created_at)
-                new.created_at = created_at
-
-            return new, old_copy
 
     def __str__(self) -> str:
         if self.target_kind == MembershipTargetKind.user:
@@ -1160,7 +1105,7 @@ class MembershipLog(models.Model):
     def _current_membership(
         membership_type: MembershipType, target_username: str, target_organization: Organization | None
     ) -> Membership | None:
-        """The target's membership of this tier, read before a log's side effects replace it."""
+        """The target's membership of this tier, read before a log's side effects change it."""
         target = MembershipTargetIdentity.from_target_fields(username=target_username, organization=target_organization)
         return Membership.objects.filter(**target.for_membership_filter(), membership_type=membership_type).first()
 

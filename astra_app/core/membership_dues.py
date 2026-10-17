@@ -2,7 +2,7 @@
 
 The membership committee may charge a sponsor less than its tier's default dues
 (down to nothing) in exchange for goods or services. The amount lives on the
-membership and on every membership log entry that recreates it, so renewals and
+membership and on every membership log entry that sets its term, so renewals and
 committee edits carry it over; a tier change drops it. Every change is recorded in
 the membership log and as a committee note with a mandatory reason.
 """

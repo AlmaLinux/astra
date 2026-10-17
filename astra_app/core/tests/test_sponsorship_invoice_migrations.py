@@ -136,3 +136,38 @@ class SponsorshipWelcomeInvoiceBlockMigrationTests(TransactionTestCase):
         self.assertLess(sponsor.html_content.index("invoice_url"), sponsor.html_content.index("Thanks again"))
         self.assertTrue(edited.html_content.startswith("<p>Custom html.</p>"))
         self.assertNotIn("invoice_url", individual.content + individual.html_content)
+
+
+class RenewalApprovedInvoiceBlockMigrationTests(TransactionTestCase):
+    migrate_from = [("core", "0112_membership_created_at_default")]
+    migrate_to = [("core", "0113_renewal_approved_email_invoice_block")]
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.addCleanup(migrate_to_latest)
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_from)
+
+        old_apps = executor.loader.project_state(self.migrate_from).apps
+        email_template = old_apps.get_model("post_office", "EmailTemplate")
+        email_template.objects.filter(name="membership-renewal-approved").delete()
+        email_template.objects.create(
+            name="membership-renewal-approved",
+            subject="Renewed",
+            content="Renewed!\n\nThanks again.\n",
+            html_content="<p>Renewed!</p>\n<p>Thanks again.</p>",
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate(self.migrate_to)
+        self.apps = executor.loader.project_state(self.migrate_to).apps
+
+    def test_invoice_block_is_added_before_the_closing_note(self) -> None:
+        template = self.apps.get_model("post_office", "EmailTemplate").objects.get(name="membership-renewal-approved")
+
+        # Individual renewals share the template; the block only shows when an invoice is attached.
+        self.assertIn("{% if invoice_url %}", template.content)
+        self.assertIn('href="{{ invoice_url }}"', template.html_content)
+        self.assertLess(template.content.index("invoice_url"), template.content.index("Thanks again"))
+        self.assertLess(template.html_content.index("invoice_url"), template.html_content.index("Thanks again"))

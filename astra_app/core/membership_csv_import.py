@@ -1096,7 +1096,7 @@ class MembershipCSVImportResource(MembershipCSVImportLoggingMixin, resources.Mod
                 target_username=instance.requested_username,
                 membership_type=instance.membership_type,
             )
-            # `created_at` is auto_now_add; backfill the membership start date from the CSV.
+            # The approval starts the term now; backfill the membership start date from the CSV.
             membership_qs.update(created_at=start_at)
 
             if end_at is not None and end_at > start_at:

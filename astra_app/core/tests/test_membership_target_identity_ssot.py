@@ -162,27 +162,7 @@ class MembershipTargetIdentitySSOTTests(TestCase):
         )
         self.assertEqual(matched_ids, {fk_match.pk, deleted_match.pk})
 
-    def test_replace_within_category_uses_effective_category_when_denorm_drifts(self) -> None:
-        organization = Organization.objects.create(name="Acme", representative="rep")
-        Membership.objects.create(
-            target_organization=organization,
-            membership_type_id="gold",
-            expires_at=FAR_FUTURE,
-        )
-
-        new, old_copy = Membership.replace_within_category(
-            organization=organization,
-            new_membership_type=MembershipType.objects.get(code="platinum"),
-            expires_at=FAR_FUTURE,
-        )
-
-        self.assertIsNotNone(old_copy)
-        assert old_copy is not None
-        self.assertEqual(old_copy.membership_type_id, "gold")
-        self.assertEqual(new.membership_type_id, "platinum")
-        self.assertEqual(Membership.objects.filter(target_organization=organization).count(), 1)
-
-    def test_apply_user_side_effects_updates_existing_membership(self) -> None:
+    def test_side_effects_update_existing_user_membership(self) -> None:
         membership = Membership.objects.create(
             target_username="alice",
             membership_type_id="individual",

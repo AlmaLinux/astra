@@ -41,7 +41,7 @@ INVOICE_ASSETS_DIR = Path(__file__).resolve().parent / "static" / "core" / "invo
 class InvoiceTerm(StrEnum):
     """Which membership term an invoice bills."""
 
-    # The term just granted: the welcome invoice for a newly approved sponsor.
+    # The term just granted: sent with approval emails.
     current = "current"
     # The term starting when the membership expires: sent with renewal reminders.
     renewal = "renewal"
@@ -62,20 +62,17 @@ def _term_start(membership: Membership, term: InvoiceTerm) -> datetime.date:
     return renewal_start - datetime.timedelta(days=settings.MEMBERSHIP_VALIDITY_DAYS)
 
 
-def _number_digits(membership_pk: int, term: InvoiceTerm) -> int:
-    # Random-looking but derived from the row and invoice kind, so every reminder
-    # arrives at the same number (and stored PDF) without storing anything.
-    digest = hashlib.sha256(f"{membership_pk}:{term}".encode()).digest()
-    return int.from_bytes(digest[:8]) % 1_000_000
-
-
 def invoice_number(membership: Membership, term: InvoiceTerm) -> str:
-    year = _term_start(membership, term).year
-    digits = _number_digits(membership.pk, term)
-    # A row's welcome and renewal invoices can share a year, so keep their digits apart.
-    if term == InvoiceTerm.renewal and digits == _number_digits(membership.pk, InvoiceTerm.current):
-        digits = (digits + 1) % 1_000_000
-    return f"{membership.target_organization_id:04d}-{year}-{digits:06d}"
+    term_start = _term_start(membership, term)
+    # Random-looking but derived from what is billed, without storing anything: every
+    # reminder, and the renewed term's invoice, arrive at the same number (and stored PDF),
+    # while any change to the bill gets a new one.
+    billed = (
+        f"{membership.target_organization_id}:{membership.membership_type_id}:"
+        f"{term_start.isoformat()}:{effective_dues_usd(membership)}"
+    )
+    digits = int.from_bytes(hashlib.sha256(billed.encode()).digest()[:8]) % 1_000_000
+    return f"{membership.target_organization_id:04d}-{term_start.year}-{digits:06d}"
 
 
 def invoice_filename(membership: Membership, term: InvoiceTerm) -> str:
@@ -83,8 +80,7 @@ def invoice_filename(membership: Membership, term: InvoiceTerm) -> str:
 
 
 def invoice_storage_key(membership: Membership, term: InvoiceTerm) -> str:
-    # The number is derived from the membership pk, which changes whenever the committee
-    # edits the membership (rows are recreated), so edited terms never reuse a stale PDF.
+    # Keyed by the number, so a changed bill never reuses a stale PDF.
     return f"invoices/{membership.target_organization.invoice_token}/{invoice_filename(membership, term)}"
 
 

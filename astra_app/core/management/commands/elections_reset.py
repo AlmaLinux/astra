@@ -1071,16 +1071,13 @@ class Command(BaseCommand):
         definitions: tuple[MembershipSeedDefinition, ...],
     ) -> None:
         for definition in definitions:
-            membership, _ = Membership.objects.update_or_create(
+            Membership.objects.update_or_create(
                 target_username=str(definition["username"]),
                 membership_type_id=str(definition["membership_type_code"]),
                 defaults={
+                    "created_at": definition["created_at"],
                     "expires_at": definition["expires_at"],
                 },
-            )
-            Membership.objects.filter(pk=membership.pk).update(
-                created_at=definition["created_at"],
-                expires_at=definition["expires_at"],
             )
 
     def _clear_slice_workflow_state(

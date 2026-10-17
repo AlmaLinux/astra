@@ -2148,9 +2148,9 @@ class MembershipRequestsFlowTests(TestCase):
                 membership_request=None,
             )
 
-        recreated = Membership.objects.get(target_username="alice", membership_type=membership_type)
-        self.assertEqual(recreated.created_at, start_at)
-        self.assertGreater(recreated.expires_at, previous_expires_at)
+        renewed = Membership.objects.get(target_username="alice", membership_type=membership_type)
+        self.assertEqual(renewed.created_at, start_at)
+        self.assertGreater(renewed.expires_at, previous_expires_at)
 
     def test_expired_membership_starts_new_term_and_resets_created_at(self) -> None:
         import datetime

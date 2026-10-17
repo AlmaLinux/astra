@@ -2745,9 +2745,7 @@ class OrganizationUserViewsTests(TestCase):
             )
 
         self.assertEqual(resp.status_code, 302)
-        # replace_within_category() deletes the old row and creates a new one,
-        # so re-query rather than refresh_from_db on the stale reference.
-        sponsorship = Membership.objects.get(target_organization=org)
+        sponsorship.refresh_from_db()
         self.assertEqual(
             sponsorship.expires_at,
             datetime.datetime(2030, 1, 31, 23, 59, 59, tzinfo=datetime.UTC),
@@ -2869,7 +2867,7 @@ class OrganizationUserViewsTests(TestCase):
         with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
             for url_name, data in (("membership-update", {"expires_on": "2030-01-31"}), ("membership-terminate", {"confirm": "x"})):
                 with self.subTest(url_name=url_name):
-                    # A sponsorship change replaces the row, so a stale page posts an id that no longer exists.
+                    # A type change or termination removes the row, so a stale page can post an id that no longer exists.
                     resp = self.client.post(reverse(url_name, args=[999999]), data={**data, "next": page})
                     self.assertRedirects(resp, page, fetch_redirect_response=False)
                     self.assertIn(
@@ -4107,9 +4105,9 @@ class OrganizationUserViewsTests(TestCase):
                 membership_request=None,
             )
 
-        recreated = Membership.objects.get(target_organization=org)
-        self.assertEqual(recreated.created_at, start_at)
-        self.assertGreater(recreated.expires_at, previous_expires_at)
+        renewed = Membership.objects.get(target_organization=org)
+        self.assertEqual(renewed.created_at, start_at)
+        self.assertGreater(renewed.expires_at, previous_expires_at)
 
     def test_expired_sponsorship_starts_new_term_and_resets_created_at(self) -> None:
         import datetime

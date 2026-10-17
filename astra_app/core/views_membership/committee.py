@@ -32,6 +32,7 @@ from core.membership_notes_preload import build_notes_by_membership_request_id
 from core.membership_notifications import organization_sponsor_notification_recipient_email
 from core.membership_request_workflow import (
     _resolve_approval_template_name,
+    approval_invoice_membership,
     approve_membership_request,
     approve_on_hold_membership_request,
     ignore_membership_request,
@@ -39,7 +40,6 @@ from core.membership_request_workflow import (
     put_membership_request_on_hold,
     reject_membership_request,
     reopen_ignored_membership_request,
-    welcome_invoice_membership,
 )
 from core.membership_requests_datatables import (
     build_datatables_payload,
@@ -1142,14 +1142,10 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
         if req.is_user_target:
             approve_extras["group_cn"] = membership_type.group_cn
 
-        # Like the standard welcome email, a custom one carries a new sponsor's invoice.
+        # Like the standard approval email, a custom one carries the sponsor's invoice.
         invoice_cc: list[str] = []
         invoice_attachment_tokens: list[str] = []
-        invoice_membership = (
-            welcome_invoice_membership(membership_request=req, previous_expires_at=previous_expires_at)
-            if custom_email
-            else None
-        )
+        invoice_membership = approval_invoice_membership(membership_request=req) if custom_email else None
         if invoice_membership is not None:
             # The recipient is only chosen in Send Mail, so the business contact is always copied.
             invoice_parts = invoice_email_parts(

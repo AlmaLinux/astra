@@ -412,11 +412,8 @@ class OrganizationMembershipCSVImportResourceTests(TestCase):
         )
 
         lower_approved_at = timezone.now().astimezone(datetime.UTC)
-        with patch("core.models.Membership.replace_within_category", wraps=Membership.replace_within_category) as replace_within_category:
-            resource.import_data(dataset, dry_run=False, raise_errors=True)
+        resource.import_data(dataset, dry_run=False, raise_errors=True)
         upper_approved_at = timezone.now().astimezone(datetime.UTC)
-
-        self.assertGreaterEqual(replace_within_category.call_count, 1)
 
         memberships = Membership.objects.filter(target_organization=org)
         self.assertEqual(memberships.count(), 1)

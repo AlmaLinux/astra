@@ -63,7 +63,8 @@ class ElectionVoteWeightsTests(TestCase):
             code="voter_b",
             name="Voter B",
             votes=3,
-            category_id="individual",
+            # One membership per category: summing weights needs a second individual category.
+            category_id="contributor",
             enabled=True,
         )
         mt_org = MembershipType.objects.create(
@@ -450,7 +451,7 @@ class ElectionVoteWeightsTests(TestCase):
             code="old_weight",
             name="Old weight",
             votes=3,
-            category_id="individual",
+            category_id="contributor",
             enabled=True,
         )
 
