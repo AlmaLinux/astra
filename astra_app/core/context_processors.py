@@ -10,6 +10,7 @@ from core.models import AccountInvitation
 from core.permissions import (
     membership_review_permissions,
 )
+from core.views_utils import get_username, normalize_freeipa_username
 
 
 def membership_review(request) -> dict[str, object]:
@@ -91,6 +92,9 @@ def sidebar_active_flags(request) -> dict[str, bool]:
     resolver_match = getattr(request, "resolver_match", None)
     url_name = resolver_match.url_name if resolver_match else ""
     return {
+        # Other users' profiles share the URL name; only the viewer's own is "My Profile".
+        "profile_nav_active": url_name == "user-profile"
+        and normalize_freeipa_username(resolver_match.kwargs["username"]) == get_username(request),
         "membership_nav_active": url_name in _MEMBERSHIP_NAV_URLS,
         "mail_nav_active": url_name in _MAIL_NAV_URLS,
     }

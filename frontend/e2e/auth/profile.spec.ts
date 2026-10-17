@@ -196,6 +196,27 @@ test("auth-profile-sidebar hover-expanded layout matches the pinned-open sidebar
   await expect.poll(() => page.evaluate(measureSidebar, false)).toEqual(pinned);
 });
 
+// As a signed-in user, expanding a sidebar group I'm not on doesn't highlight it like the current page's link.
+test("auth-profile-sidebar highlights only the current page's link after expanding another group", async ({ page }) => {
+  const actor = authResetState.actors.regular01;
+  await loginViaForm(page, actor.username, actor.password);
+  await expect(page).toHaveURL(new RegExp(`${escapeRegExp(actor.profile_route)}$`));
+
+  await page.waitForLoadState("load");
+  await page.locator(".nav-sidebar .nav-link").filter({ hasText: "Membership Management" }).click();
+  await expect(page.locator(".nav-item.menu-open > .nav-treeview")).toHaveAttribute("style", "display: block;");
+  await page.mouse.move(800, 500);
+
+  const highlighted = await page.evaluate(() => {
+    const links = Array.from(document.querySelectorAll<HTMLElement>(".nav-sidebar > .nav-item > .nav-link"));
+    const activeBackground = getComputedStyle(document.querySelector(".nav-sidebar > .nav-item > .nav-link.active")!).backgroundColor;
+    return links
+      .filter((link) => getComputedStyle(link).backgroundColor === activeBackground)
+      .map((link) => link.querySelector("p")?.firstChild?.textContent?.trim());
+  });
+  expect(highlighted).toEqual(["My Profile"]);
+});
+
 // As a profile owner, my avatar stays circular when its column is narrower than the avatar's nominal size.
 test("auth-profile-avatar stays square when the profile column is narrower than the avatar", async ({ page }) => {
   const actor = authResetState.actors.regular03;

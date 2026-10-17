@@ -252,8 +252,7 @@ body.layout-top-nav .main-footer {
   white-space: normal;
 }
 
-.sidebar-dark-primary .nav-sidebar > .nav-item > .nav-link.active,
-.sidebar-dark-primary .nav-sidebar > .nav-item.menu-open > .nav-link {
+.sidebar-dark-primary .nav-sidebar > .nav-item > .nav-link.active {
   background: var(--al-c-science-blue);
   color: #fff;
 }

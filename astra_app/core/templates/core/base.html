@@ -248,7 +248,7 @@
         <nav class="mt-2">
           <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
             <li class="nav-item">
-              <a href="{% url 'user-profile' request.user.get_username %}" class="nav-link {% if current_url_name == 'home' or current_url_name == 'user-profile' %}active{% endif %}">
+              <a href="{% url 'user-profile' request.user.get_username %}" class="nav-link {% if profile_nav_active %}active{% endif %}">
                 <i class="nav-icon fas fa-user"></i>
                 <p>My Profile</p>
               </a>
