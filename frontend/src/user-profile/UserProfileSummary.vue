@@ -197,7 +197,7 @@ function externalLinkTarget(href: string | null): string | undefined {
             v-if="bootstrap.avatarUrl"
             :src="bootstrap.avatarUrl"
             class="img-fluid img-circle mb-3"
-            style="width:220px;height:220px;object-fit:cover;"
+            style="width:220px;aspect-ratio:1;object-fit:cover;"
             alt="Avatar"
           >
           <i v-else class="far fa-user" style="font-size:140px;" />
@@ -207,7 +207,7 @@ function externalLinkTarget(href: string | null): string | undefined {
             v-if="bootstrap.avatarUrl"
             :src="bootstrap.avatarUrl"
             class="img-fluid img-circle mb-3"
-            style="width:140px;height:140px;object-fit:cover;"
+            style="width:140px;aspect-ratio:1;object-fit:cover;"
             alt="Avatar"
           >
           <i v-else class="far fa-user" style="font-size:90px;" />

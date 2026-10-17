@@ -218,6 +218,40 @@ body.layout-top-nav .main-footer {
   color: #fff;
 }
 
+/* One layout for every sidebar link: the icon keeps its column and the label
+   fills the rest, so labels line up and long ones wrap beside the icon. */
+.nav-sidebar .nav-link {
+  display: flex;
+  align-items: baseline;
+}
+
+.nav-sidebar .nav-link > .nav-icon {
+  flex: none;
+  margin-right: 0.5rem;
+}
+
+.nav-sidebar .nav-link > p {
+  flex: 1;
+}
+
+/* AdminLTE animates each link's width alongside the sidebar's, so labels
+   reflow at every intermediate width. Links take their final width at once
+   and the sidebar clips them while it animates. */
+.sidebar-mini .main-sidebar {
+  overflow-x: hidden;
+}
+
+.sidebar-mini .main-sidebar .nav-link {
+  transition: none;
+}
+
+/* AdminLTE keeps hover/focus-expanded labels on one line; wrap them like the
+   pinned-open sidebar. */
+.sidebar-mini.sidebar-collapse .main-sidebar:hover .nav-sidebar .nav-link p,
+.sidebar-mini.sidebar-collapse .main-sidebar.sidebar-focused .nav-sidebar .nav-link p {
+  white-space: normal;
+}
+
 .sidebar-dark-primary .nav-sidebar > .nav-item > .nav-link.active,
 .sidebar-dark-primary .nav-sidebar > .nav-item.menu-open > .nav-link {
   background: var(--al-c-science-blue);

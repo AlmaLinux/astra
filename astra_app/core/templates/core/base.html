@@ -291,9 +291,9 @@
 
             {% if membership_can_add or membership_can_view %}
               <li class="nav-item {% if membership_nav_active %}menu-open{% endif %}">
-                <a href="#" class="nav-link d-flex align-items-start {% if membership_nav_active %}active{% endif %}">
-                  <i class="nav-icon fas fa-users-gear mt-1"></i>
-                  <p class="mb-0 ml-2 flex-grow-1">
+                <a href="#" class="nav-link {% if membership_nav_active %}active{% endif %}">
+                  <i class="nav-icon fas fa-users-gear"></i>
+                  <p>
                     Membership Management
                     <i class="right fas fa-angle-left"></i>
                   </p>
@@ -302,9 +302,9 @@
                 <ul class="nav nav-treeview" {% if membership_nav_active %}style="display: block;"{% endif %}>
                   {% if membership_can_add %}
                     <li class="nav-item">
-                      <a href="{% url 'membership-requests' %}" class="nav-link d-flex align-items-start {% if current_url_name == 'membership-requests' %}active{% endif %}">
-                        <i class="nav-icon fas fa-user-check mt-1"></i>
-                        <p class="mb-0 ml-2 d-flex align-items-start justify-content-between flex-grow-1">
+                      <a href="{% url 'membership-requests' %}" class="nav-link {% if current_url_name == 'membership-requests' %}active{% endif %}">
+                        <i class="nav-icon fas fa-user-check"></i>
+                        <p class="d-flex align-items-start justify-content-between">
                           <span class="mr-2">Requests</span>
                           {% if membership_requests_pending_count %}
                             <span class="badge badge-danger ml-2 align-self-start">{{ membership_requests_pending_count }}</span>
@@ -318,9 +318,9 @@
                     </li>
 
                     <li class="nav-item">
-                      <a href="{% url 'account-invitations' %}" class="nav-link d-flex align-items-start {% if current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' %}active{% endif %}">
-                        <i class="nav-icon fas fa-user-plus mt-1"></i>
-                        <p class="mb-0 ml-2 d-flex align-items-start justify-content-between flex-grow-1">
+                      <a href="{% url 'account-invitations' %}" class="nav-link {% if current_url_name == 'account-invitations' or current_url_name == 'account-invitations-upload' or current_url_name == 'account-invitations-send' %}active{% endif %}">
+                        <i class="nav-icon fas fa-user-plus"></i>
+                        <p class="d-flex align-items-start justify-content-between">
                           <span class="mr-2">Invitations</span>
                           {% if account_invitations_accepted_count %}
                             <span class="badge badge-success ml-2 align-self-start">{{ account_invitations_accepted_count }}</span>
@@ -366,9 +366,9 @@
 
             {% if send_mail_can_add %}
               <li class="nav-item {% if mail_nav_active %}menu-open{% endif %}">
-                <a href="#" class="nav-link d-flex align-items-start {% if mail_nav_active %}active{% endif %}">
-                  <i class="nav-icon fas fa-envelope-open-text mt-1"></i>
-                  <p class="mb-0 ml-2 flex-grow-1">
+                <a href="#" class="nav-link {% if mail_nav_active %}active{% endif %}">
+                  <i class="nav-icon fas fa-envelope-open-text"></i>
+                  <p>
                     Mail Tools
                     <i class="right fas fa-angle-left"></i>
                   </p>

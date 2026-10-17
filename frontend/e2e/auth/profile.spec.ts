@@ -116,3 +116,96 @@ test("auth-profile-membership-operator sees the management modal and typed-name 
   await confirmInput.fill("regular03");
   await expect(terminateButton).toBeEnabled();
 });
+// Runs in the browser. Clicking the toggle in the same task lets the caller measure the very
+// first frame of the expand transition.
+function measureSidebar(clickToggle: boolean) {
+  if (clickToggle) {
+    document.querySelector<HTMLElement>("[data-widget='pushmenu']")?.click();
+  }
+  const visibleLinks = Array.from(document.querySelectorAll(".nav-sidebar .nav-link")).filter(
+    (link) => link.getClientRects().length > 0,
+  );
+  const links = visibleLinks.map((link) => {
+    const icon = link.querySelector(".nav-icon")?.getBoundingClientRect();
+    return {
+      text: link.querySelector("p")?.firstChild?.textContent?.trim(),
+      iconLeft: icon?.left,
+      iconWidth: icon?.width,
+      labelLeft: link.querySelector("p")?.getBoundingClientRect().left,
+      height: link.getBoundingClientRect().height,
+    };
+  });
+  return { sidebarWidth: document.querySelector<HTMLElement>(".main-sidebar")?.offsetWidth, links };
+}
+
+async function openSidebarLayout(page: Page) {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const actor = authResetState.actors.regular01;
+  await loginViaForm(page, actor.username, actor.password);
+
+  // Open a submenu so its links (some with badges) are measured too. AdminLTE wires treeviews on load.
+  await page.waitForLoadState("load");
+  await page.locator(".nav-sidebar .nav-link").filter({ hasText: "Membership Management" }).click();
+  // jQuery's slideDown leaves only display: block behind once it has finished.
+  await expect(page.locator(".nav-item.menu-open > .nav-treeview")).toHaveAttribute("style", "display: block;");
+
+  const pinned = await page.evaluate(measureSidebar, false);
+  const singleLineHeight = pinned.links.find((link) => link.text === "My Profile")?.height ?? 0;
+  const longLabel = pinned.links.find((link) => link.text === "Membership Management");
+  expect(longLabel?.height).toBeGreaterThan(singleLineHeight);
+  expect(pinned.links.find((link) => link.text === "Sponsors")).toBeDefined();
+  expectLabelsAligned(pinned);
+
+  await page.locator("[data-widget='pushmenu']").click();
+  await expect(page.locator(".main-sidebar")).toHaveJSProperty("offsetWidth", 74);
+  return pinned;
+}
+
+type SidebarLayout = ReturnType<typeof measureSidebar>;
+
+function expectLabelsAligned(layout: SidebarLayout): void {
+  expect(new Set(layout.links.map((link) => link.labelLeft)).size).toBe(1);
+}
+
+// Mid-animation the layout must already be the open one. Labels are excluded from the position check because
+// AdminLTE slides them all in together; they must stay aligned with each other while doing so.
+function expectOpenLayoutWhileExpanding(expanding: SidebarLayout, pinned: SidebarLayout): void {
+  const withoutLabelLeft = ({ labelLeft: _, ...link }: SidebarLayout["links"][number]) => link;
+  expect(expanding.sidebarWidth).toBeLessThan(250);
+  expect(expanding.links.map(withoutLabelLeft)).toEqual(pinned.links.map(withoutLabelLeft));
+  expectLabelsAligned(expanding);
+}
+
+// As a signed-in user, expanding the collapsed sidebar reveals the final layout without reflowing labels
+// mid-animation, including long labels that wrap in the open sidebar.
+test("auth-profile-sidebar labels keep their open layout while the collapsed sidebar expands", async ({ page }) => {
+  const pinned = await openSidebarLayout(page);
+
+  expectOpenLayoutWhileExpanding(await page.evaluate(measureSidebar, true), pinned);
+
+  await expect.poll(() => page.evaluate(measureSidebar, false)).toEqual(pinned);
+});
+
+// As a signed-in user, hovering the collapsed sidebar shows the same layout as pinning it open, throughout the animation.
+test("auth-profile-sidebar hover-expanded layout matches the pinned-open sidebar", async ({ page }) => {
+  const pinned = await openSidebarLayout(page);
+
+  await page.mouse.move(30, 300);
+  expectOpenLayoutWhileExpanding(await page.evaluate(measureSidebar, false), pinned);
+
+  await expect.poll(() => page.evaluate(measureSidebar, false)).toEqual(pinned);
+});
+
+// As a profile owner, my avatar stays circular when its column is narrower than the avatar's nominal size.
+test("auth-profile-avatar stays square when the profile column is narrower than the avatar", async ({ page }) => {
+  const actor = authResetState.actors.regular03;
+
+  await page.setViewportSize({ width: 800, height: 900 });
+  await loginViaForm(page, actor.username, actor.password);
+
+  const avatar = page.locator("[data-user-profile-summary-vue-root] .d-md-block img.img-circle");
+  await expect(avatar).toBeVisible();
+  const box = await avatar.boundingBox();
+  expect(box?.width).toBeLessThan(220);
+  expect(box?.height).toBeCloseTo(box?.width ?? 0, 1);
+});
