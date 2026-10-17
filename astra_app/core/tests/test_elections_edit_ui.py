@@ -747,12 +747,12 @@ class ElectionDraftDeletionTests(_CoreCategoriesTestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=mt,
+            created_at=now - datetime.timedelta(days=10),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=10))
 
         committee_group = FreeIPAGroup(
             settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
@@ -1177,19 +1177,13 @@ class ElectionEditCreateModeGroupSelectionTests(_CoreCategoriesTestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(
-            target_username="alex",
-            membership_type=mt,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=30))
-
-        nominator_membership = Membership.objects.create(
-            target_username="sam",
-            membership_type=mt,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-        Membership.objects.filter(pk=nominator_membership.pk).update(created_at=now - datetime.timedelta(days=30))
+        for username in ("alex", "sam"):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=mt,
+                created_at=now - datetime.timedelta(days=30),
+                expires_at=now + datetime.timedelta(days=365),
+            )
 
         committee_group = FreeIPAGroup(
             settings.FREEIPA_ELECTION_COMMITTEE_GROUP,
@@ -1270,12 +1264,12 @@ class ElectionCommitteeDisqualificationDraftTests(_CoreCategoriesTestCase):
                 "enabled": True,
             },
         )
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username=username,
             membership_type=mt,
+            created_at=now - datetime.timedelta(days=30),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=30))
 
     def test_save_draft_rejects_committee_member_candidate(self) -> None:
         self._login_as_freeipa_user("admin")

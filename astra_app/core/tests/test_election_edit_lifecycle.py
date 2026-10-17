@@ -82,12 +82,12 @@ class ElectionStartLifecycleTests(TestCase):
 
     def _member(self, username: str, *, membership_type: MembershipType | None = None) -> None:
         """Seed a membership old enough to clear the eligibility cutoff."""
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username=username,
             membership_type=membership_type or self.individual_type,
+            created_at=self.now - datetime.timedelta(days=200),
             expires_at=FAR_FUTURE,
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=self.now - datetime.timedelta(days=200))
 
     def _committee_group_patch(self, *, member_usernames: list[str]):
         group = FreeIPAGroup(settings.FREEIPA_ELECTION_COMMITTEE_GROUP, {"member_user": member_usernames})
@@ -296,12 +296,12 @@ class ElectionStartLifecycleTests(TestCase):
         )
         self._member("voter1")
         self._member("alice")
-        org_membership = Membership.objects.create(
+        Membership.objects.create(
             target_organization=organization,
             membership_type=sponsor_type,
+            created_at=self.now - datetime.timedelta(days=200),
             expires_at=organization_expires_at,
         )
-        Membership.objects.filter(pk=org_membership.pk).update(created_at=self.now - datetime.timedelta(days=200))
         return election, organization_nominator_id
 
     def test_start_accepts_a_valid_organization_nominator(self) -> None:

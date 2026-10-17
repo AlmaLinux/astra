@@ -40,12 +40,12 @@ class ElectionEditEligibleUsersSearchTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=mt,
+            created_at=now - datetime.timedelta(days=200),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=200))
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_elections("admin")
@@ -79,12 +79,12 @@ class ElectionEditEligibleUsersSearchTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=mt,
+            created_at=now - datetime.timedelta(days=200),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=200))
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_elections("admin")
@@ -116,12 +116,12 @@ class ElectionEditEligibleUsersSearchTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=mt,
+            created_at=now - datetime.timedelta(days=200),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=200))
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_elections("admin")

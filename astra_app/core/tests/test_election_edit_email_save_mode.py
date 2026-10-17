@@ -39,9 +39,12 @@ class ElectionEditEmailSaveModeTests(TestCase):
             enabled=True,
             votes=1,
         )
-        m = Membership.objects.create(target_username=username, membership_type=mt, expires_at=FAR_FUTURE)
-        created_at = election.start_datetime - datetime.timedelta(days=200)
-        Membership.objects.filter(pk=m.pk).update(created_at=created_at)
+        Membership.objects.create(
+            target_username=username,
+            membership_type=mt,
+            created_at=election.start_datetime - datetime.timedelta(days=200),
+            expires_at=FAR_FUTURE,
+        )
 
     def test_keep_existing_invalid_rerender_preserves_saved_baseline_for_followup_save(self) -> None:
         now = timezone.now()

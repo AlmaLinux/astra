@@ -52,13 +52,12 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username=username,
             membership_type=mt,
+            created_at=election.start_datetime - datetime.timedelta(days=10),
             expires_at=timezone.now() + datetime.timedelta(days=365),
         )
-        created_at = election.start_datetime - datetime.timedelta(days=10)
-        Membership.objects.filter(pk=m.pk).update(created_at=created_at)
 
     def _make_org_membership(self, *, election: Election, name: str, expires_at: datetime.datetime | None) -> Organization:
         mt = MembershipType.objects.create(
@@ -69,13 +68,12 @@ class ElectionEligibleGroupUiAndNominationTests(TestCase):
             enabled=True,
         )
         organization = Organization.objects.create(name=name, representative="")
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_organization=organization,
             membership_type=mt,
+            created_at=election.start_datetime - datetime.timedelta(days=10),
             expires_at=expires_at,
         )
-        created_at = election.start_datetime - datetime.timedelta(days=10)
-        Membership.objects.filter(pk=membership.pk).update(created_at=created_at)
         return organization
 
     def test_eligible_users_search_count_only_respects_eligible_group_override(self) -> None:

@@ -75,31 +75,25 @@ class ElectionVoteWeightsTests(TestCase):
             enabled=True,
         )
 
-        m1 = Membership.objects.create(
-            target_username=username,
-            membership_type=mt_a,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-        m2 = Membership.objects.create(
-            target_username=username,
-            membership_type=mt_b,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-
         created_at = election.start_datetime - datetime.timedelta(days=10)
-        Membership.objects.filter(pk=m1.pk).update(created_at=created_at)
-        Membership.objects.filter(pk=m2.pk).update(created_at=created_at)
+        for membership_type in (mt_a, mt_b):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=membership_type,
+                created_at=created_at,
+                expires_at=now + datetime.timedelta(days=365),
+            )
 
         org = Organization.objects.create(
             name="ACME",
             representative=username,
         )
-        sponsorship = Membership.objects.create(
+        Membership.objects.create(
             target_organization=org,
             membership_type=mt_org,
+            created_at=created_at,
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=sponsorship.pk).update(created_at=created_at)
 
         return 2 + 3 + 5
 
@@ -455,20 +449,14 @@ class ElectionVoteWeightsTests(TestCase):
             enabled=True,
         )
 
-        too_new_membership = Membership.objects.create(
-            target_username="alice",
-            membership_type=too_new_type,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-        old_enough_membership = Membership.objects.create(
-            target_username="alice",
-            membership_type=old_enough_type,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-
         # Age at vote time is not authoritative; age at election start is.
-        Membership.objects.filter(pk=too_new_membership.pk).update(created_at=now - datetime.timedelta(days=20))
-        Membership.objects.filter(pk=old_enough_membership.pk).update(created_at=now - datetime.timedelta(days=30))
+        for membership_type, created_days_ago in ((too_new_type, 20), (old_enough_type, 30)):
+            Membership.objects.create(
+                target_username="alice",
+                membership_type=membership_type,
+                created_at=now - datetime.timedelta(days=created_days_ago),
+                expires_at=now + datetime.timedelta(days=365),
+            )
 
         breakdown = vote_weight_breakdown_for_username(election=election, username="alice")
 
@@ -519,12 +507,12 @@ class ElectionVoteWeightsTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=membership_type,
+            created_at=now - datetime.timedelta(days=30),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=30))
 
         breakdown = vote_weight_breakdown_for_username(election=election, username="alice")
         weight = eligible_vote_weight_for_username(election=election, username="alice")

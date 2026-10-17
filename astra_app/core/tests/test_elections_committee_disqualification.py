@@ -120,12 +120,12 @@ class ElectionCommitteeDisqualificationSearchTests(_CoreCategoriesTestCase):
                 "enabled": True,
             },
         )
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username=username,
             membership_type=mt,
+            created_at=now - datetime.timedelta(days=30),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=30))
 
     def _create_organization_membership(
         self,
@@ -146,12 +146,12 @@ class ElectionCommitteeDisqualificationSearchTests(_CoreCategoriesTestCase):
             },
         )
         organization = Organization.objects.create(name=name, representative=representative)
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_organization=organization,
             membership_type=mt,
+            created_at=created_at,
             expires_at=expires_at,
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=created_at)
         return organization
 
     def test_candidate_search_excludes_committee_members(self) -> None:

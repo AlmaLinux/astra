@@ -71,12 +71,12 @@ class IneligibleVotersWithReasonsTests(TestCase):
 
         now = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
         # Created 60 days ago (old enough) but expired 15 days ago (before election start)
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="charlie",
             membership_type=voter_type,
+            created_at=now - datetime.timedelta(days=60),
             expires_at=now - datetime.timedelta(days=15),
         )
-        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=60))
 
         with (
             patch(
@@ -101,12 +101,12 @@ class IneligibleVotersWithReasonsTests(TestCase):
 
         now = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
         # Created 10 days ago — too new (need 30 days minimum)
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="newbie",
             membership_type=voter_type,
+            created_at=now - datetime.timedelta(days=10),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=10))
 
         with (
             patch(
@@ -134,12 +134,12 @@ class IneligibleVotersWithReasonsTests(TestCase):
 
         now = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
         # Created 60 days ago, not expired — should be eligible
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="eligible_user",
             membership_type=voter_type,
+            created_at=now - datetime.timedelta(days=60),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=60))
 
         with (
             patch(
@@ -202,12 +202,12 @@ class IneligibleVotersWithReasonsTests(TestCase):
             name="Test Org",
             representative="orgrep",
         )
-        s = Membership.objects.create(
+        Membership.objects.create(
             target_organization=org,
             membership_type=voter_type,
+            created_at=now - datetime.timedelta(days=60),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=s.pk).update(created_at=now - datetime.timedelta(days=60))
 
         with (
             patch(
@@ -254,26 +254,17 @@ class IneligibleVotersWithReasonsTests(TestCase):
 
         now = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
-        expired = Membership.objects.create(
-            target_username="expired_user",
-            membership_type=voter_type,
-            expires_at=now - datetime.timedelta(days=15),
-        )
-        Membership.objects.filter(pk=expired.pk).update(created_at=now - datetime.timedelta(days=60))
-
-        too_new = Membership.objects.create(
-            target_username="too_new",
-            membership_type=voter_type,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-        Membership.objects.filter(pk=too_new.pk).update(created_at=now - datetime.timedelta(days=10))
-
-        eligible = Membership.objects.create(
-            target_username="eligible_user",
-            membership_type=voter_type,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-        Membership.objects.filter(pk=eligible.pk).update(created_at=now - datetime.timedelta(days=60))
+        for username, created_days_ago, expires_at in (
+            ("expired_user", 60, now - datetime.timedelta(days=15)),
+            ("too_new", 10, now + datetime.timedelta(days=365)),
+            ("eligible_user", 60, now + datetime.timedelta(days=365)),
+        ):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=voter_type,
+                created_at=now - datetime.timedelta(days=created_days_ago),
+                expires_at=expires_at,
+            )
 
         with (
             patch(

@@ -568,13 +568,13 @@ class MembershipRequestWorkflowAgreementTests(TestCase):
             },
         )
         org = Organization.objects.create(name="Acme", representative="bob")
-        previous_membership = Membership.objects.create(
+        previous_created_at = timezone.now() - datetime.timedelta(days=180)
+        Membership.objects.create(
             target_organization=org,
             membership_type=membership_type_old,
+            created_at=previous_created_at,
             expires_at=timezone.now() + datetime.timedelta(days=60),
         )
-        previous_created_at = timezone.now() - datetime.timedelta(days=180)
-        Membership.objects.filter(pk=previous_membership.pk).update(created_at=previous_created_at)
         membership_request = MembershipRequest.objects.create(
             requested_username="",
             requested_organization=org,

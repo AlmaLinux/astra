@@ -218,8 +218,12 @@ class ElectionsApiTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="viewer", membership_type=voter_type, expires_at=FAR_FUTURE)
-        Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=1))
+        Membership.objects.create(
+            target_username="viewer",
+            membership_type=voter_type,
+            created_at=election.start_datetime - datetime.timedelta(days=1),
+            expires_at=FAR_FUTURE,
+        )
 
         issued_at = now - datetime.timedelta(hours=1)
         VotingCredential.objects.create(
@@ -566,9 +570,13 @@ class ElectionsApiTests(TestCase):
         )
         voter_type = MembershipType.objects.get(code="voter")
 
-        alice = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
-        bob = Membership.objects.create(target_username="bob", membership_type=voter_type, expires_at=FAR_FUTURE)
-        Membership.objects.filter(pk__in=[alice.pk, bob.pk]).update(created_at=election.start_datetime - datetime.timedelta(days=10))
+        for username in ("alice", "bob"):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=voter_type,
+                created_at=election.start_datetime - datetime.timedelta(days=10),
+                expires_at=FAR_FUTURE,
+            )
 
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
 
@@ -628,12 +636,12 @@ class ElectionsApiTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type_id="voter",
+            created_at=election.start_datetime - datetime.timedelta(days=10),
             expires_at=FAR_FUTURE,
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=10))
 
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
         alice = FreeIPAUser("alice", {"uid": ["alice"], "displayname": ["Alice Example"], "memberof_group": []})
@@ -689,17 +697,13 @@ class ElectionsApiTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        bob = Membership.objects.create(
-            target_username="bob",
-            membership_type_id="voter",
-            expires_at=start_dt + datetime.timedelta(days=365),
-        )
-        alice = Membership.objects.create(
-            target_username="alice",
-            membership_type_id="voter",
-            expires_at=start_dt + datetime.timedelta(days=365),
-        )
-        Membership.objects.filter(pk__in=[bob.pk, alice.pk]).update(created_at=now)
+        for username in ("bob", "alice"):
+            Membership.objects.create(
+                target_username=username,
+                membership_type_id="voter",
+                created_at=now,
+                expires_at=start_dt + datetime.timedelta(days=365),
+            )
 
         admin = FreeIPAUser("admin", {"uid": ["admin"], "memberof_group": []})
         freeipa_users = [

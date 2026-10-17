@@ -290,8 +290,12 @@ class AdminElectionLifecycleActionTests(TestCase):
             enabled=True,
             votes=1,
         )
-        m = Membership.objects.create(target_username="voter1", membership_type=mt, expires_at=FAR_FUTURE)
-        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=120))
+        Membership.objects.create(
+            target_username="voter1",
+            membership_type=mt,
+            created_at=now - datetime.timedelta(days=120),
+            expires_at=FAR_FUTURE,
+        )
 
         self._login_as_freeipa_admin("alice")
         admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})

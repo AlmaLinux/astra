@@ -34,12 +34,14 @@ class ElectionEligibleGroupTests(TestCase):
             enabled=True,
         )
 
-        m1 = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
-        m2 = Membership.objects.create(target_username="bob", membership_type=voter_type, expires_at=FAR_FUTURE)
-
         eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
-        Membership.objects.filter(pk=m1.pk).update(created_at=eligible_created_at)
-        Membership.objects.filter(pk=m2.pk).update(created_at=eligible_created_at)
+        for username in ("alice", "bob"):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=voter_type,
+                created_at=eligible_created_at,
+                expires_at=FAR_FUTURE,
+            )
 
         group = SimpleNamespace(
             cn="fas-restricted",
@@ -80,12 +82,14 @@ class ElectionEligibleGroupTests(TestCase):
             enabled=True,
         )
 
-        m1 = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
-        m2 = Membership.objects.create(target_username="bob", membership_type=voter_type, expires_at=FAR_FUTURE)
-
         eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
-        Membership.objects.filter(pk=m1.pk).update(created_at=eligible_created_at)
-        Membership.objects.filter(pk=m2.pk).update(created_at=eligible_created_at)
+        for username in ("alice", "bob"):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=voter_type,
+                created_at=eligible_created_at,
+                expires_at=FAR_FUTURE,
+            )
 
         root = SimpleNamespace(
             cn="fas-root",

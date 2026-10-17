@@ -61,8 +61,12 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="viewer", membership_type=voter_type, expires_at=FAR_FUTURE)
-        Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=1))
+        Membership.objects.create(
+            target_username="viewer",
+            membership_type=voter_type,
+            created_at=election.start_datetime - datetime.timedelta(days=1),
+            expires_at=FAR_FUTURE,
+        )
 
         VotingCredential.objects.create(
             election=election,
@@ -120,8 +124,12 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             votes=1,
             category_id="individual",
         )
-        membership = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
-        Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
+        Membership.objects.create(
+            target_username="alice",
+            membership_type=voter_type,
+            created_at=election.start_datetime - datetime.timedelta(days=200),
+            expires_at=FAR_FUTURE,
+        )
 
         viewer = FreeIPAUser(
             "viewer",
@@ -640,8 +648,12 @@ class ElectionDetailAdminControlsTests(_CoreCategoriesTestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="alice", membership_type=voter_type, expires_at=FAR_FUTURE)
-        Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=200))
+        Membership.objects.create(
+            target_username="alice",
+            membership_type=voter_type,
+            created_at=election.start_datetime - datetime.timedelta(days=200),
+            expires_at=FAR_FUTURE,
+        )
 
         VotingCredential.objects.create(
             election=election,
@@ -745,8 +757,12 @@ class ElectionVoteNoJsFallbackTests(_CoreCategoriesTestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(target_username="voter1", membership_type=voter_type, expires_at=FAR_FUTURE)
-        Membership.objects.filter(pk=membership.pk).update(created_at=election.start_datetime - datetime.timedelta(days=1))
+        Membership.objects.create(
+            target_username="voter1",
+            membership_type=voter_type,
+            created_at=election.start_datetime - datetime.timedelta(days=1),
+            expires_at=FAR_FUTURE,
+        )
 
         session = self.client.session
         session["_freeipa_username"] = "voter1"

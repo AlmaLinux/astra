@@ -36,15 +36,14 @@ class ElectionEligibilityReferenceDatetimeTests(TestCase):
             enabled=True,
         )
 
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=voter_type,
+            # Created 36 days before 'now': eligible by now-based cutoff (now-30),
+            # but would be ineligible by start-based cutoff (start-30 == now-40).
+            created_at=now - datetime.timedelta(days=36),
             expires_at=now + datetime.timedelta(days=365),
         )
-
-        # Created 36 days before 'now': eligible by now-based cutoff (now-30),
-        # but would be ineligible by start-based cutoff (start-30 == now-40).
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=36))
 
         with patch("django.utils.timezone.now", autospec=True, return_value=now):
             eligible = eligible_voters_from_memberships(election=election)
@@ -72,13 +71,12 @@ class ElectionEligibilityReferenceDatetimeTests(TestCase):
             enabled=True,
         )
 
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=voter_type,
+            created_at=now - datetime.timedelta(days=36),
             expires_at=now + datetime.timedelta(days=365),
         )
-
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=36))
 
         with patch("django.utils.timezone.now", autospec=True, return_value=now):
             eligible = eligible_voters_from_memberships(election=election)
@@ -107,12 +105,12 @@ class ElectionEligibilityReferenceDatetimeTests(TestCase):
             enabled=True,
         )
 
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=voter_type,
+            created_at=now - datetime.timedelta(days=60),
             expires_at=election.start_datetime,
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=60))
 
         eligible = eligible_voters_from_memberships(election=election)
         weight = eligible_vote_weight_for_username(election=election, username="alice")
@@ -155,12 +153,12 @@ class ElectionEligibilityMembershipAgeCutoffTests(TestCase):
         }
 
         for username, start_at in membership_starts_by_username.items():
-            membership = Membership.objects.create(
+            Membership.objects.create(
                 target_username=username,
                 membership_type=voter_type,
+                created_at=start_at,
                 expires_at=election_start + datetime.timedelta(days=365),
             )
-            Membership.objects.filter(pk=membership.pk).update(created_at=start_at)
 
         eligible = eligible_voters_from_memberships(election=election)
         weights_by_username = {

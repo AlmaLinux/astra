@@ -317,18 +317,13 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        m1 = Membership.objects.create(
-            target_username="voter1",
-            membership_type=mt,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-        m2 = Membership.objects.create(
-            target_username="voter2",
-            membership_type=mt,
-            expires_at=now + datetime.timedelta(days=365),
-        )
-        Membership.objects.filter(pk=m1.pk).update(created_at=now - datetime.timedelta(days=10))
-        Membership.objects.filter(pk=m2.pk).update(created_at=now - datetime.timedelta(days=10))
+        for username in ("voter1", "voter2"):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=mt,
+                created_at=now - datetime.timedelta(days=10),
+                expires_at=now + datetime.timedelta(days=365),
+            )
 
         ballot_hash = Ballot.compute_hash(
             election_id=election.id,
@@ -458,12 +453,12 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="voter1",
             membership_type=mt,
+            created_at=start_dt - datetime.timedelta(days=10),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=m.pk).update(created_at=start_dt - datetime.timedelta(days=10))
 
         # Create ballot_submitted audit rows on only some days.
         e0 = AuditLogEntry.objects.create(election=election, event_type="ballot_submitted", payload={}, is_public=False)
@@ -533,12 +528,12 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="voter1",
             membership_type=mt,
+            created_at=start_dt - datetime.timedelta(days=10),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=m.pk).update(created_at=start_dt - datetime.timedelta(days=10))
 
         e0 = AuditLogEntry.objects.create(election=election, event_type="ballot_submitted", payload={}, is_public=False)
         # 2025-12-30
@@ -592,12 +587,12 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="voter1",
             membership_type=mt,
+            created_at=now - datetime.timedelta(days=365),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=365))
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_permission("admin")
@@ -643,13 +638,13 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             enabled=True,
         )
 
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="bob",
             membership_type=mt,
+            # Term start too recent for a 30-day minimum at election start.
+            created_at=now,
             expires_at=start_dt + datetime.timedelta(days=365),
         )
-        # Term start too recent for a 30-day minimum at election start.
-        Membership.objects.filter(pk=m.pk).update(created_at=now)
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_permission("admin")
@@ -706,12 +701,12 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             enabled=True,
         )
 
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="bob",
             membership_type=mt,
+            created_at=start_dt,
             expires_at=start_dt + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=m.pk).update(created_at=start_dt)
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_permission("admin")
@@ -763,13 +758,13 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             enabled=True,
         )
 
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=mt,
+            # Eligible: membership term start is old enough.
+            created_at=now - datetime.timedelta(days=365),
             expires_at=start_dt + datetime.timedelta(days=365),
         )
-        # Eligible: membership term start is old enough.
-        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=365))
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_permission("admin")
@@ -818,17 +813,13 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             enabled=True,
         )
 
-        bob = Membership.objects.create(
-            target_username="bob",
-            membership_type=mt,
-            expires_at=start_dt + datetime.timedelta(days=365),
-        )
-        alice = Membership.objects.create(
-            target_username="alice",
-            membership_type=mt,
-            expires_at=start_dt + datetime.timedelta(days=365),
-        )
-        Membership.objects.filter(pk__in=[bob.pk, alice.pk]).update(created_at=now)
+        for username in ("bob", "alice"):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=mt,
+                created_at=now,
+                expires_at=start_dt + datetime.timedelta(days=365),
+            )
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_permission("admin")
@@ -874,17 +865,13 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             enabled=True,
         )
 
-        alice = Membership.objects.create(
-            target_username="alice",
-            membership_type=mt,
-            expires_at=start_dt + datetime.timedelta(days=365),
-        )
-        bob = Membership.objects.create(
-            target_username="bob",
-            membership_type=mt,
-            expires_at=start_dt + datetime.timedelta(days=365),
-        )
-        Membership.objects.filter(pk__in=[alice.pk, bob.pk]).update(created_at=now - datetime.timedelta(days=365))
+        for username in ("alice", "bob"):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=mt,
+                created_at=now - datetime.timedelta(days=365),
+                expires_at=start_dt + datetime.timedelta(days=365),
+            )
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_permission("admin")
@@ -1025,12 +1012,12 @@ class ElectionDetailManagerUIStatsTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        m = Membership.objects.create(
+        Membership.objects.create(
             target_username="expireduser",
             membership_type=mt,
+            created_at=now - datetime.timedelta(days=365),
             expires_at=start_dt - datetime.timedelta(days=1),
         )
-        Membership.objects.filter(pk=m.pk).update(created_at=now - datetime.timedelta(days=365))
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_permission("admin")

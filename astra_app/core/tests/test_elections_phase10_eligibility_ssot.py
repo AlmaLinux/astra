@@ -43,12 +43,12 @@ class ElectionsPhase10EligibilitySSOTTests(TestCase):
             category_id="individual",
             enabled=True,
         )
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type=membership_type,
+            created_at=now - datetime.timedelta(days=40),
             expires_at=now + datetime.timedelta(days=365),
         )
-        Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=40))
 
         with (
             patch("django.utils.timezone.now", return_value=now),

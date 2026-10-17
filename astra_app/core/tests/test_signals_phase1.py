@@ -166,26 +166,13 @@ class Phase1ElectionSignalTests(TestCase):
 
         from core.models import Membership
 
-        voter_membership = Membership.objects.create(
-            target_username="voter1",
-            membership_type=voter_type,
-            expires_at=FAR_FUTURE,
-        )
-        Membership.objects.filter(pk=voter_membership.pk).update(created_at=now - datetime.timedelta(days=200))
-
-        candidate_membership = Membership.objects.create(
-            target_username="alice",
-            membership_type=voter_type,
-            expires_at=FAR_FUTURE,
-        )
-        Membership.objects.filter(pk=candidate_membership.pk).update(created_at=now - datetime.timedelta(days=200))
-
-        nominator_membership = Membership.objects.create(
-            target_username="nominator",
-            membership_type=voter_type,
-            expires_at=FAR_FUTURE,
-        )
-        Membership.objects.filter(pk=nominator_membership.pk).update(created_at=now - datetime.timedelta(days=200))
+        for username in ("voter1", "alice", "nominator"):
+            Membership.objects.create(
+                target_username=username,
+                membership_type=voter_type,
+                created_at=now - datetime.timedelta(days=200),
+                expires_at=FAR_FUTURE,
+            )
 
         self._login_as_freeipa_user("admin")
         self._grant_manage_elections("admin")

@@ -1748,13 +1748,12 @@ class AdminImportMembershipsCSVTests(TestCase):
         self._login_as_freeipa_admin("alex")
 
         now = timezone.now().astimezone(datetime.UTC)
-        membership = Membership.objects.create(
+        Membership.objects.create(
             target_username="alice",
             membership_type_id="individual",
+            created_at=datetime.datetime(2024, 1, 2, 0, 0, 0, tzinfo=datetime.UTC),
             expires_at=now + datetime.timedelta(days=30),
         )
-        matching_start = datetime.datetime(2024, 1, 2, 0, 0, 0, tzinfo=datetime.UTC)
-        Membership.objects.filter(pk=membership.pk).update(created_at=matching_start)
 
         dataset = Dataset(headers=["Email", "Start date", "Notes"])
         dataset.append(["alice@example.org", "2024-01-02", "Updated note"])

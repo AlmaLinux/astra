@@ -223,12 +223,12 @@ class OperationsHourlyCommandTests(TestCase):
             votes=1,
         )
         for username in ("voter1", "voter2", "alice", "nominator"):
-            membership = Membership.objects.create(
+            Membership.objects.create(
                 target_username=username,
                 membership_type=membership_type,
+                created_at=now - datetime.timedelta(days=200),
                 expires_at=FAR_FUTURE,
             )
-            Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=200))
 
         def _get_user(username: str, **_: object) -> FreeIPAUser:
             return FreeIPAUser(

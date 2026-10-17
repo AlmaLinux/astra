@@ -65,12 +65,12 @@ class ElectionStartProgressApiTests(TestCase):
             votes=1,
         )
         for username in VOTER_USERNAMES:
-            membership = Membership.objects.create(
+            Membership.objects.create(
                 target_username=username,
                 membership_type=membership_type,
+                created_at=now - datetime.timedelta(days=200),
                 expires_at=FAR_FUTURE,
             )
-            Membership.objects.filter(pk=membership.pk).update(created_at=now - datetime.timedelta(days=200))
 
         session = self.client.session
         session["_freeipa_username"] = "admin"

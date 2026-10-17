@@ -39,14 +39,12 @@ class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
             representative="rep1",
         )
 
-        sponsorship = Membership.objects.create(
+        Membership.objects.create(
             target_organization=org,
             membership_type=org_type,
+            created_at=election.start_datetime - datetime.timedelta(days=120),
             expires_at=FAR_FUTURE,
         )
-
-        eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
-        Membership.objects.filter(pk=sponsorship.pk).update(created_at=eligible_created_at)
 
         eligible = eligible_voters_from_memberships(election=election)
         eligible_by_username = {v.username: v.weight for v in eligible}
@@ -78,14 +76,12 @@ class ElectionEligibilityOrganizationRepresentativesTests(TestCase):
             representative="rep1",
         )
 
-        sponsorship = Membership.objects.create(
+        Membership.objects.create(
             target_organization=org,
             membership_type=org_type,
+            created_at=election.start_datetime - datetime.timedelta(days=120),
             expires_at=FAR_FUTURE,
         )
-
-        eligible_created_at = election.start_datetime - datetime.timedelta(days=120)
-        Membership.objects.filter(pk=sponsorship.pk).update(created_at=eligible_created_at)
 
         eligible = eligible_voters_from_memberships(election=election)
         eligible_by_username = {v.username: v.weight for v in eligible}
