@@ -188,6 +188,122 @@ class MembershipAuditLogApiTests(TestCase):
         self.assertEqual(resp_query.json()["recordsFiltered"], 1)
         self.assertEqual(resp_query.json()["data"][0]["action"], MembershipLog.Action.terminated)
 
+    def test_membership_audit_log_detail_api_gives_each_action_its_own_details(self) -> None:
+        from core.models import MembershipTerminationFeedback
+
+        gold, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={
+                "name": "Gold", "group_cn": "almalinux-gold", "category_id": "sponsorship", "enabled": True,
+                "annual_dues_usd": 20000,
+            },
+        )
+        org = Organization.objects.create(name="Acme", representative="bob")
+        req = MembershipRequest.objects.create(
+            requested_organization=org,
+            membership_type=gold,
+            responses=[{"Why": "We ship AlmaLinux"}],
+        )
+        old_expiry = FAR_FUTURE - datetime.timedelta(days=30)
+
+        def log(action: str, **fields: object) -> MembershipLog:
+            return MembershipLog.objects.create(
+                actor_username="committee", target_organization=org, membership_type=gold,
+                membership_request=req, action=action, **fields,
+            )
+
+        requested = log(MembershipLog.Action.requested)
+        approved = log(MembershipLog.Action.approved, expires_at=old_expiry)
+        on_hold = log(MembershipLog.Action.on_hold, rejection_reason="Which products?")
+        rejected = log(MembershipLog.Action.rejected, rejection_reason="Not a sponsor")
+        expiry = log(MembershipLog.Action.expiry_changed, expires_at=FAR_FUTURE, previous_expires_at=old_expiry)
+        # previous_dues_usd None: the sponsor was paying the tier's standard price.
+        dues = log(MembershipLog.Action.dues_changed, expires_at=FAR_FUTURE, dues_usd=5000)
+        terminated = MembershipLog.objects.create(
+            actor_username="alice", target_username="alice", membership_type_id="individual",
+            action=MembershipLog.Action.terminated, expires_at=FAR_FUTURE,
+        )
+        MembershipTerminationFeedback.objects.create(
+            membership_log=terminated,
+            reason_category=MembershipTerminationFeedback.ReasonCategory.privacy,
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._make_freeipa_user("reviewer", groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP])
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            response = self.client.get(
+                reverse("api-membership-audit-log-detail"),
+                data=self._datatables_query(),
+                HTTP_ACCEPT="application/json",
+            )
+
+        rows = {row["log_id"]: row for row in response.json()["data"]}
+        details = ("expires_at", "reason", "previous_expires_at", "dues", "termination_reason_category")
+
+        def row_details(entry: MembershipLog) -> dict[str, object]:
+            row = rows[entry.pk]
+            return {
+                "responses": row["request"]["responses"] if row["request"] else None,
+                **{key: row[key] for key in details},
+            }
+
+        empty = {
+            "expires_at": None, "reason": None, "previous_expires_at": None, "dues": None,
+            "termination_reason_category": None,
+        }
+        responses = [{"question": "Why", "answer_text": "We ship AlmaLinux", "segments": [{"kind": "text", "text": "We ship AlmaLinux"}]}]
+        expected = {
+            # Only the request's own actions carry its answers; later actions just link to it.
+            requested: {**empty, "responses": responses},
+            # The term end only matters where a term is set; a dues change keeps it and a
+            # termination's expires_at is just when it happened.
+            approved: {**empty, "responses": [], "expires_at": old_expiry.isoformat()},
+            on_hold: {**empty, "responses": [], "reason": "Which products?"},
+            rejected: {**empty, "responses": [], "reason": "Not a sponsor"},
+            expiry: {
+                **empty, "responses": [], "expires_at": FAR_FUTURE.isoformat(), "previous_expires_at": old_expiry.isoformat(),
+            },
+            dues: {**empty, "responses": [], "dues": {"old_usd": 20000, "new_usd": 5000, "default_usd": 20000}},
+            terminated: {**empty, "responses": None, "termination_reason_category": "privacy"},
+        }
+        for entry, entry_details in expected.items():
+            with self.subTest(action=entry.action):
+                self.assertEqual(row_details(entry), entry_details)
+
+    def test_membership_audit_log_search_finds_invoice_numbers_and_representatives(self) -> None:
+        gold, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={"name": "Gold", "group_cn": "almalinux-gold", "category_id": "sponsorship", "enabled": True},
+        )
+        org = Organization.objects.create(name="Acme", representative="bob")
+        invoice_log = MembershipLog.objects.create(
+            actor_username="committee",
+            target_organization=org,
+            membership_type=gold,
+            action=MembershipLog.Action.invoice_generated,
+            invoice_number="0001-2026-123456",
+        )
+        representative_log = MembershipLog.objects.create(
+            actor_username="committee",
+            target_organization=org,
+            membership_type=gold,
+            action=MembershipLog.Action.representative_changed,
+            old_representative="carol",
+            new_representative="bob",
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._make_freeipa_user("reviewer", groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP])
+        # A sponsor quoting an invoice number, or a former representative, must lead back to the log.
+        for q, expected in (("2026-123456", invoice_log), ("carol", representative_log)):
+            with self.subTest(q=q), patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+                response = self.client.get(
+                    reverse("api-membership-audit-log-detail"),
+                    data={**self._datatables_query(), "q": q},
+                    HTTP_ACCEPT="application/json",
+                )
+                self.assertEqual([row["log_id"] for row in response.json()["data"]], [expected.pk])
+
     def test_membership_audit_log_api_rejects_invalid_query_parameters(self) -> None:
         self._login_as_freeipa_user("reviewer")
         reviewer = self._make_freeipa_user(
@@ -242,7 +358,8 @@ class MembershipAuditLogApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         row = response.json()["data"][0]
         self.assertEqual(row["created_at"], log.created_at.isoformat())
-        self.assertEqual(row["expires_at"], log.expires_at.isoformat())
+        # A request sets no term, so its expires_at is not part of the row.
+        self.assertIsNone(row["expires_at"])
         self.assertEqual(row["action"], MembershipLog.Action.requested)
         self.assertNotIn("created_at_display", row)
         self.assertNotIn("action_display", row)

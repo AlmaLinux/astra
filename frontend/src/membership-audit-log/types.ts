@@ -47,6 +47,18 @@ export interface AuditLogRow {
   request: AuditLogRequestInfo | null;
   invoice: OrganizationDetailInvoice | null;
   representative: AuditLogRepresentativeChange | null;
+  // Rejection reason, or the RFI message of an on_hold.
+  reason: string | null;
+  previous_expires_at: string | null;
+  dues: AuditLogDuesChange | null;
+  termination_reason_category: string | null;
+}
+
+export interface AuditLogDuesChange {
+  // What the sponsor pays per year, before and after; default_usd is the tier's standard price.
+  old_usd: number;
+  new_usd: number;
+  default_usd: number;
 }
 
 export interface AuditLogRepresentativeChange {

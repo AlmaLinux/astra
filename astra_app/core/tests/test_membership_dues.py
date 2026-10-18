@@ -217,7 +217,20 @@ class ChangeDuesTests(MembershipDuesTestMixin, TestCase):
         )
 
         self.assertEqual(Membership.objects.get(target_organization=self.organization).dues_usd, 0)
-        self.assertEqual(MembershipLog.objects.latest("pk").dues_usd, 0)
+        log = MembershipLog.objects.latest("pk")
+        self.assertEqual(log.dues_usd, 0)
+        # The audit log shows what the expiry was changed from.
+        self.assertEqual(log.previous_expires_at, membership.expires_at)
+
+    def test_dues_change_log_records_what_the_sponsor_paid_before(self) -> None:
+        from core.membership_dues import change_membership_dues
+
+        membership = self._active_gold(dues_usd=10000)
+
+        change_membership_dues(membership=membership, dues_usd=5000, reason="Bigger in-kind deal", actor_username="committee")
+
+        log = MembershipLog.objects.filter(action=MembershipLog.Action.dues_changed).get()
+        self.assertEqual((log.previous_dues_usd, log.dues_usd), (10000, 5000))
 
 
 class ApprovalDuesTests(MembershipDuesTestMixin, TestCase):

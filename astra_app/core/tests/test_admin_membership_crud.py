@@ -129,6 +129,62 @@ class AdminMembershipCRUDTests(TestCase):
         self.assertContains(response, "Reachable Org")
         self.assertContains(response, "Gold Sponsor")
 
+    def _sponsorship_to_delete(self):
+        from core.models import Membership, MembershipLog
+
+        membership_type = self._create_membership_type(
+            code="gold-sponsor", name="Gold Sponsor", group_cn="alma-gold-sponsor", category_id="sponsorship", sort_order=5,
+        )
+        organization = self._create_organization(name="Leaving Org")
+        MembershipLog.create_for_approval(actor_username="reviewer", membership_type=membership_type, target_organization=organization)
+        return Membership.objects.get(target_organization=organization)
+
+    def _delete_in_admin(self, membership, *, revoked: bool):
+        self._login_as_freeipa_admin("alice")
+        with (
+            patch.object(FreeIPAUser, "get", side_effect=self._freeipa_user_get),
+            patch("core.membership.revoke_membership_group_access", return_value=revoked) as revoke_mock,
+        ):
+            response = self.client.post(reverse("admin:core_membership_delete", args=[membership.pk]), data={"post": "yes"})
+        return response, revoke_mock
+
+    def test_admin_delete_terminates_the_membership_like_the_committee(self) -> None:
+        from core.models import Membership, MembershipLog
+
+        membership = self._sponsorship_to_delete()
+
+        response, revoke_mock = self._delete_in_admin(membership, revoked=True)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(revoke_mock.call_args.args[0].pk, membership.pk)
+        self.assertFalse(Membership.objects.filter(pk=membership.pk).exists())
+        self.assertEqual(
+            list(MembershipLog.objects.filter(action=MembershipLog.Action.terminated).values_list("actor_username", "membership_type_id")),
+            [("alice", "gold-sponsor")],
+        )
+
+    def test_admin_delete_keeps_the_membership_when_freeipa_access_stays(self) -> None:
+        from core.models import Membership, MembershipLog
+
+        membership = self._sponsorship_to_delete()
+
+        response, _revoke_mock = self._delete_in_admin(membership, revoked=False)
+
+        self.assertRedirects(response, reverse("admin:core_membership_change", args=[membership.pk]), fetch_redirect_response=False)
+        self.assertTrue(Membership.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(MembershipLog.objects.filter(action=MembershipLog.Action.terminated).exists())
+
+    def test_membership_admin_has_no_bulk_delete(self) -> None:
+        self._sponsorship_to_delete()
+        self._login_as_freeipa_admin("alice")
+
+        with patch.object(FreeIPAUser, "get", side_effect=self._freeipa_user_get):
+            response = self.client.get(reverse("admin:core_membership_changelist"))
+
+        # Each termination revokes FreeIPA access and may fail on its own; a bulk delete can't say which did.
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'value="delete_selected"')
+
     def _assert_recorded_as_approved_request(self, approved_log, *, actor: str, at: datetime.datetime) -> None:
         """Direct grants still get a request, so notes always have one to attach to."""
         from post_office.models import Email

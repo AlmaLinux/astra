@@ -864,6 +864,10 @@ class MembershipLog(models.Model):
     # The term's committee-set dues after this action (None: tier default). Kept on
     # every approval/expiry/dues log so replaying the log never loses a waiver.
     dues_usd = models.PositiveIntegerField(blank=True, null=True)
+    # What expiry_changed/dues_changed changed from, so the log reads on its own.
+    # previous_dues_usd follows dues_usd: None means the tier's standard price.
+    previous_expires_at = models.DateTimeField(blank=True, null=True)
+    previous_dues_usd = models.PositiveIntegerField(blank=True, null=True)
     # Set on invoice actions: the stored PDF is found by number, even after the sponsorship expires.
     invoice_number = models.CharField(max_length=32, blank=True, default="")
     # Set on representative_changed; empty old means the organization was just claimed.
@@ -963,6 +967,8 @@ class MembershipLog(models.Model):
         rejection_reason: str = "",
         import_batch_id: uuid.UUID | None = None,
         dues_usd: int | None = None,
+        previous_expires_at: datetime.datetime | None = None,
+        previous_dues_usd: int | None = None,
     ) -> MembershipLog:
         """Internal factory: all public create_for_* methods delegate here."""
         return cls.objects.create(
@@ -978,6 +984,8 @@ class MembershipLog(models.Model):
             rejection_reason=rejection_reason,
             import_batch_id=import_batch_id,
             dues_usd=dues_usd,
+            previous_expires_at=previous_expires_at,
+            previous_dues_usd=previous_dues_usd,
         )
 
     # --- Factory methods (unified: pass target_username OR target_organization) ---
@@ -1069,6 +1077,7 @@ class MembershipLog(models.Model):
                 action=cls.Action.expiry_changed, expires_at=expires_at,
                 import_batch_id=import_batch_id,
                 dues_usd=None if current is None else current.dues_usd,
+                previous_expires_at=old_expires_at,
             )
             apply_membership_log_side_effects(log=log)
             if log.membership_request is not None:
@@ -1096,6 +1105,7 @@ class MembershipLog(models.Model):
         expires_at: datetime.datetime,
         dues_usd: int | None,
     ) -> MembershipLog:
+        current = cls._current_membership(membership_type, "", target_organization)
         log = cls._create_log(
             actor_username=actor_username,
             target_organization=target_organization,
@@ -1104,6 +1114,7 @@ class MembershipLog(models.Model):
             action=cls.Action.dues_changed,
             expires_at=expires_at,
             dues_usd=dues_usd,
+            previous_dues_usd=None if current is None else current.dues_usd,
         )
         apply_membership_log_side_effects(log=log)
         return log

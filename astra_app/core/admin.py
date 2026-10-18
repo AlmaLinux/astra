@@ -83,7 +83,7 @@ from core.ipa_user_attrs import (
 )
 from core.ipa_utils import bool_to_ipa, sync_set_membership
 from core.logging_extras import exception_log_fields
-from core.membership import FreeIPARepresentativeSyncError
+from core.membership import FreeIPARepresentativeSyncError, terminate_membership
 from core.membership_csv_import import (
     _COLUMN_FIELDS,
     MembershipCSVConfirmImportForm,
@@ -2431,6 +2431,26 @@ class MembershipAdmin(admin.ModelAdmin):
         obj.__dict__.update(saved_membership.__dict__)
         obj._state.adding = False
 
+    @override
+    def get_actions(self, request: HttpRequest) -> dict[str, Any]:
+        actions = super().get_actions(request)
+        # Each deletion is a termination that revokes FreeIPA access and may fail on its own.
+        actions.pop("delete_selected", None)
+        return actions
+
+    @override
+    def delete_model(self, request: HttpRequest, obj: Membership) -> None:
+        if not terminate_membership(membership=obj, actor_username=get_username(request)):
+            raise ValidationError("Failed to remove the FreeIPA group access, so the membership was not terminated.")
+
+    @override
+    def delete_view(self, request: HttpRequest, object_id: str, extra_context: dict[str, Any] | None = None) -> HttpResponse:
+        try:
+            return super().delete_view(request, object_id, extra_context)
+        except ValidationError as exc:
+            self.message_user(request, exc.messages[0], level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:core_membership_change", args=[object_id]))
+
 
 class CandidateInline(admin.TabularInline):
     model = Candidate
@@ -3854,6 +3874,25 @@ class OrganizationMembershipCSVImportLinkAdmin(BaseCsvImportAdmin):
         return redirect("admin:core_organizationmembershipcsvimportlink_import")
 
 
+class OrganizationMembershipInlineForm(forms.ModelForm):
+    class Meta:
+        model = Membership
+        fields = ("membership_type", "expires_at")
+
+    @override
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # A tier change is an approval of another type (FreeIPA groups, dues), which a row edit can't do.
+        if self.instance.pk is not None:
+            self.fields["membership_type"].disabled = True
+
+    def clean_membership_type(self) -> MembershipType:
+        membership_type = self.cleaned_data["membership_type"]
+        if not membership_type.category.is_organization:
+            raise forms.ValidationError("This membership type cannot be assigned to organizations.")
+        return membership_type
+
+
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
     class OrganizationAdminForm(forms.ModelForm):
@@ -3973,7 +4012,9 @@ class OrganizationAdmin(admin.ModelAdmin):
                     if not old_group_cn and not new_group_cn:
                         continue
 
-                    if delete_requested or membership_type_id != current_membership.membership_type_id:
+                    # Existing rows' type is disabled, so browsers don't post it.
+                    type_changed = bool(membership_type_id) and membership_type_id != current_membership.membership_type_id
+                    if delete_requested or type_changed:
                         raise forms.ValidationError(
                             "Change the representative and sponsorship memberships in separate saves."
                         )
@@ -4047,6 +4088,7 @@ class OrganizationAdmin(admin.ModelAdmin):
 
     class MembershipInline(admin.TabularInline):
         model = Membership
+        form = OrganizationMembershipInlineForm
         fk_name = "target_organization"
         fields = ("membership_type", "expires_at", "created_at")
         readonly_fields = ("created_at",)
@@ -4085,6 +4127,43 @@ class OrganizationAdmin(admin.ModelAdmin):
                 level=messages.ERROR,
             )
             return HttpResponseRedirect(request.path)
+        except ValidationError as exc:
+            # Raised by the logged membership paths in save_formset; the whole save was rolled back.
+            for message in exc.messages:
+                self.message_user(request, message, level=messages.ERROR)
+            return HttpResponseRedirect(request.path)
+
+    @override
+    def save_formset(self, request, form, formset, change) -> None:
+        if formset.model is not Membership:
+            super().save_formset(request, form, formset, change)
+            return
+
+        # Rows go through the same logged paths as the Membership admin and the committee,
+        # so every change reaches the membership log, the notes and FreeIPA.
+        actor_username = get_username(request)
+        formset.save(commit=False)
+        for membership in formset.deleted_objects:
+            if not terminate_membership(membership=membership, actor_username=actor_username):
+                raise ValidationError(
+                    f"Failed to remove the FreeIPA group access, so {membership.membership_type.name} was not terminated."
+                )
+        for membership, changed_fields in formset.changed_objects:
+            if "expires_at" in changed_fields:
+                update_direct_membership_dates(
+                    actor_username=actor_username,
+                    membership=membership,
+                    starts_at=membership.created_at,
+                    expires_at=membership.expires_at,
+                )
+        for membership in formset.new_objects:
+            grant_direct_membership(
+                actor_username=actor_username,
+                membership_type=membership.membership_type,
+                starts_at=timezone.now(),
+                expires_at=membership.expires_at,
+                target_organization=form.instance,
+            )
 
     @override
     def save_model(self, request, obj, form, change) -> None:

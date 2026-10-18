@@ -274,3 +274,49 @@ class OrganizationAuditEntriesMoveMigrationTests(TransactionTestCase):
     def test_only_election_entries_remain(self) -> None:
         entry_model = self.apps.get_model("core", "AuditLogEntry")
         self.assertEqual(list(entry_model.objects.values_list("pk", flat=True)), [self.election_entry.pk])
+
+
+class MembershipLogPreviousTermMigrationTests(TransactionTestCase):
+    before = [("core", "0118_auditlogentry_election_only")]
+    after = [("core", "0119_membershiplog_previous_term")]
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.addCleanup(migrate_to_latest)
+        apps = _migrate(self.before)
+        gold = _gold_membership_type(apps)
+        log_model = apps.get_model("core", "MembershipLog")
+        organization = apps.get_model("core", "Organization").objects.create(name="Acme", representative="bob")
+        first_expiry = NOW + datetime.timedelta(days=300)
+
+        def log(action: str, when: datetime.datetime, **fields: object) -> object:
+            entry = log_model.objects.create(
+                actor_username="committee", target_organization=organization, membership_type=gold, action=action, **fields,
+            )
+            log_model.objects.filter(pk=entry.pk).update(created_at=when)
+            return entry
+
+        log("approved", NOW, expires_at=first_expiry, dues_usd=10000)
+        self.expiry = log("expiry_changed", NOW + datetime.timedelta(days=1), expires_at=first_expiry + datetime.timedelta(days=30), dues_usd=10000)
+        self.dues = log("dues_changed", NOW + datetime.timedelta(days=2), expires_at=first_expiry + datetime.timedelta(days=30), dues_usd=5000)
+        # A term that ended has nothing to change from.
+        log("terminated", NOW + datetime.timedelta(days=3), expires_at=NOW + datetime.timedelta(days=3))
+        self.after_termination = log("expiry_changed", NOW + datetime.timedelta(days=4), expires_at=first_expiry)
+        self.first_expiry = first_expiry
+        self.apps = _migrate(self.after)
+
+    def test_history_gets_the_term_it_changed(self) -> None:
+        log_model = self.apps.get_model("core", "MembershipLog")
+        self.assertEqual(
+            {
+                entry.pk: (entry.previous_expires_at, entry.previous_dues_usd)
+                for entry in log_model.objects.filter(pk__in=[self.expiry.pk, self.dues.pk, self.after_termination.pk])
+            },
+            {
+                # Like the factories: each action records only what it changed.
+                self.expiry.pk: (self.first_expiry, None),
+                self.dues.pk: (None, 10000),
+                self.after_termination.pk: (None, None),
+            },
+        )

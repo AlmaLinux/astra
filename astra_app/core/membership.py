@@ -526,6 +526,23 @@ def revoke_membership_group_access(membership: Membership) -> bool:
     return True
 
 
+def terminate_membership(*, membership: Membership, actor_username: str) -> bool:
+    """Revoke the membership's FreeIPA access, then log and note its termination.
+
+    False, with nothing recorded, when FreeIPA failed: a termination recorded while
+    FreeIPA still grants access would be a lie.
+    """
+    if not revoke_membership_group_access(membership):
+        return False
+    MembershipLog.create_for_termination(
+        actor_username=actor_username,
+        membership_type=membership.membership_type,
+        target_username=membership.target_username,
+        target_organization=membership.target_organization,
+    )
+    return True
+
+
 def get_valid_memberships(
     *,
     username: str | None = None,

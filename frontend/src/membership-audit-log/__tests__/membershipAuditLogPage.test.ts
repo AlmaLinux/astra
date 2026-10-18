@@ -102,6 +102,51 @@ describe("MembershipAuditLogPage", () => {
     expect(wrapper.find('a[href="/membership/request/7/"]').exists()).toBe(true);
   });
 
+  it("shows only the details relevant to each action", async () => {
+    const base = {
+      created_at: "2026-10-18T10:00:00+00:00",
+      actor_username: "committee",
+      target: { kind: "organization", id: 3, label: "CERN", secondary_label: "", deleted: false },
+      membership_name: "Gold Sponsor",
+      expires_at: "2027-01-12T23:59:59+00:00",
+      request: { request_id: 194, responses: [] },
+      invoice: null,
+      representative: null,
+      reason: null,
+      previous_expires_at: null,
+      dues: null,
+      termination_reason_category: null,
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      draw: 1,
+      recordsTotal: 6,
+      recordsFiltered: 6,
+      data: [
+        { ...base, log_id: 1, action: "approved" },
+        { ...base, log_id: 2, action: "expiry_changed", previous_expires_at: "2026-11-18T23:59:59+00:00" },
+        { ...base, log_id: 3, action: "dues_changed", dues: { old_usd: 20000, new_usd: 5000, default_usd: 20000 } },
+        { ...base, log_id: 4, action: "rejected", reason: "Not a sponsor" },
+        { ...base, log_id: 5, action: "on_hold", reason: "Which products?" },
+        { ...base, log_id: 6, action: "terminated", request: null, termination_reason_category: "privacy" },
+      ],
+    }))));
+
+    const wrapper = mount(MembershipAuditLogPage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+
+    const rowText = wrapper.findAll("tbody tr").map((row) => row.text());
+    expect(rowText).toHaveLength(6);
+    expect(rowText.some((text) => text.includes("Request responses"))).toBe(false);
+    expect(rowText[1]).toContain("Nov 18, 2026 → Jan 12, 2027");
+    expect(rowText[2]).toContain("$20,000 → $5,000");
+    expect(rowText[3]).toContain("Not a sponsor");
+    expect(rowText[4]).toContain("Which products?");
+    expect(rowText[5]).toContain("Privacy");
+    // Each detail belongs to its own row only.
+    expect(rowText[0]).not.toMatch(/→|\$|Not a sponsor|Privacy/);
+  });
+
   it("labels dues changes and links them to the request of the term they change", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       draw: 1,

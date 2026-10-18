@@ -14,7 +14,7 @@ from django.utils import timezone
 from core.forms_membership import MembershipUpdateExpiryForm
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
-from core.membership import revoke_membership_group_access
+from core.membership import terminate_membership
 from core.membership_constants import MembershipCategoryCode
 from core.membership_dues import change_membership_dues, effective_dues_usd, parse_dues_usd, payable_dues_usd
 from core.models import Membership, MembershipLog
@@ -341,17 +341,10 @@ def membership_terminate(request: HttpRequest, membership_id: int) -> HttpRespon
         messages.error(request, confirmation_error)
         return redirect(resolved_redirect)
 
-    # Revoke access first: a termination recorded while FreeIPA still grants it would be a lie.
-    if not revoke_membership_group_access(membership):
+    if not terminate_membership(membership=membership, actor_username=get_username(request)):
         messages.error(request, "Failed to remove the FreeIPA group access, so the membership was not terminated.")
         return redirect(resolved_redirect)
 
-    MembershipLog.create_for_termination(
-        actor_username=get_username(request),
-        membership_type=membership.membership_type,
-        target_username=membership.target_username,
-        target_organization=organization,
-    )
     messages.success(request, "Sponsorship terminated." if organization is not None else "Membership terminated.")
     return redirect(resolved_redirect)
 

@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.admin.models import ADDITION, LogEntry
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
@@ -400,7 +401,7 @@ class AdminOrganizationCRUDTests(TestCase):
             code="contributor-basic",
             defaults={
                 "name": "Contributor Basic",
-                "category_id": "contributor",
+                "category_id": "mirror",
                 "sort_order": 2,
                 "enabled": True,
                 "group_cn": "",
@@ -410,7 +411,7 @@ class AdminOrganizationCRUDTests(TestCase):
             code="contributor-plus",
             defaults={
                 "name": "Contributor Plus",
-                "category_id": "contributor",
+                "category_id": "mirror",
                 "sort_order": 3,
                 "enabled": True,
                 "group_cn": "",
@@ -494,6 +495,8 @@ class AdminOrganizationCRUDTests(TestCase):
             patch("core.admin.FreeIPAUser.all", return_value=[admin_user, old_rep, new_rep]),
             patch.object(FreeIPAUser, "remove_from_group", autospec=True) as remove_mock,
             patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_mock,
+            # Inline grants run before the representative transition; a failing one must stop it.
+            patch("core.admin.grant_direct_membership", side_effect=ValidationError("grant failed")),
         ):
             response = self.client.post(
                 reverse("admin:core_organization_change", args=[organization.pk]),
@@ -513,3 +516,145 @@ class AdminOrganizationCRUDTests(TestCase):
         )
         remove_mock.assert_not_called()
         add_mock.assert_not_called()
+
+    def _post_inline(self, organization, inline_rows: list[dict[str, str]], *, initial_forms: int) -> object:
+        admin_user = FreeIPAUser("alice", {"uid": ["alice"], "memberof_group": ["admins"]})
+        rep = FreeIPAUser("bob", {"uid": ["bob"], "memberof_group": []})
+        payload = self._organization_change_payload(
+            organization=organization, representative=organization.representative, inline_rows=inline_rows,
+        )
+        payload["memberships-INITIAL_FORMS"] = str(initial_forms)
+        self._login_as_freeipa_admin("alice")
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", side_effect=lambda username, **_: {"alice": admin_user, "bob": rep}.get(username)),
+            patch("core.admin.FreeIPAUser.all", return_value=[admin_user, rep]),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            return self.client.post(reverse("admin:core_organization_change", args=[organization.pk]), data=payload)
+
+    def _inline_org(self) -> tuple[object, object, object]:
+        from core.models import Membership, MembershipType, Organization
+
+        gold, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={"name": "Gold Sponsor Member", "category_id": "sponsorship", "enabled": True, "group_cn": "almalinux-gold"},
+        )
+        organization = Organization.objects.create(
+            name="Inline Org",
+            representative="bob",
+            country_code="US",
+            business_contact_name="Business Person",
+            business_contact_email="contact@example.org",
+            website_logo="https://example.org/logo-options",
+            website="https://example.org/",
+        )
+        membership = Membership.objects.create(target_organization=organization, membership_type=gold, expires_at=FAR_FUTURE)
+        return organization, gold, membership
+
+    def _inline_row(self, *, membership_id: str, organization, membership_type: str, expires_on: str) -> dict[str, str]:
+        return {
+            "id": membership_id,
+            "target_organization": str(organization.pk),
+            "membership_type": membership_type,
+            "expires_at_0": expires_on,
+            "expires_at_1": "00:00:00",
+        }
+
+    def test_inline_expiry_edit_is_logged_like_any_other_expiry_change(self) -> None:
+        import datetime
+
+        from core.models import Membership, MembershipLog
+
+        organization, _gold, membership = self._inline_org()
+
+        response = self._post_inline(
+            organization,
+            [self._inline_row(membership_id=str(membership.pk), organization=organization, membership_type="gold", expires_on="2099-06-01")],
+            initial_forms=1,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        new_expiry = datetime.datetime(2099, 6, 1, tzinfo=datetime.UTC)
+        self.assertEqual(Membership.objects.get(pk=membership.pk).expires_at, new_expiry)
+        self.assertEqual(
+            list(MembershipLog.objects.values_list("action", "actor_username", "previous_expires_at", "expires_at")),
+            [(MembershipLog.Action.expiry_changed, "alice", FAR_FUTURE, new_expiry)],
+        )
+
+    def test_inline_new_row_is_granted_like_an_admin_membership(self) -> None:
+        import datetime
+
+        from core.models import Membership, MembershipLog, MembershipRequest, MembershipType
+
+        organization, _gold, membership = self._inline_org()
+        MembershipType.objects.update_or_create(
+            code="mirror",
+            defaults={"name": "Mirror", "category_id": "mirror", "enabled": True, "group_cn": ""},
+        )
+
+        response = self._post_inline(
+            organization,
+            [
+                self._inline_row(membership_id=str(membership.pk), organization=organization, membership_type="gold", expires_on="2099-01-01"),
+                self._inline_row(membership_id="", organization=organization, membership_type="mirror", expires_on="2099-06-01"),
+            ],
+            initial_forms=1,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        mirror = Membership.objects.get(target_organization=organization, membership_type_id="mirror")
+        self.assertEqual(mirror.expires_at, datetime.datetime(2099, 6, 1, tzinfo=datetime.UTC))
+        # A direct grant: an approved request owns its history, and the log says who granted it.
+        self.assertTrue(
+            MembershipRequest.objects.filter(
+                requested_organization=organization, membership_type_id="mirror", status=MembershipRequest.Status.approved,
+            ).exists()
+        )
+        self.assertEqual(
+            list(MembershipLog.objects.filter(membership_type_id="mirror").order_by("pk").values_list("action", "actor_username")),
+            [(MembershipLog.Action.approved, "alice"), (MembershipLog.Action.expiry_changed, "alice")],
+        )
+
+    def test_inline_delete_terminates_and_revokes_group_access(self) -> None:
+        from core.models import Membership, MembershipLog
+
+        organization, _gold, membership = self._inline_org()
+        row = self._inline_row(membership_id=str(membership.pk), organization=organization, membership_type="gold", expires_on="2099-01-01")
+
+        with patch("core.membership.revoke_membership_group_access", return_value=False):
+            refused = self._post_inline(organization, [{**row, "DELETE": "on"}], initial_forms=1)
+
+        # Never record a termination while FreeIPA still grants access.
+        self.assertEqual(refused.status_code, 302)
+        self.assertTrue(Membership.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(MembershipLog.objects.exists())
+
+        with patch("core.membership.revoke_membership_group_access", return_value=True) as revoke_mock:
+            response = self._post_inline(organization, [{**row, "DELETE": "on"}], initial_forms=1)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(revoke_mock.call_args.args[0].pk, membership.pk)
+        self.assertFalse(Membership.objects.filter(pk=membership.pk).exists())
+        self.assertEqual(
+            list(MembershipLog.objects.values_list("action", "actor_username", "membership_type_id")),
+            [(MembershipLog.Action.terminated, "alice", "gold")],
+        )
+
+    def test_inline_cannot_change_an_existing_rows_type(self) -> None:
+        from core.models import Membership, MembershipLog, MembershipType
+
+        organization, _gold, membership = self._inline_org()
+        MembershipType.objects.update_or_create(
+            code="silver",
+            defaults={"name": "Silver Sponsor Member", "category_id": "sponsorship", "enabled": True, "group_cn": "almalinux-silver"},
+        )
+
+        # A tier change is an approval of another type (FreeIPA groups, dues), which the inline can't do.
+        self._post_inline(
+            organization,
+            [self._inline_row(membership_id=str(membership.pk), organization=organization, membership_type="silver", expires_on="2099-01-01")],
+            initial_forms=1,
+        )
+
+        self.assertEqual(Membership.objects.get(pk=membership.pk).membership_type_id, "gold")
+        self.assertFalse(MembershipLog.objects.exists())

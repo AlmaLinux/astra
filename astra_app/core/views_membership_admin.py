@@ -23,8 +23,9 @@ from django.utils import timezone
 from core.country_codes import country_code_status_from_user_data
 from core.freeipa.user import FreeIPAUser
 from core.membership import visible_committee_membership_requests
+from core.membership_dues import payable_dues_usd
 from core.membership_minutes import build_minutes_data
-from core.models import Membership, MembershipLog, MembershipRequest
+from core.models import Membership, MembershipLog, MembershipRequest, MembershipTerminationFeedback
 from core.permissions import (
     ASTRA_VIEW_MEMBERSHIP,
     MEMBERSHIP_PERMISSIONS,
@@ -287,6 +288,7 @@ def _membership_audit_log_queryset(
         "membership_request",
         "membership_request__membership_type",
         "target_organization",
+        "termination_feedback",
     ).all()
 
     if username:
@@ -302,8 +304,17 @@ def _membership_audit_log_queryset(
             | Q(membership_type__name__icontains=q)
             | Q(membership_type__code__icontains=q)
             | Q(action__icontains=q)
+            | Q(invoice_number__icontains=q)
+            | Q(old_representative__icontains=q)
+            | Q(new_representative__icontains=q)
         )
     return logs.order_by("-created_at")
+
+
+_AUDIT_LOG_ACTIONS_WITH_RESPONSES = frozenset({MembershipLog.Action.requested, MembershipLog.Action.resubmitted})
+_AUDIT_LOG_ACTIONS_WITH_EXPIRY = frozenset({MembershipLog.Action.approved, MembershipLog.Action.expiry_changed})
+# rejection_reason also holds the RFI message of an on_hold.
+_AUDIT_LOG_ACTIONS_WITH_REASON = frozenset({MembershipLog.Action.rejected, MembershipLog.Action.on_hold})
 
 
 def _serialize_membership_audit_log_row(log: MembershipLog) -> dict[str, object]:
@@ -339,21 +350,42 @@ def _serialize_membership_audit_log_row_contract(log: MembershipLog, *, data_onl
     request_payload: dict[str, object] | None = None
     if log.membership_request_id is not None and log.membership_request is not None:
         responses: list[dict[str, object]] = []
-        for response_row in list(log.membership_request.responses or []):
-            for question, value in response_row.items():
-                if data_only:
-                    responses.append(serialize_membership_response(value, question))
-                else:
-                    responses.append(
-                        {
-                            "question": str(question),
-                            "answer_html": str(membership_response_value(value, str(question))),
-                        }
-                    )
+        # Later actions only link to the request; its answers belong to the request's own actions.
+        if log.action in _AUDIT_LOG_ACTIONS_WITH_RESPONSES:
+            for response_row in list(log.membership_request.responses or []):
+                for question, value in response_row.items():
+                    if data_only:
+                        responses.append(serialize_membership_response(value, question))
+                    else:
+                        responses.append(
+                            {
+                                "question": str(question),
+                                "answer_html": str(membership_response_value(value, str(question))),
+                            }
+                        )
         request_payload = {
             "request_id": log.membership_request_id,
             "responses": responses,
         }
+
+    dues: dict[str, int] | None = None
+    if log.action == MembershipLog.Action.dues_changed:
+        dues = {
+            "old_usd": payable_dues_usd(log.membership_type, log.previous_dues_usd),
+            "new_usd": payable_dues_usd(log.membership_type, log.dues_usd),
+            "default_usd": log.membership_type.annual_dues_usd,
+        }
+
+    termination_reason_category: str | None = None
+    if log.action == MembershipLog.Action.terminated:
+        try:
+            termination_reason_category = log.termination_feedback.reason_category
+        except MembershipTerminationFeedback.DoesNotExist:
+            # Only members leaving on their own say why; committee terminations don't.
+            pass
+
+    # The term end matters where a term is set; elsewhere expires_at is unchanged or the action time.
+    term_expires_at = log.expires_at if log.action in _AUDIT_LOG_ACTIONS_WITH_EXPIRY else None
 
     invoice: dict[str, str | None] | None = None
     if log.invoice_number:
@@ -382,16 +414,24 @@ def _serialize_membership_audit_log_row_contract(log: MembershipLog, *, data_onl
             and (log.old_representative or log.new_representative)
             else None
         ),
+        "reason": (log.rejection_reason or None) if log.action in _AUDIT_LOG_ACTIONS_WITH_REASON else None,
+        "previous_expires_at": (
+            log.previous_expires_at.isoformat()
+            if log.action == MembershipLog.Action.expiry_changed and log.previous_expires_at is not None
+            else None
+        ),
+        "dues": dues,
+        "termination_reason_category": termination_reason_category,
     }
     if data_only:
         row["created_at"] = log.created_at.isoformat()
-        row["expires_at"] = log.expires_at.isoformat() if log.expires_at is not None else None
+        row["expires_at"] = term_expires_at.isoformat() if term_expires_at is not None else None
         return row
 
     row["created_at_display"] = format_date(log.created_at, "r")
     row["created_at_iso"] = log.created_at.isoformat()
     row["action_display"] = log.get_action_display()
-    row["expires_display"] = format_date(log.expires_at, "M j, Y") if log.expires_at is not None else ""
+    row["expires_display"] = format_date(term_expires_at, "M j, Y") if term_expires_at is not None else ""
     return row
 
 

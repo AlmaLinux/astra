@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 
 import TableBase from "../../shared/components/TableBase.vue";
-import { formatMembershipTimestamp, membershipLogActionLabel } from "../../shared/membershipPresentation";
+import { formatMembershipTimestamp, formatUsd, membershipLogActionLabel } from "../../shared/membershipPresentation";
 import { fillUrlTemplate } from "../../shared/urlTemplates";
 import { formatAuditLogExpiresAt } from "../types";
 import type { AuditLogRequestResponseSegment, AuditLogRow } from "../types";
@@ -36,8 +36,19 @@ const columns = computed(() => [
   { key: "target", label: "Target", width: "1%", noWrap: true },
   { key: "membership", label: "Membership", width: "1%", noWrap: true },
   { key: "action", label: "Action" },
-  { key: "expires", label: "Expires", width: "1%", noWrap: true },
 ]);
+
+// Mirrors MembershipTerminationFeedback.ReasonCategory.
+const TERMINATION_REASON_LABELS: Record<string, string> = {
+  privacy: "Privacy",
+  no_longer_needed: "No longer needed",
+  duplicate: "Duplicate membership",
+  other: "Other",
+};
+
+function terminationReasonLabel(category: string): string {
+  return TERMINATION_REASON_LABELS[category] || category;
+}
 
 function rowId(row: unknown): string | number {
   return (row as AuditLogRow).log_id;
@@ -161,7 +172,21 @@ function segmentKey(segment: AuditLogRequestResponseSegment, index: number): str
         <div v-if="asRow(row).representative" class="small text-muted">
           {{ asRow(row).representative?.old || "(none)" }} → {{ asRow(row).representative?.new || "(none)" }}
         </div>
-        <details v-if="asRow(row).request" class="mt-1">
+        <div v-if="asRow(row).previous_expires_at" class="small text-muted">
+          {{ formatAuditLogExpiresAt(asRow(row).previous_expires_at) }} → {{ formatAuditLogExpiresAt(asRow(row).expires_at) }}
+        </div>
+        <div v-else-if="asRow(row).expires_at" class="small text-muted">
+          Expires {{ formatAuditLogExpiresAt(asRow(row).expires_at) }}
+        </div>
+        <div v-if="asRow(row).dues" class="small text-muted">
+          {{ formatUsd(asRow(row).dues?.old_usd ?? 0) }} → {{ formatUsd(asRow(row).dues?.new_usd ?? 0) }}
+          (standard {{ formatUsd(asRow(row).dues?.default_usd ?? 0) }})
+        </div>
+        <div v-if="asRow(row).reason" class="small text-muted" style="white-space: pre-wrap;">{{ asRow(row).reason }}</div>
+        <div v-if="asRow(row).termination_reason_category" class="small text-muted">
+          Reason: {{ terminationReasonLabel(asRow(row).termination_reason_category ?? "") }}
+        </div>
+        <details v-if="asRow(row).request?.responses.length" class="mt-1">
           <summary class="small text-muted">Request responses</summary>
           <div class="mt-2">
             <div v-for="responseItem in asRow(row).request?.responses || []" :key="responseItem.question">
@@ -176,7 +201,6 @@ function segmentKey(segment: AuditLogRequestResponseSegment, index: number): str
           </div>
         </details>
       </td>
-      <td class="text-muted text-nowrap" style="width: 1%;">{{ formatAuditLogExpiresAt(asRow(row).expires_at) }}</td>
     </template>
   </TableBase>
 </template>
