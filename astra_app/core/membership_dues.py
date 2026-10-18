@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from core.membership import term_membership_request
+from core.membership import last_term_log, term_membership_request
 from core.membership_notes import add_note
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note, Organization
 
@@ -196,20 +196,7 @@ def dues_waiver_review_message(membership_request: MembershipRequest) -> str | N
     if organization is None:
         return None
     requested_type = membership_request.membership_type
-    last_term = (
-        MembershipLog.objects.filter(
-            target_organization=organization,
-            membership_type__category_id=requested_type.category_id,
-            action__in=[
-                MembershipLog.Action.approved,
-                MembershipLog.Action.expiry_changed,
-                MembershipLog.Action.dues_changed,
-            ],
-        )
-        .select_related("membership_type")
-        .order_by("-created_at", "-pk")
-        .first()
-    )
+    last_term = last_term_log(organization=organization, category_id=requested_type.category_id)
     if last_term is None or last_term.dues_usd is None:
         return None
 

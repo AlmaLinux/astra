@@ -960,28 +960,67 @@ def get_expiring_memberships(*, days: int = 0) -> list[Membership]:
     )
 
 
-def memberships_with_open_request(memberships: Iterable[Membership]) -> set[int]:
-    """Pks of *memberships* whose target has a pending or on-hold request in the same category."""
+def memberships_with_open_request(memberships: Iterable[Membership]) -> dict[int, MembershipRequest]:
+    """The oldest pending or on-hold request in the same category, by pk of each of *memberships* that has one."""
     memberships = list(memberships)
-    open_requests = MembershipRequest.objects.filter(
-        status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-        membership_type__category_id__in={membership.membership_type.category_id for membership in memberships},
+    open_requests = (
+        MembershipRequest.objects.filter(
+            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+            membership_type__category_id__in={membership.membership_type.category_id for membership in memberships},
+        )
+        .select_related("membership_type")
+        .order_by("requested_at", "pk")
     )
-    open_keys: set[tuple[str | int, str]] = {
+    open_by_key: dict[tuple[str | int, str], MembershipRequest] = {}
+    for membership_request in [
         *open_requests.filter(
             requested_username__in={membership.target_username for membership in memberships},
             requested_organization__isnull=True,
-        ).values_list("requested_username", "membership_type__category_id"),
+        ),
         *open_requests.filter(
             requested_organization_id__in={membership.target_organization_id for membership in memberships},
-        ).values_list("requested_organization_id", "membership_type__category_id"),
-    }
-    return {
-        membership.pk
-        for membership in memberships
-        if (membership.target_username or membership.target_organization_id, membership.membership_type.category_id)
-        in open_keys
-    }
+        ),
+    ]:
+        target = membership_request.requested_organization_id or membership_request.requested_username
+        open_by_key.setdefault((target, membership_request.membership_type.category_id), membership_request)
+
+    with_open_request: dict[int, MembershipRequest] = {}
+    for membership in memberships:
+        key = (membership.target_username or membership.target_organization_id, membership.membership_type.category_id)
+        if key in open_by_key:
+            with_open_request[membership.pk] = open_by_key[key]
+    return with_open_request
+
+
+@dataclass(frozen=True, slots=True)
+class PendingRenewal:
+    """A sponsorship kept past its term by a renewal request awaiting a decision."""
+
+    membership: Membership
+    membership_request: MembershipRequest
+    term_ended_at: datetime.datetime
+
+
+def last_term_log(*, organization: Organization, category_id: str) -> MembershipLog | None:
+    """The organization's latest log entry setting a term in the category.
+
+    Its expiry is the real term end: the grace hold for an open request moves only
+    Membership.expires_at, and an expired membership's row is deleted.
+    """
+    return (
+        MembershipLog.objects.filter(
+            target_organization=organization,
+            membership_type__category_id=category_id,
+            action__in=[
+                MembershipLog.Action.approved,
+                MembershipLog.Action.expiry_changed,
+                MembershipLog.Action.dues_changed,
+            ],
+        )
+        .select_related("membership_type")
+        .order_by("-created_at", "-pk")
+        .first()
+    )
 
 
 def get_valid_membership_type_codes(

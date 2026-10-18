@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 
 from core.logging_extras import current_exception_log_fields
+from core.mattermost_webhooks import dispatch_inline
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,14 @@ def run_operations(*, name: str, jobs: OperationJobs) -> None:
     still reports the run as failed.
     """
     failed: list[str] = []
-    for command_name, command_kwargs in jobs:
-        logger.info("%s: running %s", name, command_name)
-        try:
-            call_command(command_name, **command_kwargs)
-        except Exception:
-            logger.exception("%s: %s failed", name, command_name, extra=current_exception_log_fields())
-            failed.append(command_name)
+    with dispatch_inline():
+        for command_name, command_kwargs in jobs:
+            logger.info("%s: running %s", name, command_name)
+            try:
+                call_command(command_name, **command_kwargs)
+            except Exception:
+                logger.exception("%s: %s failed", name, command_name, extra=current_exception_log_fields())
+                failed.append(command_name)
     if failed:
         raise CommandError(f"{name}: failed jobs: {', '.join(failed)}")
 

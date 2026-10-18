@@ -281,6 +281,14 @@ class Command(BaseCommand):
                     "Skipping expired sponsorship cleanup for org %s; FreeIPA removal failed.",
                     org.pk,
                 )
+                # Posted on every retry: the sponsor keeps its access until someone fixes FreeIPA.
+                if not dry_run:
+                    astra_signals.organization_membership_expired.send(
+                        sender=astra_signals.MembershipExpirationCommand,
+                        membership=sponsorship,
+                        sponsor_notified=False,
+                        cleanup_failed=True,
+                    )
                 continue
 
             sponsor_context: dict[str, str]
@@ -364,6 +372,12 @@ class Command(BaseCommand):
                     "membership_expired_cleanup: deleted sponsorship org=%s membership_type=%s",
                     org.pk,
                     membership_type.code,
+                )
+                astra_signals.organization_membership_expired.send(
+                    sender=astra_signals.MembershipExpirationCommand,
+                    membership=sponsorship,
+                    sponsor_notified=bool(recipient_email),
+                    cleanup_failed=False,
                 )
 
         membership_summary = (

@@ -140,6 +140,14 @@ class Command(BaseCommand):
             if recipient_warning:
                 logger.warning("%s", recipient_warning)
             if not recipient_email:
+                # Nobody was told, so the committee has to chase this one itself.
+                if not dry_run:
+                    astra_signals.organization_membership_expiring_soon.send(
+                        sender=astra_signals.MembershipExpirationCommand,
+                        membership=sponsorship,
+                        days=days_until,
+                        sponsor_notified=False,
+                    )
                 continue
 
             extend_url = organization_membership_request_url(
@@ -190,6 +198,13 @@ class Command(BaseCommand):
                 if did_queue:
                     queued += 1
                     logger.info("Queued %s to %s.", template, recipient_email)
+                    # Gated on the email so a same-day rerun doesn't post twice.
+                    astra_signals.organization_membership_expiring_soon.send(
+                        sender=astra_signals.MembershipExpirationCommand,
+                        membership=sponsorship,
+                        days=days_until,
+                        sponsor_notified=True,
+                    )
                 else:
                     skipped += 1
                     logger.info("Skipped %s to %s; already queued today.", template, recipient_email)

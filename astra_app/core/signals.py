@@ -39,6 +39,9 @@ organization_membership_request_rejected = Signal()
 organization_membership_request_rescinded = Signal()
 organization_membership_rfi_sent = Signal()
 organization_membership_rfi_replied = Signal()
+organization_membership_expiring_soon = Signal()
+organization_membership_expired = Signal()
+organization_membership_renewals_pending = Signal()
 
 # Organizations
 organization_claimed = Signal()
@@ -78,6 +81,9 @@ CANONICAL_SIGNALS: dict[str, Signal] = {
     "organization_membership_request_rescinded": organization_membership_request_rescinded,
     "organization_membership_rfi_sent": organization_membership_rfi_sent,
     "organization_membership_rfi_replied": organization_membership_rfi_replied,
+    "organization_membership_expiring_soon": organization_membership_expiring_soon,
+    "organization_membership_expired": organization_membership_expired,
+    "organization_membership_renewals_pending": organization_membership_renewals_pending,
     "organization_claimed": organization_claimed,
     "organization_created": organization_created,
     "user_country_changed": user_country_changed,

@@ -1,6 +1,6 @@
 
 import datetime
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.conf import settings
 from django.core.management import call_command
@@ -763,3 +763,84 @@ class MembershipExpiredCleanupCommandTests(TestCase):
             any("No recipient resolved for organization id=" in line for line in logs.output),
             f"Expected a warning about the missing recipient, got: {logs.output}",
         )
+
+
+class SponsorshipExpiredMattermostTests(TestCase):
+    """Each expired sponsorship gets its own post naming the org, including failed cleanups."""
+
+    frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+
+    def setUp(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship", defaults={"is_organization": True, "sort_order": 1}
+        )
+        self.gold, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={"name": "Gold Sponsor", "group_cn": "almalinux-gold", "category_id": "sponsorship", "enabled": True},
+        )
+        EmailTemplate.objects.update_or_create(
+            name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+            defaults={"subject": "Expired", "content": "Expired", "html_content": "Expired"},
+        )
+        self.org = Organization.objects.create(name="Acme", representative="rep1")
+        Membership.objects.create(
+            target_organization=self.org,
+            membership_type=self.gold,
+            expires_at=self.frozen_now - datetime.timedelta(days=1),
+        )
+        self.rep = FreeIPAUser(
+            "rep1",
+            {"uid": ["rep1"], "mail": ["rep1@example.com"], "memberof_group": ["almalinux-gold"]},
+        )
+
+    def _run(
+        self, *args: str, removal_outcome: FreeIPAGroupRemovalOutcome = FreeIPAGroupRemovalOutcome.removed
+    ) -> Mock:
+        with (
+            patch("django.utils.timezone.now", return_value=self.frozen_now),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=self.rep),
+            patch(
+                "core.management.commands.membership_expired_cleanup.remove_user_from_group_if_present",
+                return_value=removal_outcome,
+            ),
+            patch("core.signals.organization_membership_expired.send", autospec=True) as send_mock,
+        ):
+            call_command("membership_expired_cleanup", *args)
+        return send_mock
+
+    def _assert_posted(self, send_mock: Mock, *, sponsor_notified: bool, cleanup_failed: bool) -> None:
+        send_mock.assert_called_once()
+        kwargs = dict(send_mock.call_args.kwargs)
+        # The row may be deleted by then, so the post reads the org and type off the in-memory instance.
+        membership = kwargs.pop("membership")
+        self.assertEqual((membership.target_organization, membership.membership_type), (self.org, self.gold))
+        self.assertEqual(
+            kwargs,
+            {
+                "sender": astra_signals.MembershipExpirationCommand,
+                "sponsor_notified": sponsor_notified,
+                "cleanup_failed": cleanup_failed,
+            },
+        )
+
+    def test_posts_removed_sponsorship(self) -> None:
+        send_mock = self._run()
+
+        self._assert_posted(send_mock, sponsor_notified=True, cleanup_failed=False)
+        self.assertFalse(Membership.objects.filter(target_organization=self.org).exists())
+
+    def test_posts_failed_cleanup_every_run_until_it_succeeds(self) -> None:
+        send_mock = self._run(removal_outcome=FreeIPAGroupRemovalOutcome.failed)
+
+        self._assert_posted(send_mock, sponsor_notified=False, cleanup_failed=True)
+        self.assertTrue(Membership.objects.filter(target_organization=self.org).exists())
+
+    def test_does_not_post_on_dry_run(self) -> None:
+        self._run("--dry-run").assert_not_called()
+
+    def test_does_not_post_sponsorship_held_by_open_renewal_request(self) -> None:
+        MembershipRequest.objects.create(
+            requested_organization=self.org, membership_type=self.gold, status=MembershipRequest.Status.pending
+        )
+
+        self._run().assert_not_called()

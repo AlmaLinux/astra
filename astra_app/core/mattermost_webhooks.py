@@ -4,19 +4,24 @@ import json
 import logging
 import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import requests
 from django.conf import settings
 from django.template import Context, Template
 from django.urls import reverse
+from django.utils import timezone
 
 from core.elections_services import election_vote_url
+from core.membership import PendingRenewal
+from core.membership_dues import effective_dues_usd
 from core.membership_notifications import (
     membership_extend_url,
     membership_requests_url,
 )
-from core.models import Ballot, MattermostWebhookEndpoint, MembershipTerminationFeedback
+from core.models import Ballot, MattermostWebhookEndpoint, MembershipRequest, MembershipTerminationFeedback
 from core.public_urls import build_public_absolute_url
 from core.signal_receivers import connect_once, safe_receiver
 from core.signals import CANONICAL_SIGNALS
@@ -51,6 +56,8 @@ _ORANGE_EVENTS = {
     "organization_membership_rfi_replied",
     "election_deadline_extended",
     "membership_expiring_soon",
+    "organization_membership_expiring_soon",
+    "organization_membership_renewals_pending",
     "membership_self_terminated",
     "user_country_changed",
     "organization_country_changed",
@@ -66,8 +73,15 @@ _RED_EVENTS = {
     "organization_membership_request_rescinded",
     "account_deletion_rejected",
     "membership_expired",
+    "organization_membership_expired",
     "account_deletion_requested",
     "election_closed",
+}
+
+# Posted once per sponsorship, carrying the Membership itself.
+_SPONSORSHIP_EXPIRY_EVENTS = {
+    "organization_membership_expiring_soon",
+    "organization_membership_expired",
 }
 
 _ACCOUNT_DELETION_EVENTS = {
@@ -106,6 +120,18 @@ _ACCOUNT_DELETION_TEMPLATE_VARIABLES = {
     "account_deletion_manual_review_required": "Whether manual review is required.",
     "account_deletion_blocker_codes": "Blocker-code list for manual review.",
     "account_deletion_blocker_codes_csv": "Comma-separated blocker codes.",
+}
+
+_SPONSORSHIP_TEMPLATE_VARIABLES = {
+    "membership": "Membership object (example: {{ membership.target_organization.pk }}).",
+    "organization_id": "Sponsor organization primary key.",
+    "organization_name": "Sponsor organization name.",
+    "representative": "Username of the organization's representative (empty when unclaimed).",
+    "membership_type_code": "Sponsorship level code (example: gold).",
+    "membership_type_name": "Sponsorship level display name.",
+    "expires_at": "Expiry datetime object.",
+    "dues_usd": "Annual dues the sponsor pays, after any waiver.",
+    "sponsor_notified": "True when the sponsor was emailed about it.",
 }
 
 _ACCOUNT_DELETION_EVENT_TEXT = {
@@ -360,6 +386,22 @@ _EVENT_TEMPLATE_VARIABLES: dict[str, dict[str, str]] = {
         "organization_id": "Target organization primary key.",
         "organization_display_name": "Target organization display name.",
     },
+    "organization_membership_expiring_soon": {
+        **_SPONSORSHIP_TEMPLATE_VARIABLES,
+        "days": "Days until the sponsorship expires.",
+    },
+    "organization_membership_expired": {
+        **_SPONSORSHIP_TEMPLATE_VARIABLES,
+        "cleanup_failed": "True when removing FreeIPA access failed; the sponsorship is kept and retried tomorrow.",
+    },
+    "organization_membership_renewals_pending": {
+        "count": "Number of sponsorships kept past their term by an undecided renewal request.",
+        "renewals": (
+            "Pending renewals, most overdue first (example: {% for renewal in renewals %}"
+            "{{ renewal.membership.target_organization.name }} #{{ renewal.membership_request.pk }} "
+            "{{ renewal.term_ended_at|date:'Y-m-d' }}{% endfor %})."
+        ),
+    },
     "organization_claimed": {
         "organization": "Organization object (example: {{ organization.name }}, {{ organization.pk }}).",
     },
@@ -445,6 +487,20 @@ def _event_title(event_key: str) -> str:
     return event_key.replace("_", " ").title()
 
 
+def _organization_detail_url(organization_id: int) -> str:
+    return build_public_absolute_url(
+        reverse("organization-detail", kwargs={"organization_id": organization_id}),
+        on_missing="relative",
+    )
+
+
+def _membership_request_detail_url(membership_request_id: int) -> str:
+    return build_public_absolute_url(
+        reverse("membership-request-detail", kwargs={"pk": membership_request_id}),
+        on_missing="relative",
+    )
+
+
 def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
     if event_key == "account_invitation_accepted":
         return build_public_absolute_url(reverse("account-invitations"), on_missing="relative")
@@ -458,11 +514,11 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
     if event_key in {"organization_claimed", "organization_created"}:
         organization = kwargs.get("organization")
         if organization is not None:
-            return build_public_absolute_url(
-                reverse("organization-detail", kwargs={"organization_id": organization.pk}),
-                on_missing="relative",
-            )
+            return _organization_detail_url(organization.pk)
         return build_public_absolute_url(reverse("organizations"), on_missing="relative")
+
+    if event_key in _SPONSORSHIP_EXPIRY_EVENTS:
+        return _organization_detail_url(kwargs["organization_id"])
 
     if event_key in {"membership_expiring_soon", "membership_expired"}:
         membership_type = str(kwargs.get("membership_type") or "").strip()
@@ -493,17 +549,11 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
         membership_request = kwargs.get("membership_request")
         if membership_request is None:
             raise ValueError("membership_request is required for membership-request Mattermost events")
-        return build_public_absolute_url(
-            reverse("membership-request-detail", kwargs={"pk": membership_request.pk}),
-            on_missing="relative",
-        )
+        return _membership_request_detail_url(membership_request.pk)
 
     membership_request = kwargs.get("membership_request")
     if membership_request is not None:
-        return build_public_absolute_url(
-            reverse("membership-request-detail", kwargs={"pk": membership_request.pk}),
-            on_missing="relative",
-        )
+        return _membership_request_detail_url(membership_request.pk)
 
     return membership_requests_url()
 
@@ -562,10 +612,63 @@ def _organization_fields(kwargs: dict[str, object]) -> list[dict[str, object]]:
     return fields
 
 
+def _days_text(days: int) -> str:
+    return "1 day" if days == 1 else f"{days} days"
+
+
+def _sponsorship_fields(kwargs: dict[str, object]) -> list[dict[str, object]]:
+    fields: list[dict[str, object]] = [
+        {"title": "Level", "value": kwargs["membership_type_name"], "short": True},
+        {"title": "Expires", "value": f"{kwargs['expires_at']:%Y-%m-%d}", "short": True},
+    ]
+    if kwargs["representative"]:
+        fields.append({"title": "Representative", "value": kwargs["representative"], "short": True})
+    fields.append({"title": "Annual dues", "value": f"${kwargs['dues_usd']:,}", "short": True})
+    # Bold, since an un-notified sponsor is the one the committee must contact itself.
+    notified = "Yes" if kwargs["sponsor_notified"] else "**No**"
+    fields.append({"title": "Sponsor notified", "value": notified, "short": True})
+    return fields
+
+
+def _renewals_pending_table(renewals: list[PendingRenewal]) -> str:
+    now = timezone.now()
+    rows = [
+        "| Organization | Level | Term ended | Overdue | Request |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for renewal in renewals:
+        organization = renewal.membership.target_organization
+        membership_request = renewal.membership_request
+        status = MembershipRequest.Status(membership_request.status).label
+        rows.append(
+            f"| [{organization.name}]({_organization_detail_url(organization.pk)})"
+            f" | {renewal.membership.membership_type.name}"
+            f" | {renewal.term_ended_at:%Y-%m-%d}"
+            f" | {_days_text((now - renewal.term_ended_at).days)}"
+            f" | [#{membership_request.pk}]({_membership_request_detail_url(membership_request.pk)}) {status} |"
+        )
+    return "\n".join(rows)
+
+
 def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, object]:
     link = _event_link(event_key, kwargs)
     title = _event_title(event_key)
     color = _attachment_color_for_event(event_key)
+
+    if event_key == "organization_membership_renewals_pending":
+        count = kwargs["count"]
+        noun = "renewal" if count == 1 else "renewals"
+        return {
+            "text": f"{count} sponsorship {noun} pending past expiry",
+            "attachments": [
+                {
+                    "color": color,
+                    "title": "Pending sponsorship renewals",
+                    "title_link": link,
+                    "text": _renewals_pending_table(kwargs["renewals"]),
+                }
+            ],
+        }
 
     if event_key == "account_invitation_accepted":
         text = "Account invitation accepted"
@@ -606,6 +709,14 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
         reason = MembershipTerminationFeedback.ReasonCategory(kwargs["termination_reason_category"]).label
         fields.append({"title": "Reason", "value": reason, "short": True})
         fields.append({"title": "Actor", "value": actor, "short": True})
+    elif event_key == "organization_membership_expiring_soon":
+        text = f"Sponsorship for {kwargs['organization_name']} expires in {_days_text(kwargs['days'])}"
+        fields = _sponsorship_fields(kwargs)
+    elif event_key == "organization_membership_expired":
+        text = f"Sponsorship for {kwargs['organization_name']} expired"
+        if kwargs["cleanup_failed"]:
+            text += ", but removing its FreeIPA access failed; retrying tomorrow"
+        fields = _sponsorship_fields(kwargs)
     elif event_key in _ACCOUNT_DELETION_EVENTS:
         text = _ACCOUNT_DELETION_EVENT_TEXT.get(event_key, _event_title(event_key))
         actor = kwargs.get("actor") or "system"
@@ -681,6 +792,8 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
         request_id = str(kwargs.get("account_deletion_request_id") or "").strip()
         if request_id:
             title = f"Deletion request {request_id}"
+    elif event_key in _SPONSORSHIP_EXPIRY_EVENTS:
+        title = kwargs["organization_name"]
     elif event_key.startswith(("membership_", "organization_membership_")):
         if membership_request is not None:
             title = f"Membership request {membership_request.pk}"
@@ -837,6 +950,20 @@ def _build_template_context(event_key: str, kwargs: dict[str, object]) -> dict[s
                 "account_invitation_organization_name": organization.name if organization is not None else None,
             }
         )
+
+    # Sponsorship expiry events: read off the instance, since an expired one's row is already deleted.
+    membership = kwargs.get("membership")
+    if membership is not None:
+        organization = membership.target_organization
+        context |= {
+            "organization_id": organization.pk,
+            "organization_name": organization.name,
+            "representative": organization.representative,
+            "membership_type_code": membership.membership_type.code,
+            "membership_type_name": membership.membership_type.name,
+            "expires_at": membership.expires_at,
+            "dues_usd": effective_dues_usd(membership),
+        }
 
     # Count-only events (expiring soon, expired) pass a type code string rather than the model.
     membership_type = kwargs.get("membership_type")
@@ -1121,6 +1248,22 @@ def dispatch_mattermost_event(event_key: str, /, **kwargs: object) -> None:
 
 _RECEIVER_FUNCTIONS: dict[str, Callable[..., None]] = {}
 
+_dispatch_inline: ContextVar[bool] = ContextVar("mattermost_dispatch_inline", default=False)
+
+
+@contextmanager
+def dispatch_inline() -> Iterator[None]:
+    """Post webhooks before each signal send returns.
+
+    For scheduled jobs: their process exits after the last job, killing any
+    daemon dispatch thread still waiting on Mattermost.
+    """
+    token = _dispatch_inline.set(True)
+    try:
+        yield
+    finally:
+        _dispatch_inline.reset(token)
+
 
 @connect_once
 def connect_mattermost_receivers() -> None:
@@ -1128,6 +1271,9 @@ def connect_mattermost_receivers() -> None:
         @safe_receiver(event_key)
         def _receiver(*args: object, __event_key: str = event_key, **kwargs: object) -> None:
             _ = args
+            if _dispatch_inline.get():
+                dispatch_mattermost_event(__event_key, **kwargs)
+                return
             # Defer webhook dispatch to a background thread so it doesn't block the HTTP request.
             # This is critical for endpoints like membership RFI that trigger multiple webhooks
             # and would otherwise timeout waiting for Mattermost responses.

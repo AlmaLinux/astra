@@ -1,6 +1,6 @@
 
 import datetime
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.conf import settings
 from django.core.management import call_command
@@ -8,6 +8,7 @@ from django.test import TestCase
 from django.utils import timezone
 from post_office.models import EmailTemplate
 
+from core import signals as astra_signals
 from core.freeipa.user import FreeIPAUser
 from core.membership_log_side_effects import apply_membership_log_side_effects
 from core.models import (
@@ -1186,3 +1187,100 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
             any("No recipient resolved for organization id=" in line for line in logs.output),
             f"Expected a warning about the missing recipient, got: {logs.output}",
         )
+
+
+class SponsorshipExpiringSoonMattermostTests(TestCase):
+    """Each expiring sponsorship gets its own post naming the org, on every reminder day."""
+
+    frozen_now = datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.UTC)
+
+    def setUp(self) -> None:
+        MembershipTypeCategory.objects.update_or_create(
+            pk="individual", defaults={"is_individual": True, "is_organization": False, "sort_order": 0}
+        )
+        MembershipTypeCategory.objects.update_or_create(
+            pk="sponsorship", defaults={"is_organization": True, "sort_order": 1}
+        )
+        self.sponsor_type, _ = MembershipType.objects.update_or_create(
+            code="sponsor",
+            defaults={"name": "Sponsor", "group_cn": "almalinux-sponsor", "category_id": "sponsorship", "enabled": True},
+        )
+        for template_name in (
+            settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+            settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+        ):
+            EmailTemplate.objects.update_or_create(
+                name=template_name, defaults={"subject": "Expiring", "content": "Expiring", "html_content": "Expiring"}
+            )
+        self.rep_user = FreeIPAUser(
+            "org-rep",
+            {"uid": ["org-rep"], "mail": ["rep@example.com"], "memberof_group": []},
+        )
+
+    def _expires_in(self, days: int) -> datetime.datetime:
+        expires_on = self.frozen_now.date() + datetime.timedelta(days=days)
+        return datetime.datetime.combine(expires_on, datetime.time(23, 59, 59), tzinfo=datetime.UTC)
+
+    def _run(self, *args: str, rep_user: FreeIPAUser | None) -> Mock:
+        with (
+            patch("django.utils.timezone.now", return_value=self.frozen_now),
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=rep_user),
+            patch("core.signals.organization_membership_expiring_soon.send", autospec=True) as send_mock,
+        ):
+            call_command("membership_expiration_notifications", *args)
+        return send_mock
+
+    def test_posts_each_sponsorship_on_a_reminder_day(self) -> None:
+        organization = Organization.objects.create(name="Acme", representative="org-rep")
+        sponsorship = Membership.objects.create(
+            target_organization=organization, membership_type=self.sponsor_type, expires_at=self._expires_in(11)
+        )
+
+        send_mock = self._run(rep_user=self.rep_user)
+
+        send_mock.assert_called_once_with(
+            sender=astra_signals.MembershipExpirationCommand,
+            membership=sponsorship,
+            days=11,
+            sponsor_notified=True,
+        )
+
+    def test_posts_sponsorship_nobody_could_be_emailed_as_not_notified(self) -> None:
+        organization = Organization.objects.create(name="No Contact Org", representative="org-rep")
+        sponsorship = Membership.objects.create(
+            target_organization=organization, membership_type=self.sponsor_type, expires_at=self._expires_in(1)
+        )
+
+        with self.assertLogs("core.management.commands.membership_expiration_notifications", level="WARNING"):
+            send_mock = self._run(rep_user=None)
+
+        send_mock.assert_called_once_with(
+            sender=astra_signals.MembershipExpirationCommand,
+            membership=sponsorship,
+            days=1,
+            sponsor_notified=False,
+        )
+
+    def test_does_not_post_off_schedule_with_open_request_for_users_or_on_dry_run(self) -> None:
+        off_schedule = Organization.objects.create(name="Off Schedule", representative="off-schedule-rep")
+        Membership.objects.create(
+            target_organization=off_schedule, membership_type=self.sponsor_type, expires_at=self._expires_in(30)
+        )
+        # Renewals in progress belong to the weekly digest instead.
+        renewing = Organization.objects.create(name="Renewing", representative="renewing-rep")
+        Membership.objects.create(
+            target_organization=renewing, membership_type=self.sponsor_type, expires_at=self._expires_in(11)
+        )
+        MembershipRequest.objects.create(
+            requested_organization=renewing, membership_type=self.sponsor_type, status=MembershipRequest.Status.pending
+        )
+        individual_type, _ = MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={"name": "Individual", "group_cn": "almalinux-individual", "category_id": "individual", "enabled": True},
+        )
+        Membership.objects.create(target_username="alice", membership_type=individual_type, expires_at=self._expires_in(11))
+
+        self._run(rep_user=self.rep_user).assert_not_called()
+
+        Membership.objects.filter(target_organization=off_schedule).update(expires_at=self._expires_in(11))
+        self._run("--dry-run", rep_user=self.rep_user).assert_not_called()

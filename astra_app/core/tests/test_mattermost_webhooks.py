@@ -8,6 +8,7 @@ import requests
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
 from core.mattermost_webhooks import (
@@ -26,6 +27,7 @@ from core.models import (
     MembershipType,
     Organization,
 )
+from core.operations import run_operations
 from core.signals import CANONICAL_SIGNALS
 from core.tokens import election_genesis_chain_hash
 
@@ -570,6 +572,140 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         )
 
 
+class SponsorshipMattermostPayloadTests(SimpleTestCase):
+    endpoint = MattermostWebhookEndpoint(label="Sponsors", url="https://hooks.example.invalid/sponsors")
+
+    def _sponsorship(self, organization_id: int = 5, name: str = "Acme Corp", representative: str = "jdoe") -> object:
+        return SimpleNamespace(
+            target_organization=SimpleNamespace(pk=organization_id, name=name, representative=representative),
+            membership_type=SimpleNamespace(code="gold", name="Gold Sponsor", annual_dues_usd=5000),
+            dues_usd=None,
+            expires_at=datetime.datetime(2026, 10, 29, 23, 59, 59, tzinfo=datetime.UTC),
+        )
+
+    def _org_link(self, organization_id: int = 5) -> str:
+        return reverse("organization-detail", kwargs={"organization_id": organization_id})
+
+    def test_expiring_soon_names_the_org_and_links_to_it(self) -> None:
+        payload = _build_payload(
+            self.endpoint,
+            "organization_membership_expiring_soon",
+            {"membership": self._sponsorship(), "days": 11, "sponsor_notified": True},
+        )
+
+        self.assertEqual(payload["text"], "Sponsorship for Acme Corp expires in 11 days")
+        attachment = payload["attachments"][0]
+        self.assertEqual(attachment["color"], "#ff8c00")
+        self.assertEqual(attachment["title"], "Acme Corp")
+        self.assertTrue(attachment["title_link"].endswith(self._org_link()))
+        self.assertEqual(
+            attachment["fields"],
+            [
+                {"title": "Level", "value": "Gold Sponsor", "short": True},
+                {"title": "Expires", "value": "2026-10-29", "short": True},
+                {"title": "Representative", "value": "jdoe", "short": True},
+                {"title": "Annual dues", "value": "$5,000", "short": True},
+                {"title": "Sponsor notified", "value": "Yes", "short": True},
+            ],
+        )
+
+    def test_expiring_soon_flags_a_sponsor_nobody_could_email(self) -> None:
+        payload = _build_payload(
+            self.endpoint,
+            "organization_membership_expiring_soon",
+            {"membership": self._sponsorship(representative=""), "days": 1, "sponsor_notified": False},
+        )
+
+        self.assertEqual(payload["text"], "Sponsorship for Acme Corp expires in 1 day")
+        fields = {field["title"]: field["value"] for field in payload["attachments"][0]["fields"]}
+        self.assertEqual(fields["Sponsor notified"], "**No**")
+        self.assertNotIn("Representative", fields)
+
+    def test_expired_names_the_org_and_reports_failed_cleanup(self) -> None:
+        removed = _build_payload(
+            self.endpoint,
+            "organization_membership_expired",
+            {"membership": self._sponsorship(), "sponsor_notified": True, "cleanup_failed": False},
+        )
+        failed = _build_payload(
+            self.endpoint,
+            "organization_membership_expired",
+            {"membership": self._sponsorship(), "sponsor_notified": False, "cleanup_failed": True},
+        )
+
+        self.assertEqual(removed["text"], "Sponsorship for Acme Corp expired")
+        self.assertEqual(
+            failed["text"],
+            "Sponsorship for Acme Corp expired, but removing its FreeIPA access failed; retrying tomorrow",
+        )
+        for payload in (removed, failed):
+            attachment = payload["attachments"][0]
+            self.assertEqual(attachment["color"], "#cc0000")
+            self.assertEqual(attachment["title"], "Acme Corp")
+            self.assertTrue(attachment["title_link"].endswith(self._org_link()))
+
+    def test_endpoint_text_can_use_sponsorship_template_variables(self) -> None:
+        endpoint = MattermostWebhookEndpoint(
+            label="Sponsors",
+            url="https://hooks.example.invalid/sponsors",
+            text="{{ organization_name }} ({{ membership_type_name }}, rep {{ representative }}) in {{ days }}d",
+        )
+
+        payload = _build_payload(
+            endpoint,
+            "organization_membership_expiring_soon",
+            {"membership": self._sponsorship(), "days": 45, "sponsor_notified": True},
+        )
+
+        self.assertEqual(payload["text"], "Acme Corp (Gold Sponsor, rep jdoe) in 45d")
+
+    def test_renewals_pending_lists_each_org_with_its_request(self) -> None:
+        now = timezone.now()
+        renewals = [
+            SimpleNamespace(
+                membership=self._sponsorship(organization_id=5, name="Acme Corp"),
+                membership_request=SimpleNamespace(pk=12, status="on_hold"),
+                term_ended_at=now - datetime.timedelta(days=18, hours=1),
+            ),
+            SimpleNamespace(
+                membership=self._sponsorship(organization_id=7, name="Initech"),
+                membership_request=SimpleNamespace(pk=31, status="pending"),
+                term_ended_at=now - datetime.timedelta(days=1, hours=1),
+            ),
+        ]
+
+        payload = _build_payload(
+            self.endpoint, "organization_membership_renewals_pending", {"count": 2, "renewals": renewals}
+        )
+
+        self.assertEqual(payload["text"], "2 sponsorship renewals pending past expiry")
+        attachment = payload["attachments"][0]
+        self.assertEqual(attachment["color"], "#ff8c00")
+        self.assertTrue(attachment["title_link"].endswith(reverse("membership-requests")))
+        rows = attachment["text"].splitlines()
+        self.assertEqual(rows[0], "| Organization | Level | Term ended | Overdue | Request |")
+        acme_term_ended = renewals[0].term_ended_at.date().isoformat()
+        self.assertRegex(
+            rows[2],
+            rf"^\| \[Acme Corp\]\(\S*{self._org_link(5)}\) \| Gold Sponsor \| {acme_term_ended} \| 18 days \| "
+            rf"\[#12\]\(\S*{reverse('membership-request-detail', kwargs={'pk': 12})}\) On Hold \|$",
+        )
+        self.assertRegex(rows[3], r"^\| \[Initech\].* \| 1 day \| \[#31\].* Pending \|$")
+
+    def test_renewals_pending_singular_text(self) -> None:
+        renewal = SimpleNamespace(
+            membership=self._sponsorship(),
+            membership_request=SimpleNamespace(pk=12, status="pending"),
+            term_ended_at=timezone.now() - datetime.timedelta(days=3),
+        )
+
+        payload = _build_payload(
+            self.endpoint, "organization_membership_renewals_pending", {"count": 1, "renewals": [renewal]}
+        )
+
+        self.assertEqual(payload["text"], "1 sponsorship renewal pending past expiry")
+
+
 @override_settings(MATTERMOST_WEBHOOK_TIMEOUT_SECONDS=3)
 class MattermostWebhookPostTests(SimpleTestCase):
     def _endpoint(self, *, url: str = "https://hooks.example.invalid/abc") -> MattermostWebhookEndpoint:
@@ -1004,6 +1140,31 @@ class MattermostWebhookDispatchTests(TestCase):
             )
 
         self.assertEqual(post_mock.call_args.args[1]["text"], "alice left (privacy) #7")
+
+    def test_signals_from_scheduled_jobs_post_before_the_run_returns(self) -> None:
+        # A cron process exits after its last job; a daemon dispatch thread would die with it.
+        MattermostWebhookEndpoint.objects.create(
+            label="Organizations",
+            url="https://hooks.example.invalid/orgs",
+            enabled=True,
+            events=["organization_created"],
+        )
+        organization = Organization.objects.create(name="Scheduled Org")
+
+        def _job(_command_name: str, **_kwargs: object) -> None:
+            CANONICAL_SIGNALS["organization_created"].send(sender=Organization, organization=organization)
+
+        with (
+            patch("core.operations.call_command", side_effect=_job),
+            patch("core.mattermost_webhooks.threading.Thread") as thread_mock,
+            patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
+        ):
+            run_operations(name="operations_test", jobs=[("some_job", {})])
+            # Outside a scheduled run, requests still dispatch in the background.
+            CANONICAL_SIGNALS["organization_created"].send(sender=Organization, organization=organization)
+
+        post_mock.assert_called_once()
+        thread_mock.assert_called_once()
 
     def test_account_deletion_completed_signal_posts_through_connected_receiver(self) -> None:
         endpoint = MattermostWebhookEndpoint.objects.create(

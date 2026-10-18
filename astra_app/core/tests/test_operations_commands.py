@@ -128,6 +128,7 @@ class OperationsWeeklyCommandTests(TestCase):
             [
                 call("membership_pending_requests", force=False, dry_run=False),
                 call("membership_embargoed_members", force=False, dry_run=False),
+                call("sponsorship_renewals_pending", dry_run=False),
             ],
         )
         self.assertTrue(
@@ -146,6 +147,7 @@ class OperationsWeeklyCommandTests(TestCase):
             [
                 call("membership_pending_requests", force=True, dry_run=False),
                 call("membership_embargoed_members", force=True, dry_run=False),
+                call("sponsorship_renewals_pending", dry_run=False),
             ],
         )
 
@@ -160,6 +162,7 @@ class OperationsWeeklyCommandTests(TestCase):
             [
                 call("membership_pending_requests", force=False, dry_run=True),
                 call("membership_embargoed_members", force=False, dry_run=True),
+                call("sponsorship_renewals_pending", dry_run=True),
             ],
         )
 
