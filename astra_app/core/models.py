@@ -866,6 +866,9 @@ class MembershipLog(models.Model):
     dues_usd = models.PositiveIntegerField(blank=True, null=True)
     # Set on invoice actions: the stored PDF is found by number, even after the sponsorship expires.
     invoice_number = models.CharField(max_length=32, blank=True, default="")
+    # Set on representative_changed; empty old means the organization was just claimed.
+    old_representative = models.CharField(max_length=255, blank=True, default="")
+    new_representative = models.CharField(max_length=255, blank=True, default="")
     import_batch_id = models.UUIDField(blank=True, null=True, db_index=True)
 
     objects = MembershipLogQuerySet.as_manager()
@@ -1690,17 +1693,9 @@ class Ballot(models.Model):
 
 
 class AuditLogEntry(models.Model):
-    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="audit_log", null=True, blank=True)
-    organization = models.ForeignKey(
-        "Organization",
-        on_delete=models.SET_NULL,
-        related_name="audit_log",
-        null=True,
-        blank=True,
-    )
-    # Filled by snapshot_deleted_organization() as the FK is nulled; empty while the org exists.
-    deleted_organization_id = models.PositiveBigIntegerField(blank=True, null=True)
-    deleted_organization_name = models.CharField(max_length=255, blank=True, default="")
+    """Election audit trail. Organization and membership events go to MembershipLog."""
+
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name="audit_log")
     timestamp = models.DateTimeField(auto_now_add=True)
     event_type = models.CharField(max_length=64)
     payload = models.JSONField(blank=True, default=dict)
@@ -1715,26 +1710,12 @@ class AuditLogEntry(models.Model):
     class Meta:
         verbose_name_plural = "Audit log entries"
         ordering = ("timestamp", "id")
-        constraints = [
-            models.CheckConstraint(
-                condition=_exactly_one_q(
-                    Q(election__isnull=False),
-                    Q(organization__isnull=False),
-                    Q(deleted_organization_id__isnull=False),
-                ),
-                name="chk_auditlogentry_exactly_one_target",
-            ),
-        ]
         indexes = [
             models.Index(fields=["election", "timestamp"], name="audit_el_ts"),
             models.Index(fields=["election", "is_public"], name="audit_el_pub"),
-            models.Index(fields=["organization", "timestamp"], name="audit_org_ts"),
-            models.Index(fields=["organization", "is_public"], name="audit_org_pub"),
         ]
 
     def __str__(self) -> str:
-        if self.election_id is None:
-            return f"org:{self.organization_id or self.deleted_organization_id}:{self.event_type}"
         return f"{self.election_id}:{self.event_type}"
 
 
@@ -1923,7 +1904,7 @@ def snapshot_deleted_organization(
     instance: Organization,
     **kwargs: object,
 ) -> None:
-    """Record which org requests, logs and audit entries belonged to before SET_NULL drops the FK.
+    """Record which org requests and logs belonged to before SET_NULL drops the FK.
 
     The FK is nulled in the same UPDATE because the target check constraints reject
     rows carrying both the FK and the snapshot. Collector applies SET_NULL after
@@ -1932,7 +1913,6 @@ def snapshot_deleted_organization(
     for model, fk_name in (
         (MembershipRequest, "requested_organization"),
         (MembershipLog, "target_organization"),
-        (AuditLogEntry, "organization"),
     ):
         model.objects.filter(**{fk_name: instance}).update(
             **{fk_name: None},

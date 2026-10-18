@@ -171,6 +171,33 @@ describe("MembershipAuditLogPage", () => {
     expect(wrapper.text()).toContain("0004-2026-111111");
   });
 
+  it("shows who a representative change replaced", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      draw: 1,
+      recordsTotal: 1,
+      recordsFiltered: 1,
+      data: [{
+        log_id: 14,
+        created_at: "2026-10-18T10:00:00+00:00",
+        actor_username: "committee",
+        target: { kind: "organization", id: 3, label: "CERN", secondary_label: "", deleted: false },
+        membership_name: "Platinum Sponsor",
+        action: "representative_changed",
+        expires_at: null,
+        request: null,
+        invoice: null,
+        representative: { old: "carol", new: "bob" },
+      }],
+    }))));
+
+    const wrapper = mount(MembershipAuditLogPage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Representative changed");
+    expect(wrapper.text()).toContain("carol → bob");
+  });
+
   it("renders canonical request-response link segments as anchors", async () => {
     vi.stubGlobal(
       "fetch",

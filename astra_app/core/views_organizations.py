@@ -40,7 +40,6 @@ from core.membership import (
     suggest_tier_change_membership_type_code,
 )
 from core.membership_dues import effective_dues_usd
-from core.membership_notes import add_note
 from core.membership_payloads import (
     membership_action_url_templates,
     serialize_membership_entry,
@@ -49,7 +48,6 @@ from core.membership_payloads import (
 from core.membership_request_workflow import ignore_open_membership_requests_for_target
 from core.models import (
     AccountInvitation,
-    AuditLogEntry,
     Membership,
     MembershipLog,
     MembershipRequest,
@@ -312,6 +310,7 @@ def organization_claim(request: HttpRequest, token: str) -> HttpResponse:
                 organization_id=locked_organization.pk,
                 new_representative=username,
                 caller_label="organization_claim",
+                actor_username=username,
                 persist_changes=persist_claimed_organization,
             ).organization
 
@@ -1352,9 +1351,7 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
     if request.method == "POST" and form.is_valid():
         updated_org = form.save(commit=False)
         changed_fields = list(form.changed_data)
-
-        old_representative = ""
-        new_representative = ""
+        actor_username = get_username(request) or ""
         persisted_organization = updated_org
 
         try:
@@ -1368,15 +1365,13 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                         setattr(locked_organization, field_name, getattr(updated_org, field_name))
                     locked_organization.save()
 
-                transition_result = apply_organization_representative_transition(
+                persisted_organization = apply_organization_representative_transition(
                     organization_id=organization.pk,
                     new_representative=representative,
                     caller_label="organization_edit",
+                    actor_username=actor_username,
                     persist_changes=persist_edited_organization,
-                )
-                persisted_organization = transition_result.organization
-                old_representative = transition_result.old_representative
-                new_representative = transition_result.new_representative
+                ).organization
             else:
                 updated_org.save()
         except IntegrityError:
@@ -1396,28 +1391,6 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
             form.add_error(None, "Failed to update FreeIPA group membership for the representative.")
             return _render_org_form(request, form, organization=organization, is_create=False)
 
-        actor_username = get_username(request) or ""
-
-        if changed_fields:
-            try:
-                AuditLogEntry.objects.create(
-                    organization=organization,
-                    event_type="organization_edited",
-                    payload={
-                        "changed_fields": changed_fields,
-                        "actor_username": actor_username,
-                    },
-                    is_public=False,
-                )
-            except Exception:
-                logger.exception(
-                    "organization_edit: failed to create organization_edited audit entry org_id=%s changed_fields=%r actor=%r",
-                    organization.pk,
-                    changed_fields,
-                    actor_username,
-                    extra=current_exception_log_fields(),
-                )
-
         if "country_code" in changed_fields:
             _actor = actor_username
             _old = old_country_code
@@ -1431,78 +1404,6 @@ def organization_edit(request: HttpRequest, organization_id: int) -> HttpRespons
                     actor=_actor,
                 )
             )
-
-        if old_representative and new_representative and old_representative != new_representative:
-            pending_requests = list(
-                MembershipRequest.objects.select_related("membership_type").filter(
-                    requested_organization=organization,
-                    status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
-                )
-            )
-            if pending_requests:
-                MembershipLog.objects.bulk_create(
-                    [
-                        MembershipLog(
-                            actor_username=actor_username,
-                            target_username="",
-                            target_organization=organization,
-                            membership_type=mr.membership_type,
-                            membership_request=mr,
-                            action=MembershipLog.Action.representative_changed,
-                        )
-                        for mr in pending_requests
-                    ]
-                )
-
-                if actor_username:
-                    for mr in pending_requests:
-                        try:
-                            add_note(
-                                membership_request=mr,
-                                username=actor_username,
-                                content=None,
-                                action={
-                                    "type": "representative_changed",
-                                    "old": old_representative,
-                                    "new": new_representative,
-                                },
-                            )
-                        except Exception:
-                            logger.exception(
-                                "organization_edit: failed to create representative_changed note org_id=%s request_id=%s actor=%r old=%r new=%r",
-                                organization.pk,
-                                mr.pk,
-                                actor_username,
-                                old_representative,
-                                new_representative,
-                                extra=current_exception_log_fields(),
-                            )
-                else:
-                    logger.warning(
-                        "organization_edit: missing actor username for representative_changed notes org_id=%s",
-                        organization.pk,
-                    )
-
-            try:
-                AuditLogEntry.objects.create(
-                    organization=organization,
-                    event_type="organization_representative_changed",
-                    payload={
-                        "old": old_representative,
-                        "new": new_representative,
-                        "actor_username": actor_username,
-                    },
-                    is_public=False,
-                )
-            except Exception:
-                logger.exception(
-                    "organization_edit: failed to create representative_changed audit entry org_id=%s actor=%r old=%r new=%r",
-                    organization.pk,
-                    actor_username,
-                    old_representative,
-                    new_representative,
-                    extra=current_exception_log_fields(),
-                )
 
         messages.success(request, "Organization details updated.")
 

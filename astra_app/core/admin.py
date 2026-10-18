@@ -2541,15 +2541,12 @@ class ExclusionGroupAdmin(admin.ModelAdmin):
 
 @admin.register(AuditLogEntry)
 class AuditLogEntryAdmin(ReadOnlyModelAdmin):
-    list_display = ("election", "organization", "deleted_organization_name", "timestamp", "event_type", "is_public")
-    list_filter = ("election", "organization", "is_public", "event_type")
-    search_fields = ("event_type", "deleted_organization_name")
+    list_display = ("election", "timestamp", "event_type", "is_public")
+    list_filter = ("election", "is_public", "event_type")
+    search_fields = ("event_type",)
     ordering = ("-timestamp", "id")
     readonly_fields = (
         "election",
-        "organization",
-        "deleted_organization_id",
-        "deleted_organization_name",
         "timestamp",
         "event_type",
         "payload",
@@ -4121,6 +4118,7 @@ class OrganizationAdmin(admin.ModelAdmin):
             organization_id=transition_payload["organization_id"],
             new_representative=transition_payload["new_representative"],
             caller_label="organization_admin",
+            actor_username=get_username(request),
             persist_changes=persist_changes,
         )
 

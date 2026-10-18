@@ -196,7 +196,7 @@ class AdminOrganizationCRUDTests(TestCase):
         self.assertContains(response, "/organizations/claim/")
 
     def test_admin_change_representative_transfers_active_sponsorship_groups(self) -> None:
-        from core.models import Membership, MembershipType, Organization
+        from core.models import Membership, MembershipLog, MembershipType, Organization
 
         MembershipType.objects.update_or_create(
             code="gold",
@@ -279,6 +279,15 @@ class AdminOrganizationCRUDTests(TestCase):
         add_mock.assert_called_once()
         _, add_kwargs = add_mock.call_args
         self.assertEqual(add_kwargs["group_name"], "almalinux-gold")
+        # Admin edits must reach the membership log like every other representative change.
+        self.assertEqual(
+            list(
+                MembershipLog.objects.filter(action=MembershipLog.Action.representative_changed).values_list(
+                    "actor_username", "old_representative", "new_representative"
+                )
+            ),
+            [("alice", "bob", "carol")],
+        )
 
     def test_admin_change_representative_and_sponsorship_inline_requires_separate_saves(self) -> None:
         from core.models import Membership, MembershipType, Organization

@@ -12,8 +12,10 @@ from core.membership import (
     get_valid_memberships,
     rollback_organization_representative_groups,
     sync_organization_representative_groups,
+    term_membership_request,
 )
-from core.models import Organization
+from core.membership_notes import add_note
+from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +30,61 @@ class OrganizationRepresentativeTransitionResult:
     targeted_group_cns: tuple[str, ...]
 
 
+def _record_representative_change(
+    *,
+    organization: Organization,
+    memberships: list[Membership],
+    old_representative: str,
+    new_representative: str,
+    actor_username: str,
+) -> None:
+    """Log the change on every open request and running membership of the organization, and
+    note it on their requests."""
+    affected: list[tuple[MembershipType, MembershipRequest | None]] = [
+        (request.membership_type, request)
+        for request in MembershipRequest.objects.select_related("membership_type").filter(
+            requested_organization=organization,
+            status__in=[MembershipRequest.Status.pending, MembershipRequest.Status.on_hold],
+        )
+    ]
+    for membership in memberships:
+        term_request = term_membership_request(
+            membership_type=membership.membership_type,
+            target_organization=organization,
+        )
+        # A membership granted outside the request workflow may have no request; it still changed hands.
+        if term_request is None or all(request != term_request for _, request in affected):
+            affected.append((membership.membership_type, term_request))
+
+    MembershipLog.objects.bulk_create(
+        [
+            MembershipLog(
+                actor_username=actor_username,
+                target_organization=organization,
+                membership_type=membership_type,
+                membership_request=request,
+                action=MembershipLog.Action.representative_changed,
+                old_representative=old_representative,
+                new_representative=new_representative,
+            )
+            for membership_type, request in affected
+        ]
+    )
+    for _, request in affected:
+        if request is not None:
+            add_note(
+                membership_request=request,
+                username=actor_username,
+                action={"type": "representative_changed", "old": old_representative, "new": new_representative},
+            )
+
+
 def apply_organization_representative_transition(
     *,
     organization_id: int,
     new_representative: str,
     caller_label: str,
+    actor_username: str,
     persist_changes: Callable[[Organization], None],
 ) -> OrganizationRepresentativeTransitionResult:
     old_representative = ""
@@ -49,7 +101,8 @@ def apply_organization_representative_transition(
             old_representative = locked_organization.representative
             targeted_group_cns: list[str] = []
             seen_group_cns: set[str] = set()
-            for membership in get_valid_memberships(organization=locked_organization):
+            valid_memberships = get_valid_memberships(organization=locked_organization)
+            for membership in valid_memberships:
                 group_cn = membership.membership_type.group_cn
                 if not group_cn or group_cn in seen_group_cns:
                     continue
@@ -88,6 +141,15 @@ def apply_organization_representative_transition(
 
             try:
                 persist_changes(locked_organization)
+                # Part of persisting: if the record fails, the FreeIPA groups are rolled back too.
+                if changed:
+                    _record_representative_change(
+                        organization=locked_organization,
+                        memberships=valid_memberships,
+                        old_representative=old_representative,
+                        new_representative=new_representative,
+                        actor_username=actor_username,
+                    )
             except Exception:
                 persistence_failed = True
                 raise

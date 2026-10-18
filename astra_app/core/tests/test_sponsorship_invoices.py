@@ -12,7 +12,7 @@ from post_office.models import Email, EmailTemplate
 
 from core.freeipa.user import FreeIPAUser
 from core.membership_notes import CUSTOS
-from core.models import AuditLogEntry, Membership, MembershipType, Organization
+from core.models import Membership, MembershipLog, MembershipType, Organization
 from core.sponsorship_invoices import BILLING_NOTES_MAX_LINES, InvoiceTerm
 from core.tests.utils_test_data import ensure_core_categories
 
@@ -85,12 +85,14 @@ class SponsorshipInvoiceTestMixin:
 
         return invoice_filename(invoice_number(membership, term))
 
-    def _invoice_audit_payloads(self) -> list[dict[str, object]]:
+    def _invoice_logs(self) -> list[dict[str, object]]:
         return list(
-            AuditLogEntry.objects.filter(
-                organization=self.organization,
-                event_type="sponsorship_invoice_generated",
-            ).values_list("payload", flat=True)
+            MembershipLog.objects.filter(
+                target_organization=self.organization,
+                action__in=[MembershipLog.Action.invoice_generated, MembershipLog.Action.invoice_regenerated],
+            )
+            .order_by("created_at", "pk")
+            .values("action", "actor_username", "invoice_number")
         )
 
 
@@ -247,20 +249,13 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
             )
         render_mock.assert_called_once()
 
-        # Only renders are audited: serving the stored PDF again bills nothing new.
-        expected = {
-            "invoice_number": invoice_number(membership, InvoiceTerm.renewal),
-            "term": "renewal",
-            "membership_type": "gold",
-            "amount_due_usd": 15000,
-            # Kept so the PDF can still be found once the sponsorship has expired.
-            "storage_key": self._invoice_key(membership, InvoiceTerm.renewal),
-        }
+        # Only renders are logged: serving the stored PDF again bills nothing new.
+        number = invoice_number(membership, InvoiceTerm.renewal)
         self.assertEqual(
-            self._invoice_audit_payloads(),
+            self._invoice_logs(),
             [
-                {**expected, "regenerated": False, "actor_username": "system"},
-                {**expected, "regenerated": True, "actor_username": "rep1"},
+                {"action": "invoice_generated", "actor_username": "system", "invoice_number": number},
+                {"action": "invoice_regenerated", "actor_username": "rep1", "invoice_number": number},
             ],
         )
 
@@ -522,9 +517,10 @@ class SponsorshipInvoiceNotificationTests(SponsorshipInvoiceTestMixin, TestCase)
         self.assertEqual(email.context["invoice_number"], invoice_number(membership, InvoiceTerm.renewal))
         self.assertIn(expected_url, email.message)
         self.assertEqual(email.cc, [settings.MEMBERSHIP_COMMITTEE_EMAIL, "billing@example.com"])
-        [payload] = self._invoice_audit_payloads()
-        self.assertEqual(payload["term"], "renewal")
-        self.assertEqual(payload["actor_username"], CUSTOS)
+        self.assertEqual(
+            self._invoice_logs(),
+            [{"action": "invoice_generated", "actor_username": CUSTOS, "invoice_number": invoice_number(membership, InvoiceTerm.renewal)}],
+        )
 
     def test_later_reminders_reuse_the_stored_invoice(self) -> None:
         self._expiring_membership()
@@ -658,9 +654,10 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
         self.assertEqual(email.context["invoice_number"], invoice_number(membership, InvoiceTerm.current))
         self.assertEqual(email.context["invoice_url"], default_storage.url(self._invoice_key(membership, InvoiceTerm.current)))
         self.assertEqual(email.cc, ["billing@example.com"])
-        [payload] = self._invoice_audit_payloads()
-        self.assertEqual(payload["term"], "current")
-        self.assertEqual(payload["actor_username"], "committee")
+        self.assertEqual(
+            self._invoice_logs(),
+            [{"action": "invoice_generated", "actor_username": "committee", "invoice_number": invoice_number(membership, InvoiceTerm.current)}],
+        )
 
     def test_renewal_approval_email_carries_the_renewed_term_invoice(self) -> None:
         from core.sponsorship_invoices import invoice_number
@@ -691,7 +688,7 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
         email = self._welcome_email()
         self.assertEqual(email.attachments.count(), 0)
         self.assertNotIn("invoice_url", email.context)
-        self.assertEqual(self._invoice_audit_payloads(), [])
+        self.assertEqual(self._invoice_logs(), [])
 
     def _approve_with_custom_email(self) -> dict[str, list[str]]:
         from urllib.parse import parse_qs, urlsplit
@@ -748,8 +745,8 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
         self.assertEqual(query["cc"], ["billing@example.com"])
         self.assertEqual(query["invoice_number"], [invoice_number(membership, InvoiceTerm.current)])
         self.assertEqual(query["invoice_url"], [default_storage.url(attachment.key)])
-        [payload] = self._invoice_audit_payloads()
-        self.assertEqual(payload["actor_username"], "committee")
+        [log] = self._invoice_logs()
+        self.assertEqual(log["actor_username"], "committee")
 
     def test_custom_email_renewal_approval_attaches_the_renewed_term_invoice(self) -> None:
         from core.mail_attachments import mail_attachments_from_tokens

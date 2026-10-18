@@ -1,12 +1,8 @@
-import datetime
 
 from django.db import IntegrityError, transaction
 from django.test import TestCase
-from django.utils import timezone
 
 from core.models import (
-    AuditLogEntry,
-    Election,
     Membership,
     MembershipLog,
     MembershipType,
@@ -23,37 +19,6 @@ class OrganizationStatusTests(TestCase):
         Organization.objects.filter(pk=organization.pk).update(representative="bob")
 
         self.assertEqual(Organization.objects.get(pk=organization.pk).status, Organization.Status.active)
-
-
-class OrganizationAuditLogTargetTests(TestCase):
-    def setUp(self) -> None:
-        self.organization = Organization.objects.create(name="Acme", representative="rep")
-
-    def test_deleting_organization_keeps_its_audit_entries_with_a_snapshot(self) -> None:
-        entry = AuditLogEntry.objects.create(
-            organization=self.organization,
-            event_type="organization_edited",
-            payload={"changed_fields": ["name"], "actor_username": "rep"},
-        )
-        organization_id = self.organization.pk
-
-        self.organization.delete()
-
-        entry.refresh_from_db()
-        self.assertIsNone(entry.organization_id)
-        self.assertEqual((entry.deleted_organization_id, entry.deleted_organization_name), (organization_id, "Acme"))
-
-    def test_audit_entry_needs_exactly_one_target(self) -> None:
-        now = timezone.now()
-        election = Election.objects.create(
-            name="Board",
-            start_datetime=now,
-            end_datetime=now + datetime.timedelta(days=1),
-        )
-        for targets in ({}, {"election": election, "organization": self.organization}):
-            with self.subTest(targets=sorted(targets)):
-                with self.assertRaises(IntegrityError), transaction.atomic():
-                    AuditLogEntry.objects.create(event_type="probe", **targets)
 
 
 class MembershipExpiryRequiredTests(TestCase):

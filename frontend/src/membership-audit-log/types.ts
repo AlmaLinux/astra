@@ -46,6 +46,13 @@ export interface AuditLogRow {
   expires_at: string | null;
   request: AuditLogRequestInfo | null;
   invoice: OrganizationDetailInvoice | null;
+  representative: AuditLogRepresentativeChange | null;
+}
+
+export interface AuditLogRepresentativeChange {
+  // Empty when the organization had no representative (old) or was left without one (new).
+  old: string;
+  new: string;
 }
 
 export interface AuditLogDataTablesResponse {

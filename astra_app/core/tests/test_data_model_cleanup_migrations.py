@@ -164,3 +164,113 @@ class MembershipExpiresAtRequiredMigrationTests(TransactionTestCase):
 
         self.membership_model.objects.filter(pk=self.membership.pk).update(expires_at=timezone.now())
         _migrate(self.after)
+
+
+class OrganizationAuditEntriesMoveMigrationTests(TransactionTestCase):
+    before = [("core", "0116_membershiplog_representative_change")]
+    after = [("core", "0117_move_organization_audit_entries")]
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.addCleanup(migrate_to_latest)
+        apps = _migrate(self.before)
+        gold = _gold_membership_type(apps)
+        organization_model = apps.get_model("core", "Organization")
+        request_model = apps.get_model("core", "MembershipRequest")
+        log_model = apps.get_model("core", "MembershipLog")
+        entry_model = apps.get_model("core", "AuditLogEntry")
+
+        def backdate(model: type, obj: object, field: str, when: datetime.datetime) -> None:
+            model.objects.filter(pk=obj.pk).update(**{field: when})
+
+        self.acme = organization_model.objects.create(name="Acme", representative="bob")
+        self.term_request = request_model.objects.create(
+            requested_organization=self.acme, membership_type=gold, status="approved", decided_at=NOW - datetime.timedelta(days=30),
+        )
+        approval = log_model.objects.create(
+            actor_username="committee", target_organization=self.acme, membership_type=gold,
+            membership_request=self.term_request, action="approved", expires_at=NOW + datetime.timedelta(days=300),
+        )
+        backdate(log_model, approval, "created_at", NOW - datetime.timedelta(days=30))
+
+        invoice = entry_model.objects.create(
+            organization=self.acme,
+            event_type="sponsorship_invoice_generated",
+            payload={
+                "invoice_number": "0001-2026-123456", "term": "current", "membership_type": "gold",
+                "amount_due_usd": 20000, "regenerated": True, "actor_username": "rep1",
+            },
+        )
+        backdate(entry_model, invoice, "timestamp", NOW)
+        gone_invoice = entry_model.objects.create(
+            deleted_organization_id=999,
+            deleted_organization_name="Gone",
+            event_type="sponsorship_invoice_generated",
+            payload={
+                "invoice_number": "0999-2026-654321", "term": "renewal", "membership_type": "gold",
+                "amount_due_usd": 20000, "regenerated": False, "actor_username": "-",
+            },
+        )
+        backdate(entry_model, gone_invoice, "timestamp", NOW)
+
+        # The edit view used to log open requests itself, without old/new, just before auditing.
+        changed_at = NOW + datetime.timedelta(days=1)
+        self.open_request = request_model.objects.create(requested_organization=self.acme, membership_type=gold, status="pending")
+        open_log = log_model.objects.create(
+            actor_username="committee", target_organization=self.acme, membership_type=gold,
+            membership_request=self.open_request, action="representative_changed",
+        )
+        backdate(log_model, open_log, "created_at", changed_at)
+        rep_change = entry_model.objects.create(
+            organization=self.acme,
+            event_type="organization_representative_changed",
+            payload={"old": "carol", "new": "bob", "actor_username": "committee"},
+        )
+        backdate(entry_model, rep_change, "timestamp", changed_at + datetime.timedelta(milliseconds=5))
+
+        bare = organization_model.objects.create(name="Bare", representative="dave")
+        entry_model.objects.create(
+            organization=bare,
+            event_type="organization_representative_changed",
+            payload={"old": "erin", "new": "dave", "actor_username": "committee"},
+        )
+        entry_model.objects.create(
+            organization=self.acme,
+            event_type="organization_edited",
+            payload={"changed_fields": ["name"], "actor_username": "bob"},
+        )
+        election = apps.get_model("core", "Election").objects.create(
+            name="Board", start_datetime=NOW, end_datetime=NOW + datetime.timedelta(days=1),
+        )
+        self.election_entry = entry_model.objects.create(election=election, event_type="election_started", payload={})
+
+        self.apps = _migrate(self.after)
+
+    def test_invoices_and_representative_changes_move_to_the_membership_log(self) -> None:
+        log_model = self.apps.get_model("core", "MembershipLog")
+
+        self.assertCountEqual(
+            log_model.objects.filter(action__in=["invoice_generated", "invoice_regenerated"]).values_list(
+                "action", "target_organization_id", "deleted_organization_id", "deleted_organization_name",
+                "membership_type_id", "membership_request_id", "actor_username", "invoice_number", "created_at",
+            ),
+            [
+                ("invoice_regenerated", self.acme.pk, None, "", "gold", self.term_request.pk, "rep1", "0001-2026-123456", NOW),
+                ("invoice_generated", None, 999, "Gone", "gold", None, "-", "0999-2026-654321", NOW),
+            ],
+        )
+        # The open request's row gains old/new; the active term gets the row today's code would write.
+        self.assertCountEqual(
+            log_model.objects.filter(action="representative_changed").values_list(
+                "target_organization_id", "membership_request_id", "actor_username", "old_representative", "new_representative",
+            ),
+            [
+                (self.acme.pk, self.open_request.pk, "committee", "carol", "bob"),
+                (self.acme.pk, self.term_request.pk, "committee", "carol", "bob"),
+            ],
+        )
+
+    def test_only_election_entries_remain(self) -> None:
+        entry_model = self.apps.get_model("core", "AuditLogEntry")
+        self.assertEqual(list(entry_model.objects.values_list("pk", flat=True)), [self.election_entry.pk])

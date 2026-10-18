@@ -30,7 +30,7 @@ from core.mail_attachments import MailAttachment
 from core.membership import term_membership_request
 from core.membership_dues import discount_percent, effective_dues_usd
 from core.membership_notes import add_note
-from core.models import AuditLogEntry, Membership, MembershipLog, Organization
+from core.models import Membership, MembershipLog, Organization
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,7 @@ def get_or_create_invoice_pdf(
     """Return the stored invoice PDF, rendering and storing it first if needed.
 
     Regenerating overwrites the PDF in place: same number, same link. Every render is
-    audited and noted for the committee, since each one may bill different amounts or
+    logged and noted for the committee, since each one may bill different amounts or
     details under that number, and the organization page stops offering the invoice
     once the sponsorship expires.
     """
@@ -212,20 +212,6 @@ def get_or_create_invoice_pdf(
         target_organization=membership.target_organization,
     )
     with transaction.atomic():
-        AuditLogEntry.objects.create(
-            organization_id=membership.target_organization_id,
-            event_type="sponsorship_invoice_generated",
-            payload={
-                "invoice_number": number,
-                "term": term,
-                "membership_type": membership.membership_type_id,
-                "amount_due_usd": amount_due,
-                "storage_key": key,
-                "regenerated": regenerate,
-                "actor_username": actor_username,
-            },
-            is_public=False,
-        )
         MembershipLog.objects.create(
             actor_username=actor_username,
             target_organization=membership.target_organization,

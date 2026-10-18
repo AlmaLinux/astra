@@ -308,6 +308,45 @@ class MembershipAuditLogApiTests(TestCase):
             },
         )
 
+    def test_membership_audit_log_detail_api_includes_representative_change(self) -> None:
+        gold, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={"name": "Gold", "group_cn": "almalinux-gold", "category_id": "sponsorship", "enabled": True},
+        )
+        org = Organization.objects.create(name="Acme", representative="bob")
+        MembershipLog.objects.create(
+            actor_username="committee",
+            target_organization=org,
+            membership_type=gold,
+            action=MembershipLog.Action.representative_changed,
+            old_representative="carol",
+            new_representative="bob",
+        )
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_organization=org,
+            membership_type=gold,
+            action=MembershipLog.Action.requested,
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._make_freeipa_user("reviewer", groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP])
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            response = self.client.get(
+                reverse("api-membership-audit-log-detail"),
+                data=self._datatables_query(),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row["action"]: row["representative"] for row in response.json()["data"]},
+            {
+                MembershipLog.Action.representative_changed: {"old": "carol", "new": "bob"},
+                MembershipLog.Action.requested: None,
+            },
+        )
+
     @override_settings(
         DJANGO_VITE={
             "default": {

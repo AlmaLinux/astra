@@ -375,6 +375,13 @@ def _serialize_membership_audit_log_row_contract(log: MembershipLog, *, data_onl
         "action": log.action,
         "request": request_payload,
         "invoice": invoice,
+        "representative": (
+            {"old": log.old_representative, "new": log.new_representative}
+            if log.action == MembershipLog.Action.representative_changed
+            # Rows from before old/new were recorded can't say who changed.
+            and (log.old_representative or log.new_representative)
+            else None
+        ),
     }
     if data_only:
         row["created_at"] = log.created_at.isoformat()

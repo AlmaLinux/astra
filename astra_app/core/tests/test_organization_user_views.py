@@ -610,6 +610,7 @@ class OrganizationUserViewsTests(TestCase):
         self.assertEqual(log.actor_username, "reviewer")
         self.assertEqual(log.target_username, "")
         self.assertEqual(log.membership_type_id, membership_type.pk)
+        self.assertEqual((log.old_representative, log.new_representative), ("carol", "bob"))
 
         notes = list(Note.objects.filter(membership_request=mr).order_by("timestamp", "pk"))
         self.assertEqual(len(notes), 1)

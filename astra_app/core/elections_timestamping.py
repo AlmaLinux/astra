@@ -221,10 +221,9 @@ def _attest_entry(entry: AuditLogEntry) -> None:
 
 def _write_attestation_failed(entry_id: int, error_type: str) -> None:
     try:
-        source_entry = AuditLogEntry.objects.only("election_id", "organization_id").get(pk=entry_id)
+        source_entry = AuditLogEntry.objects.only("election_id").get(pk=entry_id)
         AuditLogEntry.objects.create(
             election_id=source_entry.election_id,
-            organization_id=source_entry.organization_id,
             event_type="rekor_attestation_failed",
             is_public=True,
             payload={"error_type": str(error_type)},

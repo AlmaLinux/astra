@@ -158,6 +158,9 @@ function segmentKey(segment: AuditLogRequestResponseSegment, index: number): str
           ><i class="fas fa-file-pdf mr-1" />{{ asRow(row).invoice?.number }}</a>
           <span v-else>{{ asRow(row).invoice?.number }}</span>
         </div>
+        <div v-if="asRow(row).representative" class="small text-muted">
+          {{ asRow(row).representative?.old || "(none)" }} → {{ asRow(row).representative?.new || "(none)" }}
+        </div>
         <details v-if="asRow(row).request" class="mt-1">
           <summary class="small text-muted">Request responses</summary>
           <div class="mt-2">
