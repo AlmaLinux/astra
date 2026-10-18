@@ -215,3 +215,30 @@ class LifecycleNoteViewTests(LifecycleNotesTestMixin, TestCase):
 
         self.assertIn("No changes to save.", self._messages(response))
         self.assertEqual(MembershipLog.objects.count(), logs_before)
+
+
+class AutoIgnoreDeletedUsersTests(TestCase):
+    def test_requests_of_users_gone_from_freeipa_are_ignored_by_custos(self) -> None:
+        from core.membership import auto_ignore_pending_requests_for_deleted_users
+        from core.membership_notes import CUSTOS
+        from core.tests.utils_test_data import ensure_core_categories
+
+        ensure_core_categories()
+        individual, _ = MembershipType.objects.update_or_create(
+            code="individual",
+            defaults={"name": "Individual", "group_cn": "almalinux-individual", "category_id": "individual", "enabled": True},
+        )
+        ghost_request = MembershipRequest.objects.create(requested_username="ghost", membership_type=individual)
+        MembershipRequest.objects.create(requested_username="alice", membership_type=individual)
+
+        with patch("core.membership.FreeIPAUser.all", return_value=[FreeIPAUser("alice", {"uid": ["alice"]})]):
+            self.assertEqual(auto_ignore_pending_requests_for_deleted_users(), 1)
+
+        # Nobody decided this; it shows as the system, like every other automatic entry.
+        ghost_request.refresh_from_db()
+        self.assertEqual(ghost_request.decided_by_username, CUSTOS)
+        self.assertEqual(
+            list(MembershipLog.objects.values_list("membership_request_id", "action", "actor_username")),
+            [(ghost_request.pk, MembershipLog.Action.ignored, CUSTOS)],
+        )
+        self.assertEqual(list(Note.objects.values_list("membership_request_id", "username")), [(ghost_request.pk, CUSTOS)])

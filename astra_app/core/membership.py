@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
 from core.logging_extras import current_exception_log_fields
+from core.membership_notes import CUSTOS
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Organization
 
 logger = logging.getLogger(__name__)
@@ -826,7 +827,7 @@ def auto_ignore_pending_requests_for_deleted_users() -> int:
         try:
             ignore_membership_request(
                 membership_request=request,
-                actor_username="system",
+                actor_username=CUSTOS,
             )
             ignored_count += 1
             logger.info(
