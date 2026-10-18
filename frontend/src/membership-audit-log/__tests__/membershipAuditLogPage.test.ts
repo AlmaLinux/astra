@@ -241,6 +241,40 @@ describe("MembershipAuditLogPage", () => {
 
     expect(wrapper.text()).toContain("Representative changed");
     expect(wrapper.text()).toContain("carol → bob");
+    expect(wrapper.find('a[href="/user/carol/"]').text()).toBe("carol");
+    expect(wrapper.find('a[href="/user/bob/"]').text()).toBe("bob");
+  });
+
+  it("does not link a missing representative", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      draw: 1,
+      recordsTotal: 1,
+      recordsFiltered: 1,
+      data: [{
+        log_id: 15,
+        created_at: "2026-10-18T10:00:00+00:00",
+        actor_username: "bob",
+        target: { kind: "organization", id: 3, label: "CERN", secondary_label: "", deleted: false },
+        membership_name: "Platinum Sponsor",
+        action: "representative_changed",
+        expires_at: null,
+        request: null,
+        invoice: null,
+        // The organization was just claimed: nobody represented it before.
+        representative: { old: "", new: "bob" },
+        reason: null,
+        previous_expires_at: null,
+        dues: null,
+        termination_reason_category: null,
+      }],
+    }))));
+
+    const wrapper = mount(MembershipAuditLogPage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("(none) → bob");
+    expect(wrapper.findAll('a[href^="/user/"]').map((link) => link.text())).toEqual(["bob"]);
   });
 
   it("renders canonical request-response link segments as anchors", async () => {

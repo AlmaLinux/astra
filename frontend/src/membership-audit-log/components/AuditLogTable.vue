@@ -67,12 +67,16 @@ function clearSearch(): void {
   submitSearch();
 }
 
+function userProfileHref(username: string): string {
+  return fillUrlTemplate(props.userProfileUrlTemplate, "__username__", username);
+}
+
 function targetHref(row: AuditLogRow): string {
   if (row.target.deleted) {
     return "";
   }
   if (row.target.kind === "user") {
-    return fillUrlTemplate(props.userProfileUrlTemplate, "__username__", row.target.label);
+    return userProfileHref(row.target.label);
   }
   if (row.target.id === null) {
     return "";
@@ -170,7 +174,11 @@ function segmentKey(segment: AuditLogRequestResponseSegment, index: number): str
           <span v-else>{{ asRow(row).invoice?.number }}</span>
         </div>
         <div v-if="asRow(row).representative" class="small text-muted">
-          {{ asRow(row).representative?.old || "(none)" }} → {{ asRow(row).representative?.new || "(none)" }}
+          <template v-for="(username, index) in [asRow(row).representative?.old, asRow(row).representative?.new]" :key="index">
+            <template v-if="index"> → </template>
+            <a v-if="username" :href="userProfileHref(username)">{{ username }}</a>
+            <template v-else>(none)</template>
+          </template>
         </div>
         <div v-if="asRow(row).previous_expires_at" class="small text-muted">
           {{ formatAuditLogExpiresAt(asRow(row).previous_expires_at) }} → {{ formatAuditLogExpiresAt(asRow(row).expires_at) }}
