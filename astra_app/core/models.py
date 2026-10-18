@@ -833,6 +833,8 @@ class MembershipLog(models.Model):
         expiry_changed = "expiry_changed", "Expiry changed"
         dues_changed = "dues_changed", "Dues changed"
         terminated = "terminated", "Terminated"
+        invoice_generated = "invoice_generated", "Invoice generated"
+        invoice_regenerated = "invoice_regenerated", "Invoice regenerated"
 
     actor_username = models.CharField(max_length=255)
     target_username = models.CharField(max_length=255, blank=True, default="")
@@ -862,6 +864,8 @@ class MembershipLog(models.Model):
     # The term's committee-set dues after this action (None: tier default). Kept on
     # every approval/expiry/dues log so replaying the log never loses a waiver.
     dues_usd = models.PositiveIntegerField(blank=True, null=True)
+    # Set on invoice actions: the stored PDF is found by number, even after the sponsorship expires.
+    invoice_number = models.CharField(max_length=32, blank=True, default="")
     import_batch_id = models.UUIDField(blank=True, null=True, db_index=True)
 
     objects = MembershipLogQuerySet.as_manager()

@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib.auth.decorators import permission_required, user_passes_test
 from django.core.cache import cache
+from django.core.files.storage import default_storage
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDay, TruncMonth, TruncWeek
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -30,6 +31,7 @@ from core.permissions import (
     has_any_membership_permission,
     json_permission_required_any,
 )
+from core.sponsorship_invoices import invoice_storage_key
 from core.templatetags.core_membership_responses import membership_response_value, serialize_membership_response
 from core.views_utils import _normalize_str, parse_datatables_request_base
 
@@ -353,6 +355,18 @@ def _serialize_membership_audit_log_row_contract(log: MembershipLog, *, data_onl
             "responses": responses,
         }
 
+    invoice: dict[str, str | None] | None = None
+    if log.invoice_number:
+        invoice = {
+            "number": log.invoice_number,
+            # The PDF lives under the organization's token, so it's unreachable once the org is deleted.
+            "url": (
+                default_storage.url(invoice_storage_key(log.target_organization, log.invoice_number))
+                if log.target_organization is not None
+                else None
+            ),
+        }
+
     row: dict[str, object] = {
         "log_id": log.pk,
         "actor_username": log.actor_username,
@@ -360,6 +374,7 @@ def _serialize_membership_audit_log_row_contract(log: MembershipLog, *, data_onl
         "membership_name": log.membership_type.name,
         "action": log.action,
         "request": request_payload,
+        "invoice": invoice,
     }
     if data_only:
         row["created_at"] = log.created_at.isoformat()

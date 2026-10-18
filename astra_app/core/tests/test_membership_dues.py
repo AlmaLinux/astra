@@ -317,15 +317,14 @@ class DuesInvoiceTests(MembershipDuesTestMixin, TestCase):
 
     def test_a_dues_change_issues_a_fresh_invoice_instead_of_reusing_the_stored_one(self) -> None:
         from core.membership_dues import change_membership_dues
-        from core.sponsorship_invoices import invoice_storage_key
 
         membership = self._active_gold()
-        stored_key = invoice_storage_key(membership, InvoiceTerm.renewal)
+        stored_key = self._invoice_key(membership, InvoiceTerm.renewal)
 
         change_membership_dues(membership=membership, dues_usd=5000, reason="In-kind CI hardware", actor_username="committee")
 
         discounted = Membership.objects.get(target_organization=self.organization)
-        self.assertNotEqual(invoice_storage_key(discounted, InvoiceTerm.renewal), stored_key)
+        self.assertNotEqual(self._invoice_key(discounted, InvoiceTerm.renewal), stored_key)
 
     def test_fully_waived_memberships_are_never_invoiced(self) -> None:
         from core.sponsorship_invoices import invoice_eligible

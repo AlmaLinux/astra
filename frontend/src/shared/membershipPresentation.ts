@@ -65,6 +65,8 @@ const MEMBERSHIP_LOG_ACTION_LABELS: Record<string, string> = {
   expiry_changed: "Expiry changed",
   dues_changed: "Dues changed",
   terminated: "Terminated",
+  invoice_generated: "Invoice generated",
+  invoice_regenerated: "Invoice regenerated",
 };
 
 export function membershipLogActionLabel(action: string): string {

@@ -2,6 +2,7 @@ import datetime
 from unittest.mock import patch
 
 from django.conf import settings
+from django.core.files.storage import default_storage
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -261,6 +262,51 @@ class MembershipAuditLogApiTests(TestCase):
             },
         )
         self.assertNotIn("answer_html", row["request"]["responses"][0])
+
+    def test_membership_audit_log_detail_api_links_generated_invoices(self) -> None:
+        from core.sponsorship_invoices import invoice_storage_key
+
+        gold, _ = MembershipType.objects.update_or_create(
+            code="gold",
+            defaults={"name": "Gold", "group_cn": "almalinux-gold", "category_id": "sponsorship", "enabled": True},
+        )
+        org = Organization.objects.create(name="Acme", representative="rep1")
+        MembershipLog.objects.create(
+            actor_username="rep1",
+            target_organization=org,
+            membership_type=gold,
+            action=MembershipLog.Action.invoice_regenerated,
+            invoice_number="0001-2026-123456",
+        )
+        MembershipLog.objects.create(
+            actor_username="reviewer",
+            target_organization=org,
+            membership_type=gold,
+            action=MembershipLog.Action.requested,
+        )
+
+        self._login_as_freeipa_user("reviewer")
+        reviewer = self._make_freeipa_user("reviewer", groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP])
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            response = self.client.get(
+                reverse("api-membership-audit-log-detail"),
+                data=self._datatables_query(),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        invoice_by_action = {row["action"]: row["invoice"] for row in response.json()["data"]}
+        self.assertEqual(
+            invoice_by_action,
+            {
+                MembershipLog.Action.invoice_regenerated: {
+                    "number": "0001-2026-123456",
+                    # Storage URLs can't be built by the UI, so the API hands it over like the org page does.
+                    "url": default_storage.url(invoice_storage_key(org, "0001-2026-123456")),
+                },
+                MembershipLog.Action.requested: None,
+            },
+        )
 
     @override_settings(
         DJANGO_VITE={

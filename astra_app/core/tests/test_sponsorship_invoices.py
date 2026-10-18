@@ -11,6 +11,7 @@ from django.test import TestCase, override_settings
 from post_office.models import Email, EmailTemplate
 
 from core.freeipa.user import FreeIPAUser
+from core.membership_notes import CUSTOS
 from core.models import AuditLogEntry, Membership, MembershipType, Organization
 from core.sponsorship_invoices import BILLING_NOTES_MAX_LINES, InvoiceTerm
 from core.tests.utils_test_data import ensure_core_categories
@@ -74,6 +75,16 @@ class SponsorshipInvoiceTestMixin:
             expires_at=expires_at,
         )
 
+    def _invoice_key(self, membership: Membership, term: InvoiceTerm) -> str:
+        from core.sponsorship_invoices import invoice_number, invoice_storage_key
+
+        return invoice_storage_key(membership.target_organization, invoice_number(membership, term))
+
+    def _invoice_filename(self, membership: Membership, term: InvoiceTerm) -> str:
+        from core.sponsorship_invoices import invoice_filename, invoice_number
+
+        return invoice_filename(invoice_number(membership, term))
+
     def _invoice_audit_payloads(self) -> list[dict[str, object]]:
         return list(
             AuditLogEntry.objects.filter(
@@ -117,7 +128,7 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
                 self.assertEqual(invoice_number(Membership.objects.get(pk=membership.pk), term), number)
 
     def test_storage_key_is_unguessable_per_org(self) -> None:
-        from core.sponsorship_invoices import invoice_number, invoice_storage_key
+        from core.sponsorship_invoices import invoice_number
 
         expires_at = datetime.datetime(2026, 11, 18, 23, 59, 59, tzinfo=datetime.UTC)
         membership = self._membership(expires_at=expires_at)
@@ -128,14 +139,14 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
             expires_at=expires_at,
         )
 
-        key = invoice_storage_key(membership, InvoiceTerm.renewal)
+        key = self._invoice_key(membership, InvoiceTerm.renewal)
         self.assertEqual(
             key,
             f"invoices/{self.organization.invoice_token}/AlmaLinux_OS_Foundation_Invoice_{invoice_number(membership, InvoiceTerm.renewal)}.pdf",
         )
         self.assertGreaterEqual(len(self.organization.invoice_token), 20)
         self.assertNotEqual(self.organization.invoice_token, other_org.invoice_token)
-        self.assertTrue(invoice_storage_key(other_membership, InvoiceTerm.renewal).startswith(f"invoices/{other_org.invoice_token}/"))
+        self.assertTrue(self._invoice_key(other_membership, InvoiceTerm.renewal).startswith(f"invoices/{other_org.invoice_token}/"))
 
     def _apply_log(self, *, action: str, expires_at: datetime.datetime, dues_usd: int | None = None) -> Membership:
         from core.membership_log_side_effects import apply_membership_log_side_effects
@@ -190,7 +201,6 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
 
     def test_renewal_terms_starting_in_the_same_year_get_separate_invoices(self) -> None:
         from core.models import MembershipLog
-        from core.sponsorship_invoices import invoice_storage_key
 
         # 2028 is a leap year, so a 365-day term starting Jan 1 ends Dec 31: both renewals start in 2028.
         membership = self._apply_log(
@@ -202,24 +212,24 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
             expires_at=datetime.datetime(2028, 12, 31, 23, 59, 59, tzinfo=datetime.UTC),
         )
 
-        self.assertNotEqual(invoice_storage_key(renewed, InvoiceTerm.renewal), invoice_storage_key(membership, InvoiceTerm.renewal))
+        self.assertNotEqual(self._invoice_key(renewed, InvoiceTerm.renewal), self._invoice_key(membership, InvoiceTerm.renewal))
 
     def test_welcome_and_renewal_invoices_bill_different_terms(self) -> None:
-        from core.sponsorship_invoices import invoice_number, invoice_storage_key, render_invoice_html
+        from core.sponsorship_invoices import invoice_number, render_invoice_html
 
         membership = self._membership(expires_at=datetime.datetime(2027, 1, 12, 23, 59, 59, tzinfo=datetime.UTC))
 
         # A welcome invoice must never be re-sent as the first renewal invoice.
         self.assertNotEqual(invoice_number(membership, InvoiceTerm.current), invoice_number(membership, InvoiceTerm.renewal))
         self.assertNotEqual(
-            invoice_storage_key(membership, InvoiceTerm.current),
-            invoice_storage_key(membership, InvoiceTerm.renewal),
+            self._invoice_key(membership, InvoiceTerm.current),
+            self._invoice_key(membership, InvoiceTerm.renewal),
         )
         self.assertIn("from January 12th 2026 to January 12th 2027", render_invoice_html(membership, InvoiceTerm.current))
         self.assertIn("from January 12th 2027 to January 12th 2028", render_invoice_html(membership, InvoiceTerm.renewal))
 
     def test_reminders_reuse_the_stored_invoice_and_regenerating_overwrites_it(self) -> None:
-        from core.sponsorship_invoices import get_or_create_invoice_pdf, invoice_number, invoice_storage_key
+        from core.sponsorship_invoices import get_or_create_invoice_pdf, invoice_number
 
         membership = self._membership(expires_at=datetime.datetime(2026, 11, 18, 23, 59, 59, tzinfo=datetime.UTC))
         membership.dues_usd = 15000
@@ -243,6 +253,8 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
             "term": "renewal",
             "membership_type": "gold",
             "amount_due_usd": 15000,
+            # Kept so the PDF can still be found once the sponsorship has expired.
+            "storage_key": self._invoice_key(membership, InvoiceTerm.renewal),
         }
         self.assertEqual(
             self._invoice_audit_payloads(),
@@ -252,14 +264,60 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
             ],
         )
 
-        key = invoice_storage_key(membership, InvoiceTerm.renewal)
+        key = self._invoice_key(membership, InvoiceTerm.renewal)
         with default_storage.open(key, "rb") as stored:
             self.assertEqual(stored.read(), b"%PDF-second")
         # Overwriting must keep the URL stable instead of saving under a suffixed name.
         self.assertEqual(default_storage.listdir(key.rsplit("/", 1)[0])[1], [key.rsplit("/", 1)[1]])
 
+    def test_every_render_is_noted_and_logged_for_the_committee(self) -> None:
+        from core.membership_request_workflow import create_approved_membership_request
+        from core.models import MembershipLog, Note
+        from core.sponsorship_invoices import get_or_create_invoice_pdf, invoice_number, invoice_storage_key
+        from core.templatetags.core_membership_notes import _render_note_content
+
+        term_request = create_approved_membership_request(
+            actor_username="committee",
+            membership_type=self.gold,
+            decided_at=datetime.datetime.now(tz=datetime.UTC),
+            target_organization=self.organization,
+        )
+        membership = self._membership(expires_at=datetime.datetime(2026, 11, 18, 23, 59, 59, tzinfo=datetime.UTC))
+        number = invoice_number(membership, InvoiceTerm.renewal)
+        url = default_storage.url(invoice_storage_key(self.organization, number))
+
+        with patch("core.sponsorship_invoices.render_invoice_pdf", return_value=b"%PDF"):
+            get_or_create_invoice_pdf(membership, InvoiceTerm.renewal, actor_username=CUSTOS)
+            # Serving the stored PDF again renders nothing, so it is not noted.
+            get_or_create_invoice_pdf(membership, InvoiceTerm.renewal, actor_username=CUSTOS)
+            get_or_create_invoice_pdf(membership, InvoiceTerm.renewal, actor_username="rep1", regenerate=True)
+
+        notes = list(Note.objects.filter(membership_request=term_request))
+        self.assertEqual([note.username for note in notes], [CUSTOS, "rep1"])
+        self.assertEqual(
+            [note.content for note in notes],
+            [
+                f"Invoice [{number}]({url}) for $20,000 (term 2026-11-18 to 2027-11-18) generated.",
+                f"Invoice [{number}]({url}) for $20,000 (term 2026-11-18 to 2027-11-18) regenerated.",
+            ],
+        )
+        # The committee must be able to click through to the PDF after the sponsorship expires.
+        self.assertIn(f'<a href="{url}">{number}</a>', _render_note_content(notes[0]))
+
+        self.assertEqual(
+            list(
+                MembershipLog.objects.filter(target_organization=self.organization)
+                .order_by("created_at", "pk")
+                .values_list("action", "actor_username", "membership_type_id", "membership_request_id", "invoice_number")
+            ),
+            [
+                (MembershipLog.Action.invoice_generated, CUSTOS, "gold", term_request.pk, number),
+                (MembershipLog.Action.invoice_regenerated, "rep1", "gold", term_request.pk, number),
+            ],
+        )
+
     def test_first_renewal_invoice_after_a_welcome_invoice_is_a_separate_pdf(self) -> None:
-        from core.sponsorship_invoices import get_or_create_invoice_pdf, invoice_storage_key
+        from core.sponsorship_invoices import get_or_create_invoice_pdf
 
         membership = self._membership(expires_at=datetime.datetime(2028, 12, 31, 23, 59, 59, tzinfo=datetime.UTC))
 
@@ -272,7 +330,7 @@ class SponsorshipInvoiceModuleTests(SponsorshipInvoiceTestMixin, TestCase):
             )
 
         render_mock.assert_called_once_with(membership, InvoiceTerm.renewal)
-        with default_storage.open(invoice_storage_key(membership, InvoiceTerm.current), "rb") as stored:
+        with default_storage.open(self._invoice_key(membership, InvoiceTerm.current), "rb") as stored:
             self.assertEqual(stored.read(), b"%PDF-welcome")
 
     def test_invoice_html_contains_billing_data_and_escapes_org_supplied_text(self) -> None:
@@ -445,7 +503,7 @@ class SponsorshipInvoiceNotificationTests(SponsorshipInvoiceTestMixin, TestCase)
         return Email.objects.filter(to="rep1@example.com", template__name=template_name).latest("created")
 
     def test_expiring_soon_email_attaches_invoice_links_it_and_ccs_business_contact(self) -> None:
-        from core.sponsorship_invoices import invoice_filename, invoice_number, invoice_storage_key
+        from core.sponsorship_invoices import invoice_number
 
         membership = self._expiring_membership()
 
@@ -454,19 +512,19 @@ class SponsorshipInvoiceNotificationTests(SponsorshipInvoiceTestMixin, TestCase)
 
         email = self._latest_email(settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME)
         attachments = list(email.attachments.all())
-        self.assertEqual([attachment.name for attachment in attachments], [invoice_filename(membership, InvoiceTerm.renewal)])
+        self.assertEqual([attachment.name for attachment in attachments], [self._invoice_filename(membership, InvoiceTerm.renewal)])
         self.assertEqual(attachments[0].mimetype, "application/pdf")
         with attachments[0].file.open("rb") as attached:
             self.assertEqual(attached.read(), b"%PDF-invoice")
 
-        expected_url = default_storage.url(invoice_storage_key(membership, InvoiceTerm.renewal))
+        expected_url = default_storage.url(self._invoice_key(membership, InvoiceTerm.renewal))
         self.assertEqual(email.context["invoice_url"], expected_url)
         self.assertEqual(email.context["invoice_number"], invoice_number(membership, InvoiceTerm.renewal))
         self.assertIn(expected_url, email.message)
         self.assertEqual(email.cc, [settings.MEMBERSHIP_COMMITTEE_EMAIL, "billing@example.com"])
         [payload] = self._invoice_audit_payloads()
         self.assertEqual(payload["term"], "renewal")
-        self.assertEqual(payload["actor_username"], "system")
+        self.assertEqual(payload["actor_username"], CUSTOS)
 
     def test_later_reminders_reuse_the_stored_invoice(self) -> None:
         self._expiring_membership()
@@ -530,10 +588,9 @@ class SponsorshipInvoiceNotificationTests(SponsorshipInvoiceTestMixin, TestCase)
         self.assertEqual(email.cc, [settings.MEMBERSHIP_COMMITTEE_EMAIL, "billing@example.com"])
 
     def test_expired_email_attaches_invoice_for_the_lapsed_membership(self) -> None:
-        from core.sponsorship_invoices import invoice_filename
 
         membership = self._membership(expires_at=self.frozen_now - datetime.timedelta(days=1))
-        expected_filename = invoice_filename(membership, InvoiceTerm.renewal)
+        expected_filename = self._invoice_filename(membership, InvoiceTerm.renewal)
 
         with (
             patch("django.utils.timezone.now", return_value=self.frozen_now),
@@ -589,7 +646,7 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
         return Email.objects.get(template__name=self.welcome_template.name)
 
     def test_new_sponsor_welcome_email_carries_the_current_term_invoice(self) -> None:
-        from core.sponsorship_invoices import invoice_filename, invoice_number, invoice_storage_key
+        from core.sponsorship_invoices import invoice_number
 
         with patch("core.sponsorship_invoices.render_invoice_pdf", return_value=b"%PDF-welcome") as render_mock:
             membership = self._approve()
@@ -597,16 +654,16 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
         render_mock.assert_called_once_with(membership, InvoiceTerm.current)
         email = self._welcome_email()
         self.assertEqual(email.to, ["rep1@example.com"])
-        self.assertEqual([attachment.name for attachment in email.attachments.all()], [invoice_filename(membership, InvoiceTerm.current)])
+        self.assertEqual([attachment.name for attachment in email.attachments.all()], [self._invoice_filename(membership, InvoiceTerm.current)])
         self.assertEqual(email.context["invoice_number"], invoice_number(membership, InvoiceTerm.current))
-        self.assertEqual(email.context["invoice_url"], default_storage.url(invoice_storage_key(membership, InvoiceTerm.current)))
+        self.assertEqual(email.context["invoice_url"], default_storage.url(self._invoice_key(membership, InvoiceTerm.current)))
         self.assertEqual(email.cc, ["billing@example.com"])
         [payload] = self._invoice_audit_payloads()
         self.assertEqual(payload["term"], "current")
         self.assertEqual(payload["actor_username"], "committee")
 
     def test_renewal_approval_email_carries_the_renewed_term_invoice(self) -> None:
-        from core.sponsorship_invoices import invoice_filename, invoice_number
+        from core.sponsorship_invoices import invoice_number
 
         # Renewals usually got this invoice with their reminders already; it is the same
         # invoice, and it covers renewals no reminder reached.
@@ -620,7 +677,7 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
             membership = self._approve()
 
         email = Email.objects.get(template__name=settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME)
-        self.assertEqual([attachment.name for attachment in email.attachments.all()], [invoice_filename(membership, InvoiceTerm.current)])
+        self.assertEqual([attachment.name for attachment in email.attachments.all()], [self._invoice_filename(membership, InvoiceTerm.current)])
         self.assertEqual(email.context["invoice_number"], invoice_number(membership, InvoiceTerm.current))
         self.assertEqual(email.cc, ["billing@example.com"])
 
@@ -679,15 +736,15 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
 
     def test_custom_email_approval_opens_send_mail_with_the_welcome_invoice_attached(self) -> None:
         from core.mail_attachments import mail_attachments_from_tokens
-        from core.sponsorship_invoices import invoice_filename, invoice_number, invoice_storage_key
+        from core.sponsorship_invoices import invoice_number
 
         query = self._approve_with_custom_email()
 
         membership = Membership.objects.get(target_organization=self.organization, membership_type=self.gold)
         self.assertFalse(Email.objects.filter(template=self.welcome_template).exists())
         [attachment] = mail_attachments_from_tokens(query["attachment"])
-        self.assertEqual(attachment.key, invoice_storage_key(membership, InvoiceTerm.current))
-        self.assertEqual(attachment.name, invoice_filename(membership, InvoiceTerm.current))
+        self.assertEqual(attachment.key, self._invoice_key(membership, InvoiceTerm.current))
+        self.assertEqual(attachment.name, self._invoice_filename(membership, InvoiceTerm.current))
         self.assertEqual(query["cc"], ["billing@example.com"])
         self.assertEqual(query["invoice_number"], [invoice_number(membership, InvoiceTerm.current)])
         self.assertEqual(query["invoice_url"], [default_storage.url(attachment.key)])
@@ -696,7 +753,7 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
 
     def test_custom_email_renewal_approval_attaches_the_renewed_term_invoice(self) -> None:
         from core.mail_attachments import mail_attachments_from_tokens
-        from core.sponsorship_invoices import invoice_number, invoice_storage_key
+        from core.sponsorship_invoices import invoice_number
 
         self._membership(expires_at=datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(days=30))
 
@@ -704,5 +761,5 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
 
         membership = Membership.objects.get(target_organization=self.organization, membership_type=self.gold)
         [attachment] = mail_attachments_from_tokens(query["attachment"])
-        self.assertEqual(attachment.key, invoice_storage_key(membership, InvoiceTerm.current))
+        self.assertEqual(attachment.key, self._invoice_key(membership, InvoiceTerm.current))
         self.assertEqual(query["invoice_number"], [invoice_number(membership, InvoiceTerm.current)])

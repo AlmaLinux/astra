@@ -148,6 +148,16 @@ function segmentKey(segment: AuditLogRequestResponseSegment, index: number): str
       <td>{{ asRow(row).membership_name }}</td>
       <td>
         {{ membershipLogActionLabel(asRow(row).action) }}
+        <div v-if="asRow(row).invoice" class="small">
+          <a
+            v-if="asRow(row).invoice?.url"
+            :href="asRow(row).invoice?.url ?? undefined"
+            target="_blank"
+            rel="noopener"
+            title="Download the invoice (PDF)"
+          ><i class="fas fa-file-pdf mr-1" />{{ asRow(row).invoice?.number }}</a>
+          <span v-else>{{ asRow(row).invoice?.number }}</span>
+        </div>
         <details v-if="asRow(row).request" class="mt-1">
           <summary class="small text-muted">Request responses</summary>
           <div class="mt-2">

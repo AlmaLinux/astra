@@ -79,6 +79,13 @@
   margin: 0;
 }
 
+/* Bubbles have per-author backgrounds, so the default link blue can vanish (e.g. on the
+   blue self bubble); the bubble's own text colour is always readable against it. */
+[data-membership-notes-container] .membership-notes-bubbles .direct-chat-text a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 [data-membership-notes-container] .direct-chat-msg.right .membership-notes-bubbles {
   align-items: stretch;
   padding-right: 10px;

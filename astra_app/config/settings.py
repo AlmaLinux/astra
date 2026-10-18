@@ -946,8 +946,9 @@ MARKDOWNIFY = {
         "BLEACH": True,
     },
     "membership_note": {
-        "WHITELIST_TAGS": ["b", "em", "i", "li", "ol", "p", "strong", "ul"],
-        "WHITELIST_ATTRS": [],
+        # Links let system notes point at stored files, e.g. sponsorship invoices.
+        "WHITELIST_TAGS": ["a", "b", "em", "i", "li", "ol", "p", "strong", "ul"],
+        "WHITELIST_ATTRS": ["href"],
         "WHITELIST_PROTOCOLS": ["http", "https"],
         "STRIP": False,
         "BLEACH": True,

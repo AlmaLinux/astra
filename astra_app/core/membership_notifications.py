@@ -17,6 +17,7 @@ from core.email_context import (
 from core.freeipa.group import FreeIPAGroup
 from core.freeipa.user import FreeIPAUser
 from core.membership import visible_committee_membership_requests
+from core.membership_notes import CUSTOS
 from core.models import FreeIPAPermissionGrant, Membership, MembershipRequest, MembershipType, Organization
 from core.public_urls import build_public_absolute_url
 from core.sponsorship_invoices import InvoiceTerm, invoice_eligible, invoice_email_parts
@@ -345,7 +346,7 @@ def send_membership_notification(
             InvoiceTerm.renewal,
             recipient=address,
             cc=cc,
-            actor_username="system",
+            actor_username=CUSTOS,
         )
         cc = invoice_parts.cc
         attachments = invoice_parts.attachments

@@ -127,6 +127,50 @@ describe("MembershipAuditLogPage", () => {
     expect(wrapper.find('a[href="/membership/request/194/"]').exists()).toBe(true);
   });
 
+  it("labels invoice renders and links the stored PDF", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      draw: 1,
+      recordsTotal: 2,
+      recordsFiltered: 2,
+      data: [
+        {
+          log_id: 13,
+          created_at: "2026-10-18T10:00:00+00:00",
+          actor_username: "rep1",
+          target: { kind: "organization", id: 3, label: "CERN", secondary_label: "", deleted: false },
+          membership_name: "Platinum Sponsor",
+          action: "invoice_regenerated",
+          expires_at: null,
+          request: { request_id: 194, responses: [] },
+          invoice: { number: "0003-2027-370275", url: "https://files.example/invoices/tok/inv.pdf" },
+        },
+        {
+          log_id: 12,
+          created_at: "2026-10-17T10:00:00+00:00",
+          actor_username: "-",
+          target: { kind: "organization", id: null, label: "Gone Corp", secondary_label: "", deleted: true },
+          membership_name: "Platinum Sponsor",
+          action: "invoice_generated",
+          expires_at: null,
+          request: null,
+          // The organization was deleted, so its PDF can no longer be reached.
+          invoice: { number: "0004-2026-111111", url: null },
+        },
+      ],
+    }))));
+
+    const wrapper = mount(MembershipAuditLogPage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Invoice regenerated");
+    expect(wrapper.text()).toContain("Invoice generated");
+    const link = wrapper.find('a[href="https://files.example/invoices/tok/inv.pdf"]');
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toContain("0003-2027-370275");
+    expect(wrapper.text()).toContain("0004-2026-111111");
+  });
+
   it("renders canonical request-response link segments as anchors", async () => {
     vi.stubGlobal(
       "fetch",

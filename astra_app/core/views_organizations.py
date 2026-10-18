@@ -394,9 +394,10 @@ def _serialize_sponsorship_invoice(
     term = _organization_page_invoice_term(request, organization, membership)
     if term is None:
         return None
-    key = invoice_storage_key(membership, term)
+    number = invoice_number(membership, term)
+    key = invoice_storage_key(organization, number)
     return {
-        "number": invoice_number(membership, term),
+        "number": number,
         "url": default_storage.url(key) if default_storage.exists(key) else None,
     }
 

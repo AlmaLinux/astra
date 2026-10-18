@@ -1,3 +1,5 @@
+import type { OrganizationDetailInvoice } from "../organization-detail/types";
+
 export interface MembershipAuditLogBootstrap {
   apiUrl: string;
   pageSize: number;
@@ -43,6 +45,7 @@ export interface AuditLogRow {
   action: string;
   expires_at: string | null;
   request: AuditLogRequestInfo | null;
+  invoice: OrganizationDetailInvoice | null;
 }
 
 export interface AuditLogDataTablesResponse {

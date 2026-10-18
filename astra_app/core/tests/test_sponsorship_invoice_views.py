@@ -58,7 +58,7 @@ class SponsorshipInvoiceViewTests(SponsorshipInvoiceTestMixin, TestCase):
         )
 
     def test_representative_sees_invoice_while_renewal_is_pending(self) -> None:
-        from core.sponsorship_invoices import invoice_number, invoice_storage_key
+        from core.sponsorship_invoices import invoice_number
 
         membership = self._membership_expiring_in(30)
         self._login("rep1")
@@ -68,7 +68,7 @@ class SponsorshipInvoiceViewTests(SponsorshipInvoiceTestMixin, TestCase):
             {"number": invoice_number(membership, InvoiceTerm.renewal), "url": None},
         )
 
-        key = invoice_storage_key(membership, InvoiceTerm.renewal)
+        key = self._invoice_key(membership, InvoiceTerm.renewal)
         default_storage.save(key, ContentFile(b"%PDF-stored"))
         self.assertEqual(self._api_invoice()["url"], default_storage.url(key))
 
@@ -79,7 +79,7 @@ class SponsorshipInvoiceViewTests(SponsorshipInvoiceTestMixin, TestCase):
         self.assertIsNone(self._api_invoice())
 
     def test_committee_works_with_the_current_term_invoice_outside_the_renewal_window(self) -> None:
-        from core.sponsorship_invoices import invoice_number, invoice_storage_key
+        from core.sponsorship_invoices import invoice_number
 
         # e.g. a newly approved sponsor whose welcome invoice needs correcting.
         membership = self._membership_expiring_in(200)
@@ -94,7 +94,7 @@ class SponsorshipInvoiceViewTests(SponsorshipInvoiceTestMixin, TestCase):
             self._regenerate(membership)
 
         render_mock.assert_called_once_with(membership, InvoiceTerm.current)
-        self.assertTrue(default_storage.exists(invoice_storage_key(membership, InvoiceTerm.current)))
+        self.assertTrue(default_storage.exists(self._invoice_key(membership, InvoiceTerm.current)))
 
     def test_free_tiers_have_no_invoice(self) -> None:
         free_tier = MembershipType.objects.create(
@@ -110,7 +110,6 @@ class SponsorshipInvoiceViewTests(SponsorshipInvoiceTestMixin, TestCase):
         self.assertIsNone(self._api_invoice())
 
     def test_representative_regenerates_invoice_while_renewal_is_pending(self) -> None:
-        from core.sponsorship_invoices import invoice_storage_key
 
         membership = self._membership_expiring_in(30)
         self._login("rep1")
@@ -124,7 +123,7 @@ class SponsorshipInvoiceViewTests(SponsorshipInvoiceTestMixin, TestCase):
             fetch_redirect_response=False,
         )
         render_mock.assert_called_once()
-        with default_storage.open(invoice_storage_key(membership, InvoiceTerm.renewal), "rb") as stored:
+        with default_storage.open(self._invoice_key(membership, InvoiceTerm.renewal), "rb") as stored:
             self.assertEqual(stored.read(), b"%PDF-new")
         [payload] = self._invoice_audit_payloads()
         self.assertEqual(payload["actor_username"], "rep1")

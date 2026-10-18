@@ -18,6 +18,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.db import transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
 from weasyprint import HTML
@@ -26,8 +27,10 @@ from weasyprint.urls import URLFetcher, URLFetcherResponse
 from core.country_codes import country_name_from_code
 from core.logging_extras import current_exception_log_fields
 from core.mail_attachments import MailAttachment
+from core.membership import term_membership_request
 from core.membership_dues import discount_percent, effective_dues_usd
-from core.models import AuditLogEntry, Membership
+from core.membership_notes import add_note
+from core.models import AuditLogEntry, Membership, MembershipLog, Organization
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +58,17 @@ def invoice_eligible(membership: Membership) -> bool:
     )
 
 
-def _term_start(membership: Membership, term: InvoiceTerm) -> datetime.date:
+def _term_dates(membership: Membership, term: InvoiceTerm) -> tuple[datetime.date, datetime.date]:
+    """The (start, end) dates of the billed term."""
+    validity = datetime.timedelta(days=settings.MEMBERSHIP_VALIDITY_DAYS)
     renewal_start = membership.expires_at.astimezone(datetime.UTC).date()
     if term == InvoiceTerm.renewal:
-        return renewal_start
-    return renewal_start - datetime.timedelta(days=settings.MEMBERSHIP_VALIDITY_DAYS)
+        return renewal_start, renewal_start + validity
+    return renewal_start - validity, renewal_start
 
 
 def invoice_number(membership: Membership, term: InvoiceTerm) -> str:
-    term_start = _term_start(membership, term)
+    term_start, _ = _term_dates(membership, term)
     # Random-looking but derived from what is billed, without storing anything: every
     # reminder, and the renewed term's invoice, arrive at the same number (and stored PDF),
     # while any change to the bill gets a new one.
@@ -75,13 +80,14 @@ def invoice_number(membership: Membership, term: InvoiceTerm) -> str:
     return f"{membership.target_organization_id:04d}-{term_start.year}-{digits:06d}"
 
 
-def invoice_filename(membership: Membership, term: InvoiceTerm) -> str:
-    return f"AlmaLinux_OS_Foundation_Invoice_{invoice_number(membership, term)}.pdf"
+def invoice_filename(number: str) -> str:
+    return f"AlmaLinux_OS_Foundation_Invoice_{number}.pdf"
 
 
-def invoice_storage_key(membership: Membership, term: InvoiceTerm) -> str:
-    # Keyed by the number, so a changed bill never reuses a stale PDF.
-    return f"invoices/{membership.target_organization.invoice_token}/{invoice_filename(membership, term)}"
+def invoice_storage_key(organization: Organization, number: str) -> str:
+    # Keyed by the number, so a changed bill never reuses a stale PDF, and the
+    # membership log can find the PDF from the number alone after the term ends.
+    return f"invoices/{organization.invoice_token}/{invoice_filename(number)}"
 
 
 def read_payment_details() -> str:
@@ -121,7 +127,7 @@ def render_invoice_html(membership: Membership, term: InvoiceTerm) -> str:
         )
         if line
     ]
-    term_start = _term_start(membership, term)
+    term_start, term_end = _term_dates(membership, term)
     list_price = membership.membership_type.annual_dues_usd
     amount_due = effective_dues_usd(membership)
     discount = list_price - amount_due
@@ -140,7 +146,7 @@ def render_invoice_html(membership: Membership, term: InvoiceTerm) -> str:
             "discount_percent": discount_percent(list_price, amount_due),
             "amount_due_usd": f"${amount_due:,}",
             "term_start_date": term_start,
-            "term_end_date": term_start + datetime.timedelta(days=settings.MEMBERSHIP_VALIDITY_DAYS),
+            "term_end_date": term_end,
             "payment_details": read_payment_details(),
             "billing_notes_max_lines": BILLING_NOTES_MAX_LINES,
         },
@@ -180,10 +186,13 @@ def get_or_create_invoice_pdf(
     """Return the stored invoice PDF, rendering and storing it first if needed.
 
     Regenerating overwrites the PDF in place: same number, same link. Every render is
-    audited, since each one may bill different amounts or details under that number.
+    audited and noted for the committee, since each one may bill different amounts or
+    details under that number, and the organization page stops offering the invoice
+    once the sponsorship expires.
     """
 
-    key = invoice_storage_key(membership, term)
+    number = invoice_number(membership, term)
+    key = invoice_storage_key(membership.target_organization, number)
     if not regenerate:
         try:
             with default_storage.open(key, "rb") as stored:
@@ -196,19 +205,46 @@ def get_or_create_invoice_pdf(
     # suffixed name, breaking the link already sent to the sponsor.
     default_storage.delete(key)
     default_storage.save(key, ContentFile(pdf))
-    AuditLogEntry.objects.create(
-        organization_id=membership.target_organization_id,
-        event_type="sponsorship_invoice_generated",
-        payload={
-            "invoice_number": invoice_number(membership, term),
-            "term": term,
-            "membership_type": membership.membership_type_id,
-            "amount_due_usd": effective_dues_usd(membership),
-            "regenerated": regenerate,
-            "actor_username": actor_username,
-        },
-        is_public=False,
+
+    amount_due = effective_dues_usd(membership)
+    term_request = term_membership_request(
+        membership_type=membership.membership_type,
+        target_organization=membership.target_organization,
     )
+    with transaction.atomic():
+        AuditLogEntry.objects.create(
+            organization_id=membership.target_organization_id,
+            event_type="sponsorship_invoice_generated",
+            payload={
+                "invoice_number": number,
+                "term": term,
+                "membership_type": membership.membership_type_id,
+                "amount_due_usd": amount_due,
+                "storage_key": key,
+                "regenerated": regenerate,
+                "actor_username": actor_username,
+            },
+            is_public=False,
+        )
+        MembershipLog.objects.create(
+            actor_username=actor_username,
+            target_organization=membership.target_organization,
+            membership_type=membership.membership_type,
+            membership_request=term_request,
+            action=MembershipLog.Action.invoice_regenerated if regenerate else MembershipLog.Action.invoice_generated,
+            invoice_number=number,
+        )
+        if term_request is not None:
+            term_start, term_end = _term_dates(membership, term)
+            add_note(
+                membership_request=term_request,
+                username=actor_username,
+                content=(
+                    f"Invoice [{number}]({default_storage.url(key)}) for ${amount_due:,} "
+                    f"(term {term_start.isoformat()} to {term_end.isoformat()}) "
+                    f"{'regenerated' if regenerate else 'generated'}."
+                ),
+            )
     return pdf
 
 
@@ -259,17 +295,18 @@ def invoice_email_parts(
         )
         return InvoiceEmailParts(cc=cc, context={})
 
-    key = invoice_storage_key(membership, term)
+    number = invoice_number(membership, term)
+    key = invoice_storage_key(membership.target_organization, number)
     return InvoiceEmailParts(
         cc=cc,
         context={
             "invoice_url": default_storage.url(key),
-            "invoice_number": invoice_number(membership, term),
+            "invoice_number": number,
         },
         pdf=pdf,
         attachment=MailAttachment(
             key=key,
-            name=invoice_filename(membership, term),
+            name=invoice_filename(number),
             mimetype="application/pdf",
             size=len(pdf),
         ),
