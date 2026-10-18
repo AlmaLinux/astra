@@ -67,6 +67,9 @@ function clearSearch(): void {
   submitSearch();
 }
 
+// Actors that are the system, not a person with a profile: CUSTOS ("-"), and "system" on older rows.
+const SYSTEM_ACTORS = new Set(["-", "system"]);
+
 function userProfileHref(username: string): string {
   return fillUrlTemplate(props.userProfileUrlTemplate, "__username__", username);
 }
@@ -150,7 +153,10 @@ function segmentKey(segment: AuditLogRequestResponseSegment, index: number): str
         </div>
         <div>{{ formatMembershipTimestamp(asRow(row).created_at) }}</div>
       </td>
-      <td>{{ asRow(row).actor_username }}</td>
+      <td>
+        <a v-if="!SYSTEM_ACTORS.has(asRow(row).actor_username)" :href="userProfileHref(asRow(row).actor_username)">{{ asRow(row).actor_username }}</a>
+        <template v-else>{{ asRow(row).actor_username }}</template>
+      </td>
       <td>
         <template v-if="targetHref(asRow(row))">
           <a :href="targetHref(asRow(row))">{{ asRow(row).target.label }}</a>

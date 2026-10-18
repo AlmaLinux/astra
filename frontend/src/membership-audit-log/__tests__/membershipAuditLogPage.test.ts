@@ -245,6 +245,45 @@ describe("MembershipAuditLogPage", () => {
     expect(wrapper.find('a[href="/user/bob/"]').text()).toBe("bob");
   });
 
+  it("links the actor to their profile unless it is the system", async () => {
+    const row = {
+      created_at: "2026-10-18T10:00:00+00:00",
+      target: { kind: "organization", id: 3, label: "CERN", secondary_label: "", deleted: false },
+      membership_name: "Platinum Sponsor",
+      action: "ignored",
+      expires_at: null,
+      request: null,
+      invoice: null,
+      representative: null,
+      reason: null,
+      previous_expires_at: null,
+      dues: null,
+      termination_reason_category: null,
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      draw: 1,
+      recordsTotal: 3,
+      recordsFiltered: 3,
+      data: [
+        { ...row, log_id: 1, actor_username: "reviewer" },
+        { ...row, log_id: 2, actor_username: "-" },
+        // Older rows name the system "system".
+        { ...row, log_id: 3, actor_username: "system" },
+      ],
+    }))));
+
+    const wrapper = mount(MembershipAuditLogPage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+
+    const whoCells = wrapper.findAll("tbody tr").map((tr) => tr.findAll("td")[1]);
+    expect(whoCells.map((cell) => cell.find("a").exists() ? cell.find("a").attributes("href") : cell.text())).toEqual([
+      "/user/reviewer/",
+      "-",
+      "system",
+    ]);
+  });
+
   it("does not link a missing representative", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       draw: 1,
@@ -274,7 +313,8 @@ describe("MembershipAuditLogPage", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("(none) → bob");
-    expect(wrapper.findAll('a[href^="/user/"]').map((link) => link.text())).toEqual(["bob"]);
+    const actionCell = wrapper.findAll("tbody tr td")[4];
+    expect(actionCell.findAll('a[href^="/user/"]').map((link) => link.text())).toEqual(["bob"]);
   });
 
   it("renders canonical request-response link segments as anchors", async () => {
