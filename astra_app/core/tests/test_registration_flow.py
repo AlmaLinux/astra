@@ -180,6 +180,36 @@ class RegistrationFlowTests(TestCase):
         self.assertEqual(resp.context["username"], "ghost-user")
         self.assertIsNone(resp.context["email"])
 
+    @override_settings(REGISTRATION_OPEN=True)
+    def test_confirm_resend_without_stage_user_redirects_to_login_without_sending(self) -> None:
+        """A stale confirm page (e.g. user already activated) must not try to email an empty address."""
+        client = Client()
+
+        def _raise_not_found(*args, **kwargs):
+            _ = args, kwargs
+            raise exceptions.NotFound
+
+        ipa_client = SimpleNamespace(stageuser_show=_raise_not_found)
+        with (
+            patch("core.views_registration.FreeIPAUser.get_client", autospec=True, return_value=ipa_client),
+            patch("core.views_registration.queue_templated_email", autospec=True) as queue_email_mock,
+            patch("core.views_registration.logger.exception") as log_exception_mock,
+        ):
+            response = client.post(
+                "/register/confirm/?username=alice",
+                data={"username": "alice"},
+                follow=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("login"))
+        queue_email_mock.assert_not_called()
+        log_exception_mock.assert_not_called()
+        self.assertEqual(
+            [str(m) for m in get_messages(response.wsgi_request)],
+            [views_registration.REGISTRATION_CONFIRM_NO_PENDING_REGISTRATION_MESSAGE],
+        )
+
     def test_load_registration_stage_data_retries_service_login_unauthorized(self) -> None:
         recovered_client = SimpleNamespace()
         recovered_client.stageuser_show = Mock(

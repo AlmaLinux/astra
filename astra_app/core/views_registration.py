@@ -50,6 +50,10 @@ REGISTRATION_ACTIVATION_TEMPORARY_VERIFICATION_FAILURE_MESSAGE = (
 REGISTRATION_CONFIRM_TEMPORARY_VERIFICATION_FAILURE_MESSAGE = (
     "We could not verify your registration right now. Please try again in a few minutes or use the link from your email again."
 )
+REGISTRATION_CONFIRM_NO_PENDING_REGISTRATION_MESSAGE = (
+    "There is no pending registration for this username. "
+    "If you have already activated your account, please log in. Otherwise, please register again."
+)
 REGISTRATION_ACTIVATION_FOLLOW_UP_WARNING_MESSAGE = (
     "Your account may already be ready. Please try signing in. If you cannot sign in yet, wait a few minutes and try again."
 )
@@ -642,6 +646,11 @@ def confirm(request: HttpRequest) -> HttpResponse:
 
     form = ResendRegistrationEmailForm(request.POST or None, initial={"username": username})
     if request.method == "POST" and form.is_valid():
+        # No stage user usually means a stale confirm page after activation; there is no address to resend to.
+        if stage_data is None:
+            messages.warning(request, REGISTRATION_CONFIRM_NO_PENDING_REGISTRATION_MESSAGE)
+            return redirect("login")
+
         invitation_token = None
         pending_invitation_token = _normalize_str(request.session.get(PENDING_ACCOUNT_INVITATION_TOKEN_SESSION_KEY))
         if pending_invitation_token and load_account_invitation_from_token(pending_invitation_token) is not None:
