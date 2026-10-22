@@ -573,7 +573,6 @@ class Phase1MembershipWorkflowSignalTests(TestCase):
                 self.assertEqual(kwargs.get("membership_request").id, request_obj.id)
                 self.assertEqual(kwargs.get("actor"), actor)
                 self.assertEqual(kwargs.get("organization_id"), request_obj.requested_organization_id)
-                self.assertEqual(kwargs.get("organization_display_name"), request_obj.organization_display_name)
 
     def test_org_target_disambiguation_uses_org_signal_only(self) -> None:
         signal_module = importlib.import_module("core.signals")

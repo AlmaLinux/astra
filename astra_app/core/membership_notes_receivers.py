@@ -129,10 +129,9 @@ def record_embargoed_country_note_for_org_submission(
     membership_request: MembershipRequest,
     actor: str,
     organization_id: int | None,
-    organization_display_name: str,
     **kwargs: object,
 ) -> None:
-    _ = (sender, actor, organization_display_name, kwargs)
+    _ = (sender, actor, kwargs)
 
     organization_pk = organization_id
     if organization_pk is None:

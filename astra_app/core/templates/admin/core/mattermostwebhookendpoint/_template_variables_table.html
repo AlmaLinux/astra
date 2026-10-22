@@ -1,0 +1,8 @@
+{% for name, description in variables.items %}
+  <tr>
+    <td class="template-variables-name"><code>{{ name }}</code></td>
+    <td>{{ description }}</td>
+  </tr>
+{% empty %}
+  <tr><td colspan="2" class="text-muted">No event-specific variables.</td></tr>
+{% endfor %}

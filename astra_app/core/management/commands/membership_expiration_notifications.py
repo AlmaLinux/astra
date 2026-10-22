@@ -218,5 +218,4 @@ class Command(BaseCommand):
                 astra_signals.membership_expiring_soon.send(
                     sender=astra_signals.MembershipExpirationCommand,
                     count=queued,
-                    membership_type="all",
                 )

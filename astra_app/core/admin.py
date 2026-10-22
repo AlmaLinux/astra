@@ -193,6 +193,12 @@ class MattermostWebhookEndpointAdminForm(forms.ModelForm):
             # Replace raw JSON editing with structured controls below.
             self.fields.pop("priority")
 
+        self.fields["condition"].help_text = (
+            "Only send when this if expression is true, using the template variables below "
+            '(for example: membership_type_category == "sponsorship" and days <= 7). '
+            "Every variable must exist for every selected event; split events into separate webhooks if needed. "
+            "Leave blank to send every selected event."
+        )
         self.fields["text"].help_text = (
             "Django template syntax is supported using signal kwargs "
             "(for example: {{ actor }}, {{ election.name }}). "
@@ -248,6 +254,12 @@ class MattermostWebhookEndpointAdminForm(forms.ModelForm):
     @override
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean()
+
+        if cleaned.get("condition") and "events" in cleaned:
+            from core import mattermost_webhooks
+
+            for error in mattermost_webhooks.condition_errors(cleaned["condition"], cleaned["events"]):
+                self.add_error("condition", error)
 
         priority_level = cleaned.get("priority_level", "")
         requested_ack = bool(cleaned.get("priority_requested_ack"))
@@ -3047,9 +3059,8 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
 class MattermostWebhookEndpointAdmin(admin.ModelAdmin):
     form = MattermostWebhookEndpointAdminForm
     change_form_template = "admin/core/mattermostwebhookendpoint/change_form.html"
-    readonly_fields = ["template_variables_reference"]
 
-    list_display = ["label", "url_masked", "enabled", "events_summary"]
+    list_display = ["label", "url_masked", "enabled", "events_summary", "condition_status"]
     list_filter = ["enabled"]
     search_fields = ["label", "url"]
     save_on_top = True
@@ -3057,7 +3068,7 @@ class MattermostWebhookEndpointAdmin(admin.ModelAdmin):
     fieldsets = [
         ("Endpoint", {"fields": ["label", "url", "enabled"]}),
         ("Routing", {"fields": ["events"]}),
-        ("Template variables reference", {"fields": ["template_variables_reference"]}),
+        ("Condition", {"fields": ["condition"]}),
         ("Mattermost overrides", {"fields": ["channel", "username", "icon_url"]}),
         ("Message content (optional)", {"fields": ["text", "attachments", "props"]}),
         (
@@ -3072,16 +3083,35 @@ class MattermostWebhookEndpointAdmin(admin.ModelAdmin):
         ),
     ]
 
-    @admin.display(description="Template variables by selected events")
-    def template_variables_reference(self, obj: MattermostWebhookEndpoint | None) -> str:
+    class Media:
+        js = ("core/js/mattermost_webhook_template_variables.js",)
+
+    @override
+    def render_change_form(
+        self,
+        request: HttpRequest,
+        context: dict[str, Any],
+        add: bool = False,
+        change: bool = False,
+        form_url: str = "",
+        obj: MattermostWebhookEndpoint | None = None,
+    ) -> HttpResponse:
         from core import mattermost_webhooks
 
-        selected_events: list[str] = []
-        if obj is not None and isinstance(obj.events, list):
-            selected_events = [item for item in obj.events if isinstance(item, str)]
-
-        reference_text = mattermost_webhooks.template_variable_reference_text(selected_events)
-        return format_html("<pre style='white-space: pre-wrap; margin: 0;'>{}</pre>", reference_text)
+        # Every event is rendered; the page script reveals the ticked ones without a save.
+        # Variables are listed alphabetically, so a name is easy to find in a long list.
+        context["template_variables_common"] = dict(sorted(mattermost_webhooks._COMMON_TEMPLATE_VARIABLES.items()))
+        context["template_variables_by_event"] = [
+            (
+                event_key,
+                mattermost_webhooks._event_title(event_key),
+                dict(sorted(mattermost_webhooks._EVENT_TEMPLATE_VARIABLES[event_key].items())),
+            )
+            for event_key in sorted(CANONICAL_SIGNALS)
+        ]
+        # The bound value, so a re-rendered invalid POST keeps the events just ticked.
+        context["selected_event_keys"] = context["adminform"].form["events"].value() or []
+        return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
 
     def url_masked(self, obj: MattermostWebhookEndpoint) -> str:
         parsed = urlparse(obj.url)
@@ -3097,6 +3127,20 @@ class MattermostWebhookEndpointAdmin(admin.ModelAdmin):
         return f"{', '.join(normalized[:3])} +{len(normalized) - 3} more"
 
     events_summary.short_description = "Events"  # type: ignore[attr-defined]
+
+    @admin.display(description="Condition")
+    def condition_status(self, obj: MattermostWebhookEndpoint) -> str:
+        if not obj.condition:
+            return ""
+
+        from core import mattermost_webhooks
+
+        # Re-validated on display: a deleted membership type can invalidate a condition after it was saved.
+        events = [item for item in obj.events if isinstance(item, str)] if isinstance(obj.events, list) else []
+        errors = mattermost_webhooks.condition_errors(obj.condition, events)
+        if errors:
+            return format_html("<span style='color: #c00;'>&#9888; {}</span>", " ".join(errors))
+        return obj.condition
 
     @override
     def get_urls(self):

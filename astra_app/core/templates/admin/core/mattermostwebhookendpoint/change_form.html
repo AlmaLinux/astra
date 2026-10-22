@@ -1,4 +1,48 @@
 {% extends "admin/change_form.html" %}
+{% load jazzmin %}
+
+{% block field_sets %}
+  <div class="col-12 col-lg-9">
+    <div class="card">
+      <div class="card-body">
+        {% get_changeform_template adminform as changeform_template %}
+        {% include changeform_template %}
+      </div>
+    </div>
+
+    {# Outside the tabs, so it stays readable while editing the condition and message content. #}
+    <div class="card card-outline card-info" id="template-variables-reference">
+      <div class="card-header">
+        <h3 class="card-title">Template variables by selected events</h3>
+      </div>
+      <div class="card-body">
+        <p class="text-muted">
+          Use a variable as <code>{% templatetag openvariable %} name {% templatetag closevariable %}</code> in the message
+          content, or by its bare name in the condition. Format dates with <code>|date</code> and lists with <code>|join</code>.
+        </p>
+
+        {# One table, one tbody per event, so the name column lines up across events. #}
+        <table class="table table-sm table-striped mb-0">
+          <tbody>
+            <tr class="template-variables-heading-row"><th colspan="2" class="template-variables-heading">All events</th></tr>
+            {% include "admin/core/mattermostwebhookendpoint/_template_variables_table.html" with variables=template_variables_common %}
+          </tbody>
+          <tbody data-template-variables-empty{% if selected_event_keys %} hidden{% endif %}>
+            <tr><td colspan="2" class="text-muted">Select events in the Routing tab to see their variables here.</td></tr>
+          </tbody>
+          {% for event_key, event_title, variables in template_variables_by_event %}
+            <tbody data-template-variables-event="{{ event_key }}"{% if event_key not in selected_event_keys %} hidden{% endif %}>
+              <tr class="template-variables-heading-row">
+                <th colspan="2" class="template-variables-heading">{{ event_title }} <code>{{ event_key }}</code></th>
+              </tr>
+              {% include "admin/core/mattermostwebhookendpoint/_template_variables_table.html" %}
+            </tbody>
+          {% endfor %}
+        </table>
+      </div>
+    </div>
+  </div>
+{% endblock %}
 
 {% block object-tools-items %}
   {% if change and has_change_permission %}

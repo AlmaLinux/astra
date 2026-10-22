@@ -398,5 +398,4 @@ class Command(BaseCommand):
                 astra_signals.membership_expired.send(
                     sender=astra_signals.MembershipExpirationCommand,
                     count=removed + sponsorship_removed,
-                    membership_type="all",
                 )

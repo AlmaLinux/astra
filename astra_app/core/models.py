@@ -1738,6 +1738,7 @@ class MattermostWebhookEndpoint(models.Model):
     icon_url = models.URLField(max_length=500, blank=True)
     enabled = models.BooleanField(default=True)
     events = models.JSONField(default=list)
+    condition = models.TextField(blank=True)
     text = models.TextField(blank=True)
     attachments = models.JSONField(null=True, blank=True)
     props = models.JSONField(null=True, blank=True)

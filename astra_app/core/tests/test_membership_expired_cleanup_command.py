@@ -114,7 +114,6 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         membership_expired_send_mock.assert_called_once_with(
             sender=astra_signals.MembershipExpirationCommand,
             count=1,
-            membership_type="all",
         )
         self.assertFalse(Membership.objects.filter(target_username="alice", membership_type_id="individual").exists())
 

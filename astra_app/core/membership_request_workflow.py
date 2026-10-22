@@ -359,7 +359,6 @@ def emit_membership_request_signal_on_commit(
 
     if membership_request.is_organization_target:
         organization_id = membership_request.requested_organization_id
-        organization_display_name = membership_request.organization_display_name
 
         def _send_org_signal() -> None:
             committed_request = MembershipRequest.objects.get(pk=request_id)
@@ -368,7 +367,6 @@ def emit_membership_request_signal_on_commit(
                 membership_request=committed_request,
                 actor=actor_username,
                 organization_id=organization_id,
-                organization_display_name=organization_display_name,
             )
 
         transaction.on_commit(_send_org_signal)

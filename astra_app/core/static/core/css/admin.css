@@ -1,4 +1,39 @@
 
+/* Mattermost webhook change form: template variables reference below the tabs. */
+
+/* An accent bar and bold title, so each event stands out in a long list. The bar is an inset
+   shadow, not a border: a collapsed left border would run up through the spacer below too. */
+#template-variables-reference .template-variables-heading {
+  font-size: 1.05rem;
+  padding: 0.4rem 0.75rem 0.4rem calc(0.75rem + 4px);
+  box-shadow: inset 4px 0 0 var(--info);
+  background-color: rgba(23, 162, 184, 0.08);
+}
+
+/* Headings are rows of a striped table; keep the stripe off them and their spacer. */
+#template-variables-reference .template-variables-heading-row {
+  background-color: transparent;
+}
+
+/* Space between events: a transparent top border, since table rows take no margin. */
+#template-variables-reference tbody:not(:first-child) .template-variables-heading {
+  border-top: 1.5rem solid transparent;
+  background-clip: padding-box;
+}
+
+#template-variables-reference .template-variables-heading code {
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--secondary);
+}
+
+/* Shrink the name column to its widest name, leaving the rest to the description. */
+#template-variables-reference .template-variables-name {
+  width: 1%;
+  white-space: nowrap;
+}
+
 .select2-container--default .select2-selection--multiple .select2-selection__choice__display {
   padding-left: 5px !important;
   color: var(--dark) !important;

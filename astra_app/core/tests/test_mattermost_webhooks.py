@@ -1,30 +1,43 @@
 import datetime
 import json
+import re
 import warnings
 from types import SimpleNamespace
+from typing import override
 from unittest.mock import Mock, patch
 
 import requests
 from django.core.exceptions import ValidationError
+from django.template import Context
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from core.freeipa.user import FreeIPAUser
 from core.mattermost_webhooks import (
+    _COMMON_TEMPLATE_VARIABLES,
+    _EVENT_TEMPLATE_VARIABLES,
     _build_payload,
+    _build_template_context,
+    _condition_template,
     _default_payload,
     _post_to_endpoint,
     _render_template,
+    condition_errors,
     dispatch_mattermost_event,
 )
+from core.membership import PendingRenewal
 from core.models import (
+    AccountDeletionRequest,
     AccountInvitation,
     Election,
     MattermostWebhookEndpoint,
+    Membership,
     MembershipLog,
     MembershipRequest,
+    MembershipTerminationFeedback,
     MembershipType,
+    MembershipTypeCategory,
     Organization,
 )
 from core.operations import run_operations
@@ -96,7 +109,7 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
             text="Custom text {{ count }}",
             attachments=[
                 {
-                    "title": "Override {{ membership_type }}",
+                    "title": "Override {{ count }} expired",
                     "fields": [{"title": "Count", "value": "{{ count }}", "short": True}],
                 }
             ],
@@ -110,11 +123,11 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         payload = _build_payload(
             endpoint=endpoint,
             event_key="membership_expired",
-            kwargs={"count": 4, "membership_type": "sponsorship"},
+            kwargs={"count": 4},
         )
 
         self.assertEqual(payload["text"], "Custom text 4")
-        self.assertEqual(payload["attachments"][0]["title"], "Override sponsorship")
+        self.assertEqual(payload["attachments"][0]["title"], "Override 4 expired")
         self.assertEqual(payload["attachments"][0]["fields"][0]["value"], "4")
         self.assertEqual(payload["props"]["from_endpoint"], "yes")
         self.assertEqual(payload["priority"]["priority"], "important")
@@ -199,10 +212,7 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
                 "actor": "alice",
             }
             if event_key.startswith("organization_membership_"):
-                kwargs.update({
-                    "organization_id": 123,
-                    "organization_display_name": "Example Org",
-                })
+                kwargs["organization_id"] = 123
 
             with self.subTest(event_key=event_key):
                 payload = _default_payload(event_key, kwargs)
@@ -279,7 +289,7 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
             label="Ops",
             url="https://hooks.example.invalid/abc",
             events=["election_opened"],
-            text="genesis={{ election_genesis_hash }} end={{ election_end_datetime_iso }}",
+            text='genesis={{ election_genesis_hash }} end={{ election_end_datetime|date:"c" }}',
         )
 
         payload = _build_payload(endpoint, "election_opened", {"election": election, "actor": "alice"})
@@ -325,7 +335,7 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertEqual(payload["text"], "winners=alice, bob")
 
     def test_payload_organization_country_changed(self) -> None:
-        org = SimpleNamespace(pk=123, name="Example Org")
+        org = SimpleNamespace(pk=123, name="Example Org", representative="")
         endpoint = MattermostWebhookEndpoint(
             label="Ops",
             url="https://hooks.example.invalid/abc",
@@ -403,7 +413,7 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         self.assertEqual(by_title.get("Actor"), "carol")
 
     def test_payload_organization_embargoed_country_changed(self) -> None:
-        organization = SimpleNamespace(pk=123, name="Example Org")
+        organization = SimpleNamespace(pk=123, name="Example Org", representative="")
         endpoint = MattermostWebhookEndpoint(
             label="Compliance",
             url="https://hooks.example.invalid/abc",
@@ -443,8 +453,8 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
             url="https://hooks.example.invalid/abc",
             events=["account_invitation_accepted"],
             text=(
-                "invite={{ account_invitation_email }} accepted={{ account_invitation_accepted_username }} "
-                "matches={{ account_invitation_matched_usernames_csv }} org={{ account_invitation_organization_name }}"
+                "invite={{ account_invitation_email }} accepted={{ username }} "
+                'matches={{ account_invitation_matched_usernames|join:", " }} org={{ organization_name }}'
             ),
         )
 
@@ -479,9 +489,9 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
             url="https://hooks.example.invalid/privacy",
             events=["account_deletion_requested"],
             text=(
-                "request={{ account_deletion_request_id }} user={{ account_deletion_username }} "
+                "request={{ account_deletion_request_id }} user={{ username }} "
                 "status={{ account_deletion_status }} manual={{ account_deletion_manual_review_required }} "
-                "blockers={{ account_deletion_blocker_codes_csv }}"
+                'blockers={{ account_deletion_blocker_codes|join:", " }}'
             ),
         )
 
@@ -511,7 +521,7 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
             url="https://hooks.example.invalid/privacy",
             events=["account_deletion_completed"],
             text=(
-                "request={{ account_deletion_request_id }} user={{ account_deletion_username }} "
+                "request={{ account_deletion_request_id }} user={{ username }} "
                 "status={{ account_deletion_status }} manual={{ account_deletion_manual_review_required }}"
             ),
         )
@@ -539,10 +549,10 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
             "account_deletion_completed",
             {
                 "account_deletion_request_id": 42,
-                "account_deletion_username": "alice",
+                "username": "alice",
                 "account_deletion_status": "completed",
                 "account_deletion_manual_review_required": False,
-                "account_deletion_blocker_codes_csv": "",
+                "account_deletion_blocker_codes": [],
                 "actor": "admin",
             },
         )
@@ -557,10 +567,10 @@ class MattermostWebhookTemplateAndPayloadTests(SimpleTestCase):
         payload = _default_payload(
             "account_deletion_completed",
             {
-                "account_deletion_username": "alice",
+                "username": "alice",
                 "account_deletion_status": "completed",
                 "account_deletion_manual_review_required": False,
-                "account_deletion_blocker_codes_csv": "",
+                "account_deletion_blocker_codes": [],
                 "actor": "admin",
             },
         )
@@ -578,7 +588,9 @@ class SponsorshipMattermostPayloadTests(SimpleTestCase):
     def _sponsorship(self, organization_id: int = 5, name: str = "Acme Corp", representative: str = "jdoe") -> object:
         return SimpleNamespace(
             target_organization=SimpleNamespace(pk=organization_id, name=name, representative=representative),
-            membership_type=SimpleNamespace(code="gold", name="Gold Sponsor", annual_dues_usd=5000),
+            membership_type=SimpleNamespace(
+                code="gold", name="Gold Sponsor", category_id="sponsorship", annual_dues_usd=5000
+            ),
             dues_usd=None,
             expires_at=datetime.datetime(2026, 10, 29, 23, 59, 59, tzinfo=datetime.UTC),
         )
@@ -704,6 +716,303 @@ class SponsorshipMattermostPayloadTests(SimpleTestCase):
         )
 
         self.assertEqual(payload["text"], "1 sponsorship renewal pending past expiry")
+
+
+class MattermostWebhookTemplateVariableRegistryTests(TestCase):
+    """Conditions are validated against the registry, so it must match the context dispatch builds."""
+
+    def _event_kwargs(self) -> dict[str, dict[str, object]]:
+        now = timezone.now()
+        individual = MembershipType(code="individual", name="Individual", category_id="individual")
+        gold = MembershipType(code="gold", name="Gold Sponsor", category_id="sponsorship", annual_dues_usd=5000)
+        organization = Organization(pk=5, name="Acme Corp", representative="jdoe")
+        org_request = MembershipRequest(pk=43, requested_organization=organization, membership_type=gold)
+        sponsorship = Membership(target_organization=organization, membership_type=gold, expires_at=now)
+        election = Election(pk=1, name="Board", end_datetime=now, tally_result={"elected": ["alice"]})
+        account_deletion = {
+            "account_deletion_request": AccountDeletionRequest(pk=9, username="bob", status="pending_review"),
+            "actor": "bob",
+        }
+
+        user_request_kwargs = {
+            "membership_request": MembershipRequest(pk=42, requested_username="carol", membership_type=individual),
+            "actor": "alice",
+        }
+        org_request_kwargs = {"membership_request": org_request, "actor": "alice", "organization_id": 5}
+        user_country = {"username": "carol", "old_country": "US", "new_country": "CA", "actor": "carol"}
+        org_country = {"organization": organization, "old_country": "US", "new_country": "CA", "actor": "jdoe"}
+
+        return {
+            "account_invitation_accepted": {
+                "account_invitation": AccountInvitation(
+                    pk=3,
+                    email="dave@example.com",
+                    full_name="Dave",
+                    accepted_username="dave",
+                    accepted_at=now,
+                    freeipa_matched_usernames=["dave"],
+                    organization=organization,
+                ),
+                "actor": "dave",
+            },
+            "election_opened": {"election": election, "actor": "alice"},
+            "election_closed": {"election": election, "actor": "alice"},
+            "election_tallied": {"election": election, "actor": "alice"},
+            "election_deadline_extended": {
+                "election": election,
+                "actor": "alice",
+                "previous_end_datetime": now,
+                "new_end_datetime": now,
+            },
+            "election_quorum_met": {"election": election},
+            "membership_request_submitted": user_request_kwargs,
+            "membership_request_approved": user_request_kwargs,
+            "membership_request_rejected": user_request_kwargs,
+            "membership_request_rescinded": user_request_kwargs,
+            "membership_rfi_sent": user_request_kwargs,
+            "membership_rfi_replied": user_request_kwargs,
+            "membership_expiring_soon": {"count": 3},
+            "membership_expired": {"count": 3},
+            "membership_self_terminated": {
+                "actor": "carol",
+                "username": "carol",
+                "membership_type": individual,
+                "termination_feedback": MembershipTerminationFeedback(pk=7, reason_category="privacy"),
+            },
+            "account_deletion_requested": account_deletion,
+            "account_deletion_pending_privilege_check": account_deletion,
+            "account_deletion_approved": account_deletion,
+            "account_deletion_rejected": account_deletion,
+            "account_deletion_cancelled": account_deletion,
+            "account_deletion_completed": account_deletion,
+            "organization_membership_request_submitted": org_request_kwargs,
+            "organization_membership_request_approved": org_request_kwargs,
+            "organization_membership_request_rejected": org_request_kwargs,
+            "organization_membership_request_rescinded": org_request_kwargs,
+            "organization_membership_rfi_sent": org_request_kwargs,
+            "organization_membership_rfi_replied": org_request_kwargs,
+            "organization_membership_expiring_soon": {"membership": sponsorship, "days": 7, "sponsor_notified": True},
+            "organization_membership_expired": {
+                "membership": sponsorship,
+                "sponsor_notified": True,
+                "cleanup_failed": False,
+            },
+            "organization_membership_renewals_pending": {
+                "count": 1,
+                "renewals": [PendingRenewal(membership=sponsorship, membership_request=org_request, term_ended_at=now)],
+            },
+            "organization_claimed": {"organization": organization, "actor": "jdoe"},
+            "organization_created": {"organization": organization, "actor": "jdoe"},
+            "user_country_changed": user_country,
+            "user_embargoed_country_changed": user_country,
+            "organization_country_changed": org_country,
+            "organization_embargoed_country_changed": org_country,
+        }
+
+    def test_registry_lists_exactly_the_variables_each_event_exposes(self) -> None:
+        event_kwargs = self._event_kwargs()
+        self.assertEqual(set(event_kwargs), set(CANONICAL_SIGNALS))
+
+        for event_key, kwargs in event_kwargs.items():
+            with self.subTest(event_key=event_key):
+                context = _build_template_context(event_key, kwargs)
+                self.assertEqual(
+                    set(context) - set(_COMMON_TEMPLATE_VARIABLES),
+                    set(_EVENT_TEMPLATE_VARIABLES[event_key]) - set(_COMMON_TEMPLATE_VARIABLES),
+                )
+
+    def test_membership_events_expose_the_membership_type_category(self) -> None:
+        event_kwargs = self._event_kwargs()
+
+        for event_key, expected in [
+            ("membership_request_submitted", "individual"),
+            ("organization_membership_request_submitted", "sponsorship"),
+            ("organization_membership_expiring_soon", "sponsorship"),
+            ("membership_self_terminated", "individual"),
+        ]:
+            with self.subTest(event_key=event_key):
+                context = _build_template_context(event_key, event_kwargs[event_key])
+                self.assertEqual(context["membership_type_category"], expected)
+
+    def test_context_links_to_the_pages_of_what_it_names(self) -> None:
+        # Templates cannot reverse URLs, so links in a custom message must come from the context.
+        event_kwargs = self._event_kwargs()
+
+        for event_key, expected_paths in [
+            (
+                "membership_request_submitted",
+                {
+                    "membership_request_url": reverse("membership-request-detail", kwargs={"pk": 42}),
+                    "user_url": reverse("user-profile", kwargs={"username": "carol"}),
+                },
+            ),
+            (
+                "organization_membership_request_submitted",
+                {"organization_url": reverse("organization-detail", kwargs={"organization_id": 5})},
+            ),
+            (
+                "election_opened",
+                {
+                    "election_url": reverse("election-detail", kwargs={"election_id": 1}),
+                    "election_vote_url": reverse("election-vote", args=[1]),
+                },
+            ),
+            ("account_invitation_accepted", {"user_url": reverse("user-profile", kwargs={"username": "dave"})}),
+        ]:
+            with self.subTest(event_key=event_key):
+                context = _build_template_context(event_key, event_kwargs[event_key])
+                for name, path in expected_paths.items():
+                    self.assertTrue(str(context[name]).endswith(path), (name, context[name]))
+
+    def test_membership_type_is_the_model_wherever_the_type_is_known(self) -> None:
+        event_kwargs = self._event_kwargs()
+
+        for event_key in (
+            "membership_request_submitted",
+            "organization_membership_expired",
+            "membership_self_terminated",
+        ):
+            with self.subTest(event_key=event_key):
+                context = _build_template_context(event_key, event_kwargs[event_key])
+                self.assertIsInstance(context["membership_type"], MembershipType)
+
+    def test_org_request_for_a_deleted_organization_keeps_its_name(self) -> None:
+        request = MembershipRequest(
+            pk=44,
+            deleted_organization_id=5,
+            deleted_organization_name="Gone Corp",
+            membership_type=MembershipType(code="gold", name="Gold", category_id="sponsorship"),
+        )
+
+        context = _build_template_context(
+            "organization_membership_request_submitted", {"membership_request": request, "organization_id": None}
+        )
+
+        self.assertEqual(context["organization_name"], "Gone Corp")
+        self.assertIsNone(context.get("organization_id"))
+        self.assertNotIn("organization", context)
+
+    def test_events_name_their_user_and_organization_the_same_way(self) -> None:
+        event_kwargs = self._event_kwargs()
+        acme = {"organization_id": 5, "organization_name": "Acme Corp"}
+
+        for event_key, expected in [
+            ("membership_request_submitted", {"username": "carol"}),
+            ("membership_self_terminated", {"username": "carol"}),
+            ("user_country_changed", {"username": "carol"}),
+            ("account_deletion_requested", {"username": "bob"}),
+            ("account_invitation_accepted", {"username": "dave", **acme}),
+            ("organization_membership_request_submitted", acme),
+            ("organization_membership_expired", acme),
+            ("organization_created", acme),
+            ("organization_country_changed", acme),
+        ]:
+            with self.subTest(event_key=event_key):
+                context = _build_template_context(event_key, event_kwargs[event_key])
+                self.assertEqual({name: context.get(name) for name in expected}, expected)
+
+
+class MattermostWebhookConditionValidationTests(TestCase):
+    sponsorship_events = ["organization_membership_expiring_soon", "organization_membership_expired"]
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        MembershipTypeCategory.objects.update_or_create(pk="sponsorship", defaults={"is_organization": True})
+        for code in ("gold", "platinum"):
+            MembershipType.objects.update_or_create(
+                code=code, defaults={"name": code.title(), "category_id": "sponsorship"}
+            )
+
+    def _single_error(self, condition: str, events: list[str]) -> str:
+        errors = condition_errors(condition, events)
+        self.assertEqual(len(errors), 1, errors)
+        return errors[0]
+
+    def test_valid_condition_has_no_errors(self) -> None:
+        self.assertEqual(
+            condition_errors(
+                'membership_type_category == "sponsorship" and membership_type_code != "gold" and not sponsor_notified',
+                self.sponsorship_events,
+            ),
+            [],
+        )
+
+    def test_reports_syntax_errors(self) -> None:
+        error = self._single_error("membership_type_code ==", self.sponsorship_events)
+
+        self.assertIn("Unexpected end of expression", error)
+
+    def test_rejects_template_tags_so_the_field_holds_only_one_condition(self) -> None:
+        for condition in [
+            'membership_type_code == "gold" %}{% if True',
+            "{{ organization_name }}",
+            "{# comment #} True",
+        ]:
+            with self.subTest(condition=condition):
+                self.assertIn("without", self._single_error(condition, self.sponsorship_events))
+
+    def test_unknown_variable_suggests_the_closest_name(self) -> None:
+        error = self._single_error('membership_type_categry == "sponsorship"', self.sponsorship_events)
+
+        self.assertIn("'membership_type_categry'", error)
+        self.assertIn("Did you mean 'membership_type_category'?", error)
+
+    def test_variable_must_exist_for_every_selected_event(self) -> None:
+        # The expired event has no "days", so the condition would quietly drop every expiry post.
+        error = self._single_error("days <= 7", self.sponsorship_events)
+
+        self.assertIn("organization_membership_expired", error)
+        self.assertNotIn("organization_membership_expiring_soon", error)
+
+    def test_checks_only_the_first_part_of_dotted_lookups_and_filter_arguments(self) -> None:
+        events = ["organization_membership_expiring_soon"]
+
+        self.assertEqual(
+            condition_errors('membership.target_organization.name|default:organization_name == "Acme"', events), []
+        )
+        self.assertIn("'orgname'", self._single_error('organization_name|default:orgname == "Acme"', events))
+
+    def test_common_variables_and_template_constants_are_allowed(self) -> None:
+        self.assertEqual(condition_errors("actor == None or sponsor_notified == False", self.sponsorship_events), [])
+
+    def test_rejects_unknown_membership_type_codes_in_either_operand_order(self) -> None:
+        for condition in ['membership_type_code == "platnum"', '"platnum" != membership_type_code']:
+            with self.subTest(condition=condition):
+                error = self._single_error(condition, self.sponsorship_events)
+                self.assertIn("'platnum' is not a valid membership_type_code", error)
+                self.assertIn("platinum", error)
+
+    def test_rejects_unknown_values_for_other_enumerated_variables(self) -> None:
+        cases = [
+            ('membership_type_category == "sponsorshp"', self.sponsorship_events),
+            ('membership_target_kind == "org"', ["membership_request_submitted"]),
+            ('termination_reason_category == "privcy"', ["membership_self_terminated"]),
+            ('account_deletion_status == "done"', ["account_deletion_completed"]),
+        ]
+        for condition, events in cases:
+            with self.subTest(condition=condition):
+                self.assertIn("is not a valid", self._single_error(condition, events))
+
+    def test_rejects_comparing_an_object_with_a_constant(self) -> None:
+        # An object never equals a string or number, so the condition would silently never match.
+        for condition, suggestion in [
+            ('membership_type == "gold"', "membership_type_code"),
+            ("organization != 5", "organization_id"),
+        ]:
+            with self.subTest(condition=condition):
+                self.assertIn(suggestion, self._single_error(condition, self.sponsorship_events))
+
+    def test_condition_keeps_spaces_inside_string_constants(self) -> None:
+        template = _condition_template('organization_name == "Acme  Corp"\nand True')
+
+        self.assertEqual(template.render(Context({"organization_name": "Acme  Corp"})), "1")
+
+    def test_rejects_in_for_enumerated_variables(self) -> None:
+        # Templates have no list literals: "in" against a string is a substring match.
+        error = self._single_error('membership_type_code in "gold platinum"', self.sponsorship_events)
+
+        self.assertIn("==", error)
 
 
 @override_settings(MATTERMOST_WEBHOOK_TIMEOUT_SECONDS=3)
@@ -893,7 +1202,6 @@ class MattermostWebhookDispatchTests(TestCase):
                 "organization_membership_request_submitted",
                 actor="alice",
                 organization_id=123,
-                organization_display_name="Example Org",
             )
 
         post_mock.assert_not_called()
@@ -966,7 +1274,7 @@ class MattermostWebhookDispatchTests(TestCase):
         )
 
         with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
-            dispatch_mattermost_event("membership_expired", count=0, membership_type="all", actor="system")
+            dispatch_mattermost_event("membership_expired", count=0, actor="system")
 
         post_mock.assert_not_called()
 
@@ -992,7 +1300,7 @@ class MattermostWebhookDispatchTests(TestCase):
         )
 
         with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
-            dispatch_mattermost_event("membership_expiring_soon", count=0, membership_type="all", actor="system")
+            dispatch_mattermost_event("membership_expiring_soon", count=0, actor="system")
 
         post_mock.assert_not_called()
 
@@ -1030,6 +1338,69 @@ class MattermostWebhookDispatchTests(TestCase):
     @patch("core.mattermost_webhooks.MattermostWebhookEndpoint.objects.filter", side_effect=RuntimeError("DB down"))
     def test_dispatch_never_raises_on_db_error(self, _mock_filter: Mock) -> None:
         dispatch_mattermost_event("election_opened", actor="test")
+
+    def _sponsorship(self, code: str) -> object:
+        return SimpleNamespace(
+            target_organization=SimpleNamespace(pk=5, name="Acme Corp", representative="jdoe"),
+            membership_type=SimpleNamespace(code=code, name=code.title(), category_id="sponsorship", annual_dues_usd=0),
+            dues_usd=None,
+            expires_at=timezone.now(),
+        )
+
+    def _conditional_endpoint(self, label: str, condition: str) -> MattermostWebhookEndpoint:
+        return MattermostWebhookEndpoint.objects.create(
+            label=label,
+            url=f"https://hooks.example.invalid/{label}",
+            enabled=True,
+            events=["organization_membership_expiring_soon"],
+            condition=condition,
+        )
+
+    def _posted_labels(self, post_mock: Mock) -> list[str]:
+        return sorted(call.args[0].label for call in post_mock.call_args_list)
+
+    def test_dispatch_posts_only_to_endpoints_whose_condition_matches(self) -> None:
+        self._conditional_endpoint("platinum", 'membership_type_code == "platinum"')
+        self._conditional_endpoint("gold", 'membership_type_code == "gold"')
+        self._conditional_endpoint("everything", "")
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            dispatch_mattermost_event(
+                "organization_membership_expiring_soon", membership=self._sponsorship("gold"), days=7, sponsor_notified=True
+            )
+
+        self.assertEqual(self._posted_labels(post_mock), ["everything", "gold"])
+
+    def test_dispatch_evaluates_a_condition_typed_over_several_lines(self) -> None:
+        # Template tags cannot span lines; unjoined, this would render as literal text and always match.
+        self._conditional_endpoint("platinum-soon", 'membership_type_code == "platinum"\nor days <= 7')
+
+        with patch("core.mattermost_webhooks._post_to_endpoint") as post_mock:
+            dispatch_mattermost_event(
+                "organization_membership_expiring_soon", membership=self._sponsorship("gold"), days=30, sponsor_notified=True
+            )
+
+        post_mock.assert_not_called()
+
+    def test_dispatch_skips_and_logs_an_endpoint_whose_condition_fails(self) -> None:
+        broken = self._conditional_endpoint("broken", "days <")
+        self._conditional_endpoint("everything", "")
+
+        with (
+            patch("core.mattermost_webhooks._post_to_endpoint") as post_mock,
+            self.assertLogs("core.mattermost_webhooks", level="ERROR") as captured,
+        ):
+            dispatch_mattermost_event(
+                "organization_membership_expiring_soon", membership=self._sponsorship("gold"), days=7, sponsor_notified=True
+            )
+
+        self.assertEqual(self._posted_labels(post_mock), ["everything"])
+        self.assertTrue(
+            any(
+                record.getMessage() == "mattermost.dispatch_error" and record.endpoint_id == broken.pk
+                for record in captured.records
+            )
+        )
 
     def test_account_invitation_accepted_signal_posts_through_connected_receiver(self) -> None:
         endpoint = MattermostWebhookEndpoint.objects.create(
@@ -1091,7 +1462,7 @@ class MattermostWebhookDispatchTests(TestCase):
             enabled=True,
             events=["membership_self_terminated"],
         )
-        membership_type = SimpleNamespace(code="individual", name="Individual")
+        membership_type = SimpleNamespace(code="individual", name="Individual", category_id="individual")
         feedback = SimpleNamespace(pk=7, reason_category="no_longer_needed", reason_text="Private details")
 
         with (
@@ -1135,7 +1506,7 @@ class MattermostWebhookDispatchTests(TestCase):
                 sender=MembershipLog,
                 actor="alice",
                 username="alice",
-                membership_type=SimpleNamespace(code="individual", name="Individual"),
+                membership_type=SimpleNamespace(code="individual", name="Individual", category_id="individual"),
                 termination_feedback=SimpleNamespace(pk=7, reason_category="privacy", reason_text=""),
             )
 
@@ -1254,7 +1625,7 @@ class MattermostWebhookAdminTests(TestCase):
         self.assertContains(response, "JSON list of Mattermost attachments")
         self.assertContains(response, "JSON object merged into Mattermost props")
 
-    def test_change_page_renders_template_variable_reference_for_selected_events(self) -> None:
+    def test_change_page_shows_template_variables_of_selected_events_below_the_tabs(self) -> None:
         self._login_as_freeipa_admin()
         endpoint = self._endpoint()
 
@@ -1262,10 +1633,57 @@ class MattermostWebhookAdminTests(TestCase):
             response = self.client.get(reverse("admin:core_mattermostwebhookendpoint_change", args=[endpoint.pk]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Template variables by selected events")
-        self.assertContains(response, "Event: election_opened")
+        content = response.content.decode()
+        # Outside the tabs, so it stays readable while editing the condition or message content.
+        self.assertNotIn('href="#template-variables-reference-tab"', content)
+        self.assertGreater(content.index('id="template-variables-reference"'), content.index('id="priority-optional-tab"'))
         self.assertContains(response, "election.name")
         self.assertContains(response, "election_genesis_hash")
+        self.assertContains(response, "Election Opened")
+        # Every event is rendered so the script can reveal it when ticked, without saving first.
+        self.assertContains(response, 'data-template-variables-event="election_opened">')
+        self.assertContains(response, 'data-template-variables-event="membership_expired" hidden>')
+        self.assertContains(response, 'data-template-variables-empty hidden>')
+        self.assertContains(response, "core/js/mattermost_webhook_template_variables.js")
+
+    def test_change_page_lists_each_events_variables_alphabetically(self) -> None:
+        self._login_as_freeipa_admin()
+        endpoint = self._endpoint()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._admin_user()):
+            response = self.client.get(reverse("admin:core_mattermostwebhookendpoint_change", args=[endpoint.pk]))
+
+        content = response.content.decode()
+        section_start = content.index('data-template-variables-event="election_opened"')
+        section = content[section_start : content.index("</tbody>", section_start)]
+        names = re.findall(r'<td class="template-variables-name"><code>([^<]+)</code>', section)
+        self.assertIn("election_vote_url", names)
+        self.assertEqual(names, sorted(names))
+
+    def test_add_page_shows_no_event_variables_until_events_are_selected(self) -> None:
+        self._login_as_freeipa_admin()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._admin_user()):
+            response = self.client.get(reverse("admin:core_mattermostwebhookendpoint_add"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-template-variables-event="election_opened" hidden>')
+        self.assertContains(response, "data-template-variables-empty>")
+
+    def test_change_page_puts_the_condition_in_its_own_tab_after_routing(self) -> None:
+        self._login_as_freeipa_admin()
+        endpoint = self._endpoint()
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._admin_user()):
+            response = self.client.get(reverse("admin:core_mattermostwebhookendpoint_change", args=[endpoint.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        tab_order = [content.index(f'href="#{slug}-tab"') for slug in ("routing", "condition", "mattermost-overrides")]
+        self.assertEqual(tab_order, sorted(tab_order))
+        condition_pane = content.index('id="condition-tab"')
+        self.assertGreater(content.index('name="condition"'), condition_pane)
+        self.assertLess(content.index('name="events"'), condition_pane)
 
     def test_change_page_renders_priority_controls_instead_of_raw_priority_json(self) -> None:
         self._login_as_freeipa_admin()
@@ -1342,6 +1760,58 @@ class MattermostWebhookAdminTests(TestCase):
         self.assertContains(result, "Persistent notifications are only available for Urgent.")
         endpoint.refresh_from_db()
         self.assertIsNone(endpoint.priority)
+
+    def _post_condition(self, endpoint: MattermostWebhookEndpoint, condition: str):
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._admin_user()):
+            return self.client.post(
+                reverse("admin:core_mattermostwebhookendpoint_change", args=[endpoint.pk]),
+                data={
+                    "label": endpoint.label,
+                    "url": endpoint.url,
+                    "enabled": "on",
+                    "events": ["election_opened"],
+                    "condition": condition,
+                    "_save": "Save",
+                },
+                follow=True,
+            )
+
+    def test_change_view_saves_a_valid_condition(self) -> None:
+        self._login_as_freeipa_admin()
+        endpoint = self._endpoint()
+
+        result = self._post_condition(endpoint, 'election_name == "Board"')
+
+        self.assertEqual(result.status_code, 200)
+        endpoint.refresh_from_db()
+        self.assertEqual(endpoint.condition, 'election_name == "Board"')
+
+    def test_change_view_rejects_a_condition_using_an_unknown_variable(self) -> None:
+        self._login_as_freeipa_admin()
+        endpoint = self._endpoint()
+
+        result = self._post_condition(endpoint, 'election_nam == "Board"')
+
+        self.assertEqual(result.status_code, 200)
+        self.assertContains(result, "Did you mean &#x27;election_name&#x27;?")
+        endpoint.refresh_from_db()
+        self.assertEqual(endpoint.condition, "")
+
+    def test_changelist_flags_a_condition_that_went_stale_after_saving(self) -> None:
+        self._login_as_freeipa_admin()
+        MattermostWebhookEndpoint.objects.create(
+            label="Retired tier",
+            url="https://hooks.example.invalid/retired",
+            enabled=True,
+            events=["organization_membership_expired"],
+            condition='membership_type_code == "retired"',
+        )
+
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._admin_user()):
+            response = self.client.get(reverse("admin:core_mattermostwebhookendpoint_changelist"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "&#x27;retired&#x27; is not a valid membership_type_code")
 
     @override_settings(MATTERMOST_WEBHOOK_TIMEOUT_SECONDS=5)
     def test_test_notification_view_success(self) -> None:

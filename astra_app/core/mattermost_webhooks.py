@@ -1,16 +1,19 @@
 import datetime
+import difflib
 import hashlib
 import json
 import logging
 import re
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
 import requests
 from django.conf import settings
-from django.template import Context, Template
+from django.template import Context, Template, TemplateSyntaxError
+from django.template.base import FilterExpression, Variable
+from django.template.smartif import TokenBase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -18,10 +21,19 @@ from core.elections_services import election_vote_url
 from core.membership import PendingRenewal
 from core.membership_dues import effective_dues_usd
 from core.membership_notifications import (
-    membership_extend_url,
     membership_requests_url,
 )
-from core.models import Ballot, MattermostWebhookEndpoint, MembershipRequest, MembershipTerminationFeedback
+from core.membership_targets import MembershipTargetKind
+from core.models import (
+    AccountDeletionRequest,
+    Ballot,
+    MattermostWebhookEndpoint,
+    MembershipRequest,
+    MembershipTerminationFeedback,
+    MembershipType,
+    MembershipTypeCategory,
+    Organization,
+)
 from core.public_urls import build_public_absolute_url
 from core.signal_receivers import connect_once, safe_receiver
 from core.signals import CANONICAL_SIGNALS
@@ -108,30 +120,92 @@ _MEMBERSHIP_REQUEST_DETAIL_EVENTS = {
     "organization_membership_rfi_replied",
 }
 
+# Building blocks, one per context helper below, so each concept has one name everywhere.
+# Flat variables cover what conditions compare and what templates cannot derive (URLs);
+# anything else is reachable through the objects, e.g. {{ organization.website }}.
+def _user_template_variables(username_description: str) -> dict[str, str]:
+    return {"username": username_description, "user_url": "Profile page URL of that user."}
+
+
 _ACCOUNT_DELETION_TEMPLATE_VARIABLES = {
-    # PRIVACY-RESTRICTED: This event exposes account_deletion_username (a plain username)
+    # PRIVACY-RESTRICTED: This event exposes username (a plain username)
     # alongside a deletion intent signal. Route this event ONLY to a restricted
     # privacy/admin Mattermost channel. Do NOT route it to general #ops or
     # community-visible channels; doing so constitutes an unauthorized disclosure.
-    "account_deletion_request": "AccountDeletionRequest object or equivalent.",
+    "account_deletion_request": "AccountDeletionRequest object.",
     "account_deletion_request_id": "Deletion request primary key.",
-    "account_deletion_username": "Username that requested deletion. PRIVATE — see channel routing note above.",
-    "account_deletion_status": "Deletion request status.",
+    **_user_template_variables("Username that requested deletion. PRIVATE: route only to a restricted channel."),
+    "account_deletion_status": "Deletion request status (example: pending_review).",
     "account_deletion_manual_review_required": "Whether manual review is required.",
-    "account_deletion_blocker_codes": "Blocker-code list for manual review.",
-    "account_deletion_blocker_codes_csv": "Comma-separated blocker codes.",
+    "account_deletion_blocker_codes": "Blocker codes for manual review (example: {{ account_deletion_blocker_codes|join:', ' }}).",
+}
+
+_ORGANIZATION_TEMPLATE_VARIABLES = {
+    "organization": "Organization object (example: {{ organization.website }}).",
+    "organization_id": "Organization primary key.",
+    "organization_name": "Organization name.",
+    "organization_url": "Organization page URL.",
+    "representative": "Username of the organization's representative (empty when unclaimed).",
+}
+
+_MEMBERSHIP_TYPE_TEMPLATE_VARIABLES = {
+    "membership_type": "MembershipType object (example: {{ membership_type.annual_dues_usd }}).",
+    "membership_type_code": "Membership type code (example: gold).",
+    "membership_type_name": "Membership type display name.",
+    "membership_type_category": "Membership type category (example: sponsorship).",
+}
+
+_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES = {
+    "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
+    "membership_request_id": "Membership request primary key.",
+    "membership_request_url": "Membership request page URL.",
+    "membership_target_kind": "Target kind (user or organization).",
+    **_MEMBERSHIP_TYPE_TEMPLATE_VARIABLES,
+}
+
+_USER_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES = {
+    **_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    **_user_template_variables("Requested username."),
+}
+
+# Once the organization is deleted, only organization_name (its snapshot) remains.
+_ORGANIZATION_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES = {
+    **_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    **_ORGANIZATION_TEMPLATE_VARIABLES,
 }
 
 _SPONSORSHIP_TEMPLATE_VARIABLES = {
-    "membership": "Membership object (example: {{ membership.target_organization.pk }}).",
-    "organization_id": "Sponsor organization primary key.",
-    "organization_name": "Sponsor organization name.",
-    "representative": "Username of the organization's representative (empty when unclaimed).",
-    "membership_type_code": "Sponsorship level code (example: gold).",
-    "membership_type_name": "Sponsorship level display name.",
+    "membership": "Membership object (example: {{ membership.expires_at|date:'Y-m-d' }}).",
+    **_ORGANIZATION_TEMPLATE_VARIABLES,
+    **_MEMBERSHIP_TYPE_TEMPLATE_VARIABLES,
     "expires_at": "Expiry datetime object.",
     "dues_usd": "Annual dues the sponsor pays, after any waiver.",
     "sponsor_notified": "True when the sponsor was emailed about it.",
+}
+
+_ELECTION_TEMPLATE_VARIABLES = {
+    "election": "Election object (example: {{ election.name }}, {{ election.pk }}).",
+    "election_id": "Election primary key.",
+    "election_name": "Election display name.",
+    "election_end_datetime": "Election end datetime object (example: {{ election_end_datetime|date:'c' }}).",
+    "election_genesis_hash": "Election genesis chain hash.",
+    "election_url": "Election page URL.",
+    "election_vote_url": "Voting page URL.",
+}
+
+_COUNTRY_CHANGE_TEMPLATE_VARIABLES = {
+    "old_country": "Previous ISO country code.",
+    "new_country": "New ISO country code.",
+}
+
+_USER_COUNTRY_CHANGE_TEMPLATE_VARIABLES = {
+    **_user_template_variables("Username of the user whose country changed."),
+    **_COUNTRY_CHANGE_TEMPLATE_VARIABLES,
+}
+
+_ORGANIZATION_COUNTRY_CHANGE_TEMPLATE_VARIABLES = {
+    **_ORGANIZATION_TEMPLATE_VARIABLES,
+    **_COUNTRY_CHANGE_TEMPLATE_VARIABLES,
 }
 
 _ACCOUNT_DELETION_EVENT_TEXT = {
@@ -179,132 +253,42 @@ _EVENT_TEMPLATE_VARIABLES: dict[str, dict[str, str]] = {
         "account_invitation_id": "Account invitation primary key.",
         "account_invitation_email": "Invitation email address.",
         "account_invitation_full_name": "Invitation full name.",
-        "account_invitation_accepted_username": "Accepted username when known.",
-        "account_invitation_accepted_at": "Accepted timestamp object.",
-        "account_invitation_accepted_at_iso": "Accepted timestamp as an ISO string.",
+        **_user_template_variables("Accepted username when known."),
+        "account_invitation_accepted_at": "Accepted datetime object.",
         "account_invitation_matched_usernames": "Matched FreeIPA usernames list.",
-        "account_invitation_matched_usernames_csv": "Comma-separated matched usernames.",
-        "account_invitation_organization_id": "Linked organization primary key when present.",
-        "account_invitation_organization_name": "Linked organization display name when present.",
+        # Present only when the invitation was sent for an organization.
+        **_ORGANIZATION_TEMPLATE_VARIABLES,
     },
-    "election_opened": {
-        "election": "Election object (example: {{ election.name }}, {{ election.pk }}).",
-        "election_id": "Election primary key.",
-        "election_name": "Election display name.",
-        "election_end_datetime": "Election end datetime object.",
-        "election_end_datetime_iso": "Election end datetime ISO string.",
-        "election_genesis_hash": "Election genesis chain hash.",
-    },
+    "election_opened": _ELECTION_TEMPLATE_VARIABLES,
     "election_closed": {
-        "election": "Election object (example: {{ election.name }}, {{ election.pk }}).",
-        "election_id": "Election primary key.",
-        "election_name": "Election display name.",
-        "election_end_datetime": "Election end datetime object.",
-        "election_end_datetime_iso": "Election end datetime ISO string.",
-        "election_genesis_hash": "Election genesis chain hash.",
+        **_ELECTION_TEMPLATE_VARIABLES,
         "election_final_chain_hash": "Final chain hash for the closed election.",
     },
     "election_tallied": {
-        "election": "Election object (example: {{ election.name }}, {{ election.pk }}).",
-        "election_id": "Election primary key.",
-        "election_name": "Election display name.",
-        "election_end_datetime": "Election end datetime object.",
-        "election_end_datetime_iso": "Election end datetime ISO string.",
-        "election_genesis_hash": "Election genesis chain hash.",
-        "election_winners": "List of winner usernames from tally_result.elected.",
-        "election_winners_csv": "Comma-separated winner usernames.",
+        **_ELECTION_TEMPLATE_VARIABLES,
+        "election_winners": "Winner usernames (example: {{ election_winners|join:', ' }}).",
     },
     "election_deadline_extended": {
-        "election": "Election object (example: {{ election.name }}, {{ election.pk }}).",
-        "election_id": "Election primary key.",
-        "election_name": "Election display name.",
-        "election_end_datetime": "Election end datetime object.",
-        "election_end_datetime_iso": "Election end datetime ISO string.",
-        "election_genesis_hash": "Election genesis chain hash.",
+        **_ELECTION_TEMPLATE_VARIABLES,
         "previous_end_datetime": "Previous election deadline (datetime).",
         "new_end_datetime": "New election deadline (datetime).",
     },
-    "election_quorum_met": {
-        "election": "Election object (example: {{ election.name }}, {{ election.pk }}).",
-        "election_id": "Election primary key.",
-        "election_name": "Election display name.",
-        "election_end_datetime": "Election end datetime object.",
-        "election_end_datetime_iso": "Election end datetime ISO string.",
-        "election_genesis_hash": "Election genesis chain hash.",
-    },
-    "membership_request_submitted": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-    },
-    "membership_request_approved": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-    },
-    "membership_request_rejected": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-    },
-    "membership_request_rescinded": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-    },
-    "membership_rfi_sent": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-    },
-    "membership_rfi_replied": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-    },
+    "election_quorum_met": _ELECTION_TEMPLATE_VARIABLES,
+    "membership_request_submitted": _USER_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "membership_request_approved": _USER_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "membership_request_rejected": _USER_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "membership_request_rescinded": _USER_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "membership_rfi_sent": _USER_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "membership_rfi_replied": _USER_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
     "membership_expiring_soon": {
-        "count": "Number of queued notifications from the expiration job.",
-        "membership_type": "Membership type selector used by the job (for current jobs: all).",
+        "count": "Number of members emailed about an expiring membership, across all types.",
     },
     "membership_expired": {
-        "count": "Number of expired memberships cleaned up by the job.",
-        "membership_type": "Membership type selector used by the cleanup job (for current jobs: all).",
+        "count": "Number of expired memberships and sponsorships removed, across all types.",
     },
     "membership_self_terminated": {
-        "username": "Username of the member who self-terminated.",
-        "membership_type": "MembershipType-like object when available.",
-        "membership_type_code": "Membership type code.",
-        "membership_type_name": "Membership type display name.",
+        **_user_template_variables("Username of the member who self-terminated."),
+        **_MEMBERSHIP_TYPE_TEMPLATE_VARIABLES,
         "termination_feedback_id": "MembershipTerminationFeedback primary key (see it in the Django admin).",
         "termination_reason_category": "Reason the member chose: privacy, no_longer_needed, duplicate or other.",
     },
@@ -314,78 +298,12 @@ _EVENT_TEMPLATE_VARIABLES: dict[str, dict[str, str]] = {
     "account_deletion_rejected": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
     "account_deletion_cancelled": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
     "account_deletion_completed": _ACCOUNT_DELETION_TEMPLATE_VARIABLES,
-    "organization_membership_request_submitted": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-        "organization_id": "Target organization primary key.",
-        "organization_display_name": "Target organization display name.",
-    },
-    "organization_membership_request_approved": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-        "organization_id": "Target organization primary key.",
-        "organization_display_name": "Target organization display name.",
-    },
-    "organization_membership_request_rejected": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-        "organization_id": "Target organization primary key.",
-        "organization_display_name": "Target organization display name.",
-    },
-    "organization_membership_request_rescinded": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-        "organization_id": "Target organization primary key.",
-        "organization_display_name": "Target organization display name.",
-    },
-    "organization_membership_rfi_sent": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-        "organization_id": "Target organization primary key.",
-        "organization_display_name": "Target organization display name.",
-    },
-    "organization_membership_rfi_replied": {
-        "membership_request": "MembershipRequest object (example: {{ membership_request.pk }}).",
-        "membership_request_id": "Membership request primary key.",
-        "membership_type_code": "Membership type code (example: sponsorship).",
-        "membership_type_name": "Membership type display name.",
-        "membership_target_kind": "Target kind (user or organization).",
-        "requested_username": "Requested username for user-target requests.",
-        "requested_organization_id": "Target organization ID for org-target requests.",
-        "requested_organization_name": "Target organization display name for org-target requests.",
-        "organization_id": "Target organization primary key.",
-        "organization_display_name": "Target organization display name.",
-    },
+    "organization_membership_request_submitted": _ORGANIZATION_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "organization_membership_request_approved": _ORGANIZATION_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "organization_membership_request_rejected": _ORGANIZATION_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "organization_membership_request_rescinded": _ORGANIZATION_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "organization_membership_rfi_sent": _ORGANIZATION_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
+    "organization_membership_rfi_replied": _ORGANIZATION_MEMBERSHIP_REQUEST_TEMPLATE_VARIABLES,
     "organization_membership_expiring_soon": {
         **_SPONSORSHIP_TEMPLATE_VARIABLES,
         "days": "Days until the sponsorship expires.",
@@ -402,63 +320,144 @@ _EVENT_TEMPLATE_VARIABLES: dict[str, dict[str, str]] = {
             "{{ renewal.term_ended_at|date:'Y-m-d' }}{% endfor %})."
         ),
     },
-    "organization_claimed": {
-        "organization": "Organization object (example: {{ organization.name }}, {{ organization.pk }}).",
-    },
-    "organization_created": {
-        "organization": "Organization object (example: {{ organization.name }}, {{ organization.pk }}).",
-    },
-    "user_country_changed": {
-        "username": "Username of the user whose country changed.",
-        "old_country": "Previous ISO country code.",
-        "new_country": "New ISO country code.",
-        "actor": "Username of user who made the change.",
-    },
-    "user_embargoed_country_changed": {
-        "username": "Username of the user whose country changed.",
-        "old_country": "Previous ISO country code.",
-        "new_country": "New ISO country code.",
-        "actor": "Username of user who made the change.",
-    },
-    "organization_country_changed": {
-        "organization": "Organization object (example: {{ organization.name }}, {{ organization.pk }}).",
-        "old_country": "Previous ISO country code.",
-        "new_country": "New ISO country code.",
-        "actor": "Username of user who made the change.",
-    },
-    "organization_embargoed_country_changed": {
-        "organization": "Organization object (example: {{ organization.name }}, {{ organization.pk }}).",
-        "old_country": "Previous ISO country code.",
-        "new_country": "New ISO country code.",
-        "actor": "Username of user who made the change.",
-    },
+    "organization_claimed": _ORGANIZATION_TEMPLATE_VARIABLES,
+    "organization_created": _ORGANIZATION_TEMPLATE_VARIABLES,
+    "user_country_changed": _USER_COUNTRY_CHANGE_TEMPLATE_VARIABLES,
+    "user_embargoed_country_changed": _USER_COUNTRY_CHANGE_TEMPLATE_VARIABLES,
+    "organization_country_changed": _ORGANIZATION_COUNTRY_CHANGE_TEMPLATE_VARIABLES,
+    "organization_embargoed_country_changed": _ORGANIZATION_COUNTRY_CHANGE_TEMPLATE_VARIABLES,
 }
 
 
-def template_variable_reference_text(event_keys: list[str] | None = None) -> str:
-    selected_events = [key for key in sorted(set(event_keys or [])) if key in CANONICAL_SIGNALS]
+_CONDITION_TAG_MARKERS = ("{%", "%}", "{{", "}}", "{#", "#}")
 
-    lines: list[str] = []
-    lines.append("Common template variables:")
-    for variable_name, description in _COMMON_TEMPLATE_VARIABLES.items():
-        lines.append(f"- {variable_name}: {description}")
+# Resolved by the template context itself, so they are never "unknown variables".
+_TEMPLATE_CONSTANTS = {"True", "False", "None"}
 
-    if not selected_events:
-        lines.append("")
-        lines.append("Select one or more events to see event-specific variables here.")
-        return "\n".join(lines)
+# Variables with a closed set of values, so a misspelled literal can be caught on save.
+_CONDITION_VALUE_SOURCES: dict[str, Callable[[], Iterable[str]]] = {
+    "membership_type_code": lambda: MembershipType.objects.values_list("code", flat=True),
+    "membership_type_category": lambda: MembershipTypeCategory.objects.values_list("name", flat=True),
+    "membership_target_kind": lambda: [kind.value for kind in MembershipTargetKind],
+    "termination_reason_category": lambda: MembershipTerminationFeedback.ReasonCategory.values,
+    "account_deletion_status": lambda: AccountDeletionRequest.Status.values,
+}
 
-    for event_key in selected_events:
-        lines.append("")
-        lines.append(f"Event: {event_key}")
-        event_variables = _EVENT_TEMPLATE_VARIABLES.get(event_key, {})
-        if not event_variables:
-            lines.append("- (no additional event-specific variables)")
+# An object never equals a constant, so point at the flat variable to compare instead.
+_CONDITION_OBJECT_ALTERNATIVES = {
+    "organization": "organization_id or organization_name",
+    "membership_type": "membership_type_code",
+    "membership_request": "membership_request_id",
+    "election": "election_id or election_name",
+    "account_invitation": "account_invitation_id",
+    "account_deletion_request": "account_deletion_request_id",
+}
+
+
+def _condition_template(condition: str) -> Template:
+    """Compile an endpoint condition as the only test of an {% if %} tag."""
+    if any(marker in condition for marker in _CONDITION_TAG_MARKERS):
+        raise TemplateSyntaxError("Enter only the condition, without {% %}, {{ }} or {# #} tags.")
+    # Tags cannot span lines: a multi-line condition would compile as literal text that always renders.
+    return Template(f"{{% if {' '.join(condition.splitlines())} %}}1{{% endif %}}")
+
+
+def _condition_nodes(node: TokenBase) -> Iterator[TokenBase]:
+    yield node
+    for child in (node.first, node.second):
+        if child is not None:
+            yield from _condition_nodes(child)
+
+
+def _expression_variables(expression: FilterExpression) -> Iterator[str]:
+    filter_args = [arg for _func, args in expression.filters for is_lookup, arg in args if is_lookup]
+    for candidate in (expression.var, *filter_args):
+        # String constants are already resolved to str; numbers are Variables without lookups.
+        if isinstance(candidate, Variable) and candidate.lookups is not None:
+            yield candidate.lookups[0]
+
+
+def _plain_variable(node: TokenBase) -> str | None:
+    if node.id != "literal" or node.value.filters:
+        return None
+    variable = node.value.var
+    if isinstance(variable, Variable) and variable.lookups is not None and len(variable.lookups) == 1:
+        return variable.lookups[0]
+    return None
+
+
+def _constant(node: TokenBase) -> str | int | float | None:
+    """The value of an unfiltered string or number literal."""
+    if node.id != "literal" or node.value.filters:
+        return None
+    variable = node.value.var
+    if isinstance(variable, str):
+        return str(variable)
+    if isinstance(variable, Variable) and variable.lookups is None:
+        return variable.literal
+    return None
+
+
+def condition_errors(condition: str, events: list[str]) -> list[str]:
+    """Explain why an endpoint condition would not behave as written for the selected events."""
+    try:
+        template = _condition_template(condition)
+    except TemplateSyntaxError as exc:
+        return [str(exc)]
+
+    nodes = list(_condition_nodes(template.nodelist[0].conditions_nodelists[0][0]))
+    errors: list[str] = []
+
+    event_variables = {
+        event_key: _COMMON_TEMPLATE_VARIABLES.keys() | _EVENT_TEMPLATE_VARIABLES.get(event_key, {}).keys()
+        for event_key in events
+    }
+    available_everywhere = (
+        set.intersection(*map(set, event_variables.values())) if event_variables else set(_COMMON_TEMPLATE_VARIABLES)
+    )
+    variable_names = dict.fromkeys(
+        name for node in nodes if node.id == "literal" for name in _expression_variables(node.value)
+    )
+    for name in variable_names:
+        if name in _TEMPLATE_CONSTANTS or name in available_everywhere:
             continue
-        for variable_name, description in event_variables.items():
-            lines.append(f"- {variable_name}: {description}")
+        missing_events = [event_key for event_key, names in event_variables.items() if name not in names]
+        # A variable some events lack is None for them, silently making the condition false.
+        if 0 < len(missing_events) < len(events):
+            errors.append(
+                f"'{name}' is not available for {', '.join(missing_events)}. Move those events to a separate webhook."
+            )
+            continue
+        error = f"'{name}' is not a template variable of the selected events."
+        if suggestions := difflib.get_close_matches(name, available_everywhere, n=1):
+            error += f" Did you mean '{suggestions[0]}'?"
+        errors.append(error)
 
-    return "\n".join(lines)
+    for node in nodes:
+        if node.id not in {"==", "!=", "in", "not in"}:
+            continue
+        for variable_side, other_side in ((node.first, node.second), (node.second, node.first)):
+            name = _plain_variable(variable_side)
+            if name in _CONDITION_OBJECT_ALTERNATIVES and _constant(other_side) is not None:
+                errors.append(
+                    f"{name} is an object and never equals a constant. "
+                    f"Compare {_CONDITION_OBJECT_ALTERNATIVES[name]} instead."
+                )
+                continue
+            if name not in _CONDITION_VALUE_SOURCES:
+                continue
+            if node.id in {"in", "not in"}:
+                # Templates have no list literals, so "in" against a string matches substrings.
+                errors.append(f"Compare {name} with == or != and join alternatives with 'or'.")
+                continue
+            value = _constant(other_side)
+            if not isinstance(value, str):
+                continue
+            valid_values = sorted(_CONDITION_VALUE_SOURCES[name]())
+            if value not in valid_values:
+                errors.append(f"'{value}' is not a valid {name}. Valid values: {', '.join(valid_values)}.")
+
+    return errors
 
 
 def _url_hash(url: str) -> str:
@@ -501,6 +500,10 @@ def _membership_request_detail_url(membership_request_id: int) -> str:
     )
 
 
+def _election_detail_url(election_id: int) -> str:
+    return build_public_absolute_url(reverse("election-detail", args=[election_id]), on_missing="relative")
+
+
 def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
     if event_key == "account_invitation_accepted":
         return build_public_absolute_url(reverse("account-invitations"), on_missing="relative")
@@ -508,7 +511,7 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
     if event_key.startswith("election_"):
         election = kwargs.get("election")
         if election is not None:
-            return build_public_absolute_url(reverse("election-detail", args=[election.pk]), on_missing="relative")
+            return _election_detail_url(election.pk)
         return build_public_absolute_url(reverse("elections"), on_missing="relative")
 
     if event_key in {"organization_claimed", "organization_created"}:
@@ -519,12 +522,6 @@ def _event_link(event_key: str, kwargs: dict[str, object]) -> str:
 
     if event_key in _SPONSORSHIP_EXPIRY_EVENTS:
         return _organization_detail_url(kwargs["organization_id"])
-
-    if event_key in {"membership_expiring_soon", "membership_expired"}:
-        membership_type = str(kwargs.get("membership_type") or "").strip()
-        if membership_type:
-            return membership_extend_url(membership_type_code=membership_type)
-        return membership_requests_url()
 
     if event_key == "membership_self_terminated":
         return build_public_absolute_url(
@@ -585,17 +582,13 @@ def _membership_fields(kwargs: dict[str, object], *, org_targeted: bool) -> list
         fields.append({"title": "Request ID", "value": str(membership_request.pk), "short": True})
         fields.append({"title": "Membership type", "value": membership_request.membership_type_id, "short": True})
         if org_targeted:
-            organization_name = kwargs.get("organization_display_name") or membership_request.organization_display_name
-            fields.append({"title": "Organization", "value": organization_name, "short": True})
+            fields.append({"title": "Organization", "value": membership_request.organization_display_name, "short": True})
         else:
             fields.append({"title": "Username", "value": membership_request.requested_username, "short": True})
     else:
         count = kwargs.get("count")
-        membership_type = kwargs.get("membership_type")
         if count is not None:
             fields.append({"title": "Count", "value": str(count), "short": True})
-        if membership_type is not None:
-            fields.append({"title": "Membership type", "value": str(membership_type), "short": True})
 
     fields.append({"title": "Actor", "value": actor, "short": True})
     return fields
@@ -721,10 +714,10 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
         text = _ACCOUNT_DELETION_EVENT_TEXT.get(event_key, _event_title(event_key))
         actor = kwargs.get("actor") or "system"
         request_id = str(kwargs.get("account_deletion_request_id") or "").strip()
-        disp_username = str(kwargs.get("account_deletion_username") or "").strip()
+        disp_username = str(kwargs.get("username") or "").strip()
         status = str(kwargs.get("account_deletion_status") or "").strip()
         manual_review_required = kwargs.get("account_deletion_manual_review_required")
-        blocker_codes_csv = str(kwargs.get("account_deletion_blocker_codes_csv") or "").strip()
+        blocker_codes = kwargs.get("account_deletion_blocker_codes") or []
         fields = []
         if request_id:
             fields.append({"title": "Request ID", "value": request_id, "short": True})
@@ -734,8 +727,8 @@ def _default_payload(event_key: str, kwargs: dict[str, object]) -> dict[str, obj
             fields.append({"title": "Status", "value": status, "short": True})
         if manual_review_required is not None:
             fields.append({"title": "Manual review", "value": str(bool(manual_review_required)), "short": True})
-        if blocker_codes_csv:
-            fields.append({"title": "Blockers", "value": blocker_codes_csv, "short": False})
+        if blocker_codes:
+            fields.append({"title": "Blockers", "value": ", ".join(blocker_codes), "short": False})
         fields.append({"title": "Actor", "value": actor, "short": True})
     elif event_key in {"organization_claimed", "organization_created"}:
         text = "Organization claimed" if event_key == "organization_claimed" else "Organization created"
@@ -885,22 +878,44 @@ def _non_empty(values: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in values.items() if value not in (None, "", [])}
 
 
+def _organization_template_context(organization: Organization) -> dict[str, object]:
+    return {
+        "organization": organization,
+        "organization_id": organization.pk,
+        "organization_name": organization.name,
+        "organization_url": _organization_detail_url(organization.pk),
+        "representative": organization.representative,
+    }
+
+
+def _membership_type_template_context(membership_type: MembershipType) -> dict[str, object]:
+    return {
+        "membership_type": membership_type,
+        "membership_type_code": membership_type.code,
+        "membership_type_name": membership_type.name,
+        "membership_type_category": membership_type.category_id,
+    }
+
+
 def _membership_request_template_context(kwargs: dict[str, object]) -> dict[str, object]:
     membership_request = kwargs.get("membership_request")
     if membership_request is None:
         return {}
 
-    return _non_empty(
-        {
-            "membership_request_id": membership_request.pk,
-            "membership_type_code": membership_request.membership_type.code,
-            "membership_type_name": membership_request.membership_type.name,
-            "membership_target_kind": membership_request.target_kind.value,
-            "requested_username": membership_request.requested_username,
-            "requested_organization_id": membership_request.requested_organization_id,
-            "requested_organization_name": membership_request.organization_display_name,
-        }
-    )
+    context = {
+        "membership_request_id": membership_request.pk,
+        "membership_request_url": _membership_request_detail_url(membership_request.pk),
+        "membership_target_kind": membership_request.target_kind.value,
+        **_membership_type_template_context(membership_request.membership_type),
+    }
+    if not membership_request.is_organization_target:
+        return context | {"username": membership_request.requested_username}
+
+    organization = membership_request.requested_organization
+    if organization is None:
+        # A deleted organization leaves only the name snapshotted on the request.
+        return context | {"organization_name": membership_request.organization_display_name}
+    return context | _organization_template_context(organization)
 
 
 def _election_template_context(event_key: str, kwargs: dict[str, object]) -> dict[str, object]:
@@ -914,16 +929,15 @@ def _election_template_context(event_key: str, kwargs: dict[str, object]) -> dic
         "election_genesis_hash": genesis_hash,
         "election_name": election.name,
         "election_end_datetime": election.end_datetime,
-        "election_end_datetime_iso": election.end_datetime.isoformat(),
+        "election_url": _election_detail_url(election.pk),
+        "election_vote_url": election_vote_url(request=None, election=election),
     }
     if event_key == "election_closed":
         context["election_final_chain_hash"] = (
             Ballot.objects.latest_chain_head_hash_for_election(election=election) or genesis_hash
         )
     if event_key == "election_tallied":
-        winners = _extract_tallied_winner_usernames(election.tally_result)
-        context["election_winners"] = winners
-        context["election_winners_csv"] = ", ".join(winners)
+        context["election_winners"] = _extract_tallied_winner_usernames(election.tally_result)
     return context
 
 
@@ -932,56 +946,49 @@ def _build_template_context(event_key: str, kwargs: dict[str, object]) -> dict[s
     context.update(_membership_request_template_context(kwargs))
     context.update(_election_template_context(event_key, kwargs))
 
+    if (organization := kwargs.get("organization")) is not None:
+        context |= _organization_template_context(organization)
+
     account_invitation = kwargs.get("account_invitation")
     if account_invitation is not None:
-        accepted_at = account_invitation.accepted_at
-        organization = account_invitation.organization
         context |= _non_empty(
             {
                 "account_invitation_id": account_invitation.pk,
                 "account_invitation_email": account_invitation.email,
                 "account_invitation_full_name": account_invitation.full_name,
-                "account_invitation_accepted_username": account_invitation.accepted_username,
-                "account_invitation_accepted_at": accepted_at,
-                "account_invitation_accepted_at_iso": accepted_at.isoformat() if accepted_at else None,
+                "username": account_invitation.accepted_username,
+                "account_invitation_accepted_at": account_invitation.accepted_at,
                 "account_invitation_matched_usernames": account_invitation.freeipa_matched_usernames,
-                "account_invitation_matched_usernames_csv": ", ".join(account_invitation.freeipa_matched_usernames),
-                "account_invitation_organization_id": account_invitation.organization_id,
-                "account_invitation_organization_name": organization.name if organization is not None else None,
             }
         )
+        if account_invitation.organization is not None:
+            context |= _organization_template_context(account_invitation.organization)
 
     # Sponsorship expiry events: read off the instance, since an expired one's row is already deleted.
     membership = kwargs.get("membership")
     if membership is not None:
-        organization = membership.target_organization
         context |= {
-            "organization_id": organization.pk,
-            "organization_name": organization.name,
-            "representative": organization.representative,
-            "membership_type_code": membership.membership_type.code,
-            "membership_type_name": membership.membership_type.name,
+            **_organization_template_context(membership.target_organization),
+            **_membership_type_template_context(membership.membership_type),
             "expires_at": membership.expires_at,
             "dues_usd": effective_dues_usd(membership),
         }
 
-    # Count-only events (expiring soon, expired) pass a type code string rather than the model.
     membership_type = kwargs.get("membership_type")
-    if membership_type is not None and not isinstance(membership_type, str):
-        context |= _non_empty({"membership_type_code": membership_type.code, "membership_type_name": membership_type.name})
+    if membership_type is not None:
+        context |= _membership_type_template_context(membership_type)
 
     account_deletion_request = kwargs.get("account_deletion_request")
     if account_deletion_request is not None:
         context |= _non_empty(
             {
                 "account_deletion_request_id": account_deletion_request.pk,
-                "account_deletion_username": account_deletion_request.username,
+                "username": account_deletion_request.username,
                 "account_deletion_status": account_deletion_request.status,
             }
         )
         context["account_deletion_manual_review_required"] = account_deletion_request.manual_review_required
         context["account_deletion_blocker_codes"] = account_deletion_request.blocker_codes
-        context["account_deletion_blocker_codes_csv"] = ", ".join(account_deletion_request.blocker_codes)
 
     # Expose only the id and category: the object's free-text reason must not reach
     # Mattermost, which would keep it past the privacy cleanup window.
@@ -989,6 +996,12 @@ def _build_template_context(event_key: str, kwargs: dict[str, object]) -> dict[s
     if termination_feedback is not None:
         context["termination_feedback_id"] = termination_feedback.pk
         context["termination_reason_category"] = termination_feedback.reason_category
+
+    # Set here once: username comes from a request, a deletion, an invitation or the signal itself.
+    if username := context.get("username"):
+        context["user_url"] = build_public_absolute_url(
+            reverse("user-profile", kwargs={"username": username}), on_missing="relative"
+        )
 
     return context
 
@@ -1224,6 +1237,12 @@ def dispatch_mattermost_event(event_key: str, /, **kwargs: object) -> None:
                     )
 
                 if event_key not in endpoint.events:
+                    continue
+
+                # Raises into the handler below, so a broken condition skips only this endpoint, logged.
+                if endpoint.condition and not _condition_template(endpoint.condition).render(
+                    Context(_build_template_context(event_key, dict(kwargs)))
+                ):
                     continue
 
                 payload = _build_payload(endpoint, event_key, dict(kwargs))

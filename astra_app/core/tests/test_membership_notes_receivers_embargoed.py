@@ -172,7 +172,6 @@ class MembershipNotesReceiversEmbargoedTests(TestCase):
                 membership_request=request,
                 actor="committee-admin",
                 organization_id=organization.pk,
-                organization_display_name=organization.name,
             )
         finally:
             clear_current_viewer_username()
@@ -255,7 +254,6 @@ class MembershipNotesReceiversEmbargoedTests(TestCase):
                 membership_request=request,
                 actor="alice",
                 organization_id=organization.pk,
-                organization_display_name=organization.name,
             )
 
         notes = list(Note.objects.filter(membership_request=request, username=CUSTOS).order_by("pk"))
@@ -285,7 +283,6 @@ class MembershipNotesReceiversEmbargoedTests(TestCase):
                 membership_request=request,
                 actor="alice",
                 organization_id=organization.pk,
-                organization_display_name=organization.name,
             )
 
         notes = list(Note.objects.filter(membership_request=request, username=CUSTOS).order_by("pk"))
@@ -306,7 +303,6 @@ class MembershipNotesReceiversEmbargoedTests(TestCase):
                 membership_request=request,
                 actor="alice",
                 organization_id=organization.pk,
-                organization_display_name=organization.name,
             )
 
         get_mock.assert_not_called()
@@ -323,7 +319,6 @@ class MembershipNotesReceiversEmbargoedTests(TestCase):
                 membership_request=request,
                 actor="alice",
                 organization_id=organization.pk,
-                organization_display_name=organization.name,
             )
 
         self.assertEqual(Note.objects.filter(membership_request=request, username=CUSTOS).count(), 0)
@@ -345,7 +340,6 @@ class MembershipNotesReceiversEmbargoedTests(TestCase):
                 membership_request=request,
                 actor="alice",
                 organization_id=organization.pk,
-                organization_display_name=organization.name,
             )
 
         self.assertEqual(Note.objects.filter(membership_request=request, username=CUSTOS).count(), 0)
@@ -370,7 +364,6 @@ class MembershipNotesReceiversEmbargoedTests(TestCase):
                 membership_request=request,
                 actor="alice",
                 organization_id=organization.pk,
-                organization_display_name=organization.name,
             )
 
         self.assertEqual(Note.objects.filter(membership_request=request, username=CUSTOS).count(), 0)
@@ -387,7 +380,6 @@ class MembershipNotesReceiversEmbargoedTests(TestCase):
                 membership_request=request,
                 actor="alice",
                 organization_id=None,
-                organization_display_name="Example Org",
             )
 
         self.assertEqual(Note.objects.filter(membership_request=request, username=CUSTOS).count(), 0)
