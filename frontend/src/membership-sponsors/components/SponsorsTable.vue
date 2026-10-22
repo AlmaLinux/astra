@@ -144,11 +144,6 @@ function exportExcel(): void {
   download("sponsors.xlsx", buildCsv(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 }
 
-function exportPdf(): void {
-  const text = buildCsv();
-  download("sponsors.pdf", text, "application/pdf");
-}
-
 function printTable(): void {
   window.print();
 }
@@ -184,7 +179,6 @@ defineSlots<{
         <button data-export-copy type="button" class="btn btn-default" title="Copy" @click="copyRows">Copy</button>
         <button data-export-csv type="button" class="btn btn-default" title="CSV" @click="exportCsv">CSV</button>
         <button data-export-excel type="button" class="btn btn-default" title="Excel" @click="exportExcel">Excel</button>
-        <button data-export-pdf type="button" class="btn btn-default" title="PDF" @click="exportPdf">PDF</button>
         <button data-export-print type="button" class="btn btn-default" title="Print" @click="printTable">Print</button>
       </div>
       <span v-if="copyError" class="small text-danger ml-2" role="alert">{{ copyError }}</span>

@@ -119,7 +119,7 @@ describe("MembershipSponsorsPage", () => {
     expect(execCommand).toHaveBeenCalledWith("copy");
     expect(wrapper.find('[data-export-csv]').exists()).toBe(true);
     expect(wrapper.find('[data-export-excel]').exists()).toBe(true);
-    expect(wrapper.find('[data-export-pdf]').exists()).toBe(true);
+    expect(wrapper.find('[data-export-pdf]').exists()).toBe(false);
     expect(wrapper.find('[data-export-print]').exists()).toBe(true);
     expect(wrapper.find('[data-colvis-toggle]').exists()).toBe(true);
   });
