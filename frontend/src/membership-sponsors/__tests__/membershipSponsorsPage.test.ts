@@ -43,6 +43,8 @@ describe("MembershipSponsorsPage", () => {
                 display_label: "Representative User (repuser)",
               },
               sponsorship_level: "Gold Sponsor",
+              dues_usd: 20000,
+              dues_reason: null,
               days_left: 5,
               is_expiring_soon: true,
               expires_display: "2026-04-28 (5 days left)",
@@ -120,5 +122,53 @@ describe("MembershipSponsorsPage", () => {
     expect(wrapper.find('[data-export-pdf]').exists()).toBe(true);
     expect(wrapper.find('[data-export-print]').exists()).toBe(true);
     expect(wrapper.find('[data-colvis-toggle]').exists()).toBe(true);
+  });
+
+  it("shows and exports the dues amount and adjustment reason", async () => {
+    const sponsorRow = {
+      organization: { id: 42, name: "Sponsor Org" },
+      representative: { username: "", full_name: "", display_label: "" },
+      sponsorship_level: "Gold Sponsor",
+      days_left: 5,
+      is_expiring_soon: false,
+      expires_display: "2026-04-28 (5 days left)",
+      expires_at_order: "2026-04-28 23:59:59",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      draw: 1,
+      recordsTotal: 2,
+      recordsFiltered: 2,
+      data: [
+        { ...sponsorRow, membership_id: 1, dues_usd: 5000, dues_reason: "Hosting \"in-kind\"" },
+        { ...sponsorRow, membership_id: 2, dues_usd: 20000, dues_reason: null },
+      ],
+    }))));
+    // Copy shares the CSV builder with the file exports, and jsdom can't create blob URLs.
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+
+    const wrapper = mount(MembershipSponsorsPage, { props: { bootstrap } });
+    await flushPromises();
+    await flushPromises();
+
+    const headers = wrapper.findAll("thead th").map((th) => th.text());
+    expect(headers.indexOf("Dues")).toBe(headers.indexOf("Sponsorship Level") + 1);
+    const [discounted, fullPrice] = wrapper.findAll("[data-sponsor-dues]");
+    expect(discounted.text()).toContain("$5,000");
+    expect(discounted.get("[data-sponsor-dues-reason]").text()).toBe('Hosting "in-kind"');
+    expect(fullPrice.text()).toBe("$20,000");
+    expect(fullPrice.find("[data-sponsor-dues-reason]").exists()).toBe(false);
+
+    await wrapper.get("[data-export-copy]").trigger("click");
+    const lines = String(writeText.mock.calls[0]?.[0]).split("\n");
+    expect(lines[0]).toBe('"Organization","Representative","Sponsorship Level","Amount (USD)","Amount Adjustment Reason","Expires"');
+    expect(lines[1]).toBe('"Sponsor Org","-","Gold Sponsor","5000","Hosting ""in-kind""","2026-04-28 (5 days left)"');
+    expect(lines[2]).toBe('"Sponsor Org","-","Gold Sponsor","20000","","2026-04-28 (5 days left)"');
+
+    // A hidden Dues column leaves the table and the export.
+    await wrapper.get("#sponsors-col-dues").trigger("change");
+    expect(wrapper.find("[data-sponsor-dues]").exists()).toBe(false);
+    await wrapper.get("[data-export-copy]").trigger("click");
+    expect(String(writeText.mock.calls[1]?.[0]).split("\n")[0]).toBe('"Organization","Representative","Sponsorship Level","Expires"');
   });
 });

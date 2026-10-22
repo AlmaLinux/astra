@@ -17,7 +17,7 @@ from core.logging_extras import current_exception_log_fields
 from core.membership import terminate_membership
 from core.membership_constants import MembershipCategoryCode
 from core.membership_dues import change_membership_dues, effective_dues_usd, parse_dues_usd, payable_dues_usd
-from core.models import Membership, MembershipLog
+from core.models import Membership, MembershipLog, Note
 from core.permissions import (
     ASTRA_CHANGE_MEMBERSHIP,
     ASTRA_DELETE_MEMBERSHIP,
@@ -93,6 +93,26 @@ def _load_representative_full_names(usernames: set[str]) -> dict[str, str]:
     return representative_full_names
 
 
+def _load_dues_reasons(memberships: list[Membership]) -> dict[int, str | None]:
+    """The committee's reason for each adjusted sponsorship's dues, by membership pk.
+
+    Only dues_changed notes record the reason, and a renewal carries the waiver without
+    one, so search every request of the organization, not just the current term's.
+    """
+    adjusted = [membership for membership in memberships if membership.dues_usd is not None]
+    notes = (
+        Note.objects.filter(
+            action__type="dues_changed",
+            membership_request__requested_organization_id__in={m.target_organization_id for m in adjusted},
+        )
+        .order_by("timestamp", "pk")
+        .values_list("membership_request__requested_organization_id", "action__membership_type", "content")
+    )
+    # Ascending order, so the latest note for each organization and tier wins.
+    reasons = {(organization_id, membership_type_code): content for organization_id, membership_type_code, content in notes}
+    return {m.pk: reasons.get((m.target_organization_id, m.membership_type_id)) for m in adjusted}
+
+
 def _build_membership_sponsor_rows(*, q: str) -> list[dict[str, object]]:
     active_sponsorships = _load_active_sponsorship_memberships()
     representative_usernames = {
@@ -101,6 +121,7 @@ def _build_membership_sponsor_rows(*, q: str) -> list[dict[str, object]]:
         if membership.target_organization is not None and membership.target_organization.representative
     }
     representative_full_names = _load_representative_full_names(representative_usernames)
+    dues_reasons = _load_dues_reasons(active_sponsorships)
 
     now = timezone.now()
     warning_days = settings.MEMBERSHIP_EXPIRING_SOON_DAYS
@@ -133,6 +154,8 @@ def _build_membership_sponsor_rows(*, q: str) -> list[dict[str, object]]:
                 "display_label": representative_label,
             },
             "sponsorship_level": membership.membership_type.name,
+            "dues_usd": effective_dues_usd(membership),
+            "dues_reason": dues_reasons.get(membership.pk),
             "days_left": days_left,
             "is_expiring_soon": is_expiring_soon,
             "expires_display": expires_display,

@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 
 import { copyToClipboard } from "../../shared/clipboard";
 import TableBase from "../../shared/components/TableBase.vue";
+import { formatUsd } from "../../shared/membershipPresentation";
 import { fillUrlTemplate } from "../../shared/urlTemplates";
 import type { SponsorRow } from "../types";
 
@@ -30,7 +31,7 @@ const copyError = ref("");
 const hasSearchValue = computed(() => searchText.value.length > 0);
 
 interface ColumnState {
-  key: "organization" | "representative" | "sponsorship_level" | "expires";
+  key: "organization" | "representative" | "sponsorship_level" | "dues" | "expires";
   label: string;
   visible: boolean;
 }
@@ -39,6 +40,7 @@ const columnState = ref<ColumnState[]>([
   { key: "organization", label: "Organization", visible: true },
   { key: "representative", label: "Representative", visible: true },
   { key: "sponsorship_level", label: "Sponsorship Level", visible: true },
+  { key: "dues", label: "Dues", visible: true },
   { key: "expires", label: "Expires", visible: true },
 ]);
 
@@ -92,19 +94,26 @@ function toggleColumn(key: ColumnState["key"]): void {
 
 function buildCsv(): string {
   const visibleColumns = columnState.value.filter((column) => column.visible);
-  const header = visibleColumns.map((column) => `"${column.label}"`).join(",");
+  // The dues cell splits in two so spreadsheets get the amount as a plain number.
+  const labels = visibleColumns.flatMap((column) => {
+    return column.key === "dues" ? ["Amount (USD)", "Amount Adjustment Reason"] : [column.label];
+  });
+  const header = labels.map((label) => `"${label}"`).join(",");
   const lines = props.rows.map((row) => {
-    const values = visibleColumns.map((column) => {
+    const values = visibleColumns.flatMap((column) => {
       if (column.key === "organization") {
-        return row.organization.name;
+        return [row.organization.name];
       }
       if (column.key === "representative") {
-        return row.representative.display_label || "-";
+        return [row.representative.display_label || "-"];
       }
       if (column.key === "sponsorship_level") {
-        return row.sponsorship_level;
+        return [row.sponsorship_level];
       }
-      return row.expires_display;
+      if (column.key === "dues") {
+        return [String(row.dues_usd), row.dues_reason ?? ""];
+      }
+      return [row.expires_display];
     });
     return values.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",");
   });
@@ -244,6 +253,10 @@ defineSlots<{
       </td>
       <td v-if="columnState.find((item) => item.key === 'sponsorship_level')?.visible">
         {{ asRow(row).sponsorship_level }}
+      </td>
+      <td v-if="columnState.find((item) => item.key === 'dues')?.visible" data-sponsor-dues>
+        {{ formatUsd(asRow(row).dues_usd) }}
+        <div v-if="asRow(row).dues_reason" class="small text-muted" data-sponsor-dues-reason>{{ asRow(row).dues_reason }}</div>
       </td>
       <td
         v-if="columnState.find((item) => item.key === 'expires')?.visible"

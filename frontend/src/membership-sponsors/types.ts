@@ -18,6 +18,8 @@ export interface SponsorRow {
     display_label: string;
   };
   sponsorship_level: string;
+  dues_usd: number;
+  dues_reason: string | null;
   days_left: number | null;
   is_expiring_soon: boolean;
   expires_display: string;

@@ -166,6 +166,52 @@ class MembershipSponsorsApiTests(TestCase):
         self.assertFalse(second["is_expiring_soon"])
         self.assertEqual(second["expires_at_order"], "2099-01-01 00:00:00")
 
+    def test_membership_sponsors_api_returns_dues_and_latest_adjustment_reason(self) -> None:
+        from core.membership_dues import change_membership_dues
+        from core.membership_request_workflow import create_approved_membership_request
+
+        self._grant_membership_permission()
+        self._login_as_freeipa_user("reviewer")
+        MembershipType.objects.filter(code="sponsor-standard").update(annual_dues_usd=20000)
+
+        discounted_org = Organization.objects.create(name="Discounted Org", representative="")
+        full_price_org = Organization.objects.create(name="Full Price Org", representative="")
+        for organization, days in ((discounted_org, 10), (full_price_org, 20)):
+            create_approved_membership_request(
+                actor_username="committee",
+                membership_type=MembershipType.objects.get(code="sponsor-standard"),
+                decided_at=timezone.now(),
+                target_organization=organization,
+            )
+            Membership.objects.create(
+                target_organization=organization,
+                membership_type_id="sponsor-standard",
+                expires_at=timezone.now() + datetime.timedelta(days=days),
+            )
+
+        for dues_usd, reason in ((10000, "Hosting in-kind"), (5000, "Hosting and CI in-kind")):
+            change_membership_dues(
+                membership=Membership.objects.get(target_organization=discounted_org),
+                dues_usd=dues_usd,
+                reason=reason,
+                actor_username="committee",
+            )
+
+        reviewer = self._reviewer_user(groups=[settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP])
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=reviewer):
+            response = self.client.get(
+                reverse("api-membership-sponsors"),
+                data=self._datatables_query(),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        rows = {row["organization"]["name"]: row for row in response.json()["data"]}
+        self.assertEqual(rows["Discounted Org"]["dues_usd"], 5000)
+        self.assertEqual(rows["Discounted Org"]["dues_reason"], "Hosting and CI in-kind")
+        self.assertEqual(rows["Full Price Org"]["dues_usd"], 20000)
+        self.assertIsNone(rows["Full Price Org"]["dues_reason"])
+
     def test_membership_sponsors_api_rejects_invalid_query_parameters(self) -> None:
         self._grant_membership_permission()
         self._login_as_freeipa_user("reviewer")
