@@ -754,9 +754,11 @@ POST_OFFICE = {
     'RETRY_INTERVAL': datetime.timedelta(minutes=5),
     'TEMPLATE_ENGINE': 'post_office',
     'BACKENDS': {
-        'default': 'django.core.mail.backends.smtp.EmailBackend' if DEBUG else 'django_ses.SESBackend',
-        'smtp': 'django.core.mail.backends.smtp.EmailBackend',
-        'ses': 'django_ses.SESBackend',
+        # These wrap Django's SMTP and django-ses backends to nest inline images
+        # correctly; see core.mail_backends.
+        'default': 'core.mail_backends.SMTPEmailBackend' if DEBUG else 'core.mail_backends.SESEmailBackend',
+        'smtp': 'core.mail_backends.SMTPEmailBackend',
+        'ses': 'core.mail_backends.SESEmailBackend',
     },
 }
 
