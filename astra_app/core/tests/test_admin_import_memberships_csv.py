@@ -23,7 +23,7 @@ from core.freeipa.user import FreeIPAUser
 from core.membership import get_valid_memberships
 from core.membership_csv_import import MembershipCSVImportForm, MembershipCSVImportResource
 from core.models import Membership, MembershipCSVImportLink, MembershipLog, MembershipRequest, MembershipType, Note
-from core.tests.utils_test_data import ensure_core_categories, ensure_email_templates
+from core.tests.utils_test_data import capture_sent_emails, ensure_core_categories, ensure_email_templates
 
 
 class AdminImportMembershipsCSVTests(TestCase):
@@ -2401,7 +2401,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
-            patch("post_office.mail.send", autospec=True) as send_mail,
+            capture_sent_emails() as send_mail,
         ):
             import_url = reverse("admin:core_membershipcsvimportlink_import")
             preview_resp = self.client.post(
@@ -2511,7 +2511,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_to_group,
-            patch("post_office.mail.send", autospec=True) as send_mail,
+            capture_sent_emails() as send_mail,
         ):
             import_url = reverse("admin:core_membershipcsvimportlink_import")
             preview_resp = self.client.post(
@@ -2770,7 +2770,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True) as add_to_group,
-            patch("post_office.mail.send", autospec=True) as send_mail,
+            capture_sent_emails() as send_mail,
         ):
             import_url = reverse("admin:core_membershipcsvimportlink_import")
             preview_resp = self.client.post(
@@ -3123,7 +3123,7 @@ class AdminImportMembershipsCSVTests(TestCase):
             patch("core.freeipa.user.FreeIPAUser.get", side_effect=_get_user),
             patch("core.membership_csv_import.missing_required_agreements_for_user_in_group", return_value=[]),
             patch.object(FreeIPAUser, "add_to_group", autospec=True),
-            patch("post_office.mail.send", autospec=True) as send_mail,
+            capture_sent_emails() as send_mail,
         ):
             import_url = reverse("admin:core_membershipcsvimportlink_import")
             preview_resp = self.client.post(

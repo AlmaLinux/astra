@@ -2137,7 +2137,7 @@ class ElectionVoteEndpointTests(TestCase):
         self.assertEqual(Email.objects.count(), 1)
         queued = Email.objects.first()
         assert queued is not None
-        self.assertEqual(queued.template.name, "test-vote-receipt")
+        self.assertEqual(queued.context["template_name"], "test-vote-receipt")
 
         ctx = queued.context
         if isinstance(ctx, str):

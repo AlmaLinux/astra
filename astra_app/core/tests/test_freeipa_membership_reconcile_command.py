@@ -72,7 +72,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
         self.assertTrue(
             Email.objects.filter(
                 to="admin@example.com",
-                template__name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
             ).exists()
         )
         self.assertTrue(
@@ -178,7 +178,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
 
         email = Email.objects.get(
             to="admin@example.com",
-            template__name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
+            context__template_name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
         )
         groups = list(dict(email.context or {}).get("groups") or [])
 
@@ -759,7 +759,7 @@ class FreeIPAMembershipReconcileCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="admin@example.com",
-                template__name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.FREEIPA_MEMBERSHIP_RECONCILE_ALERT_EMAIL_TEMPLATE_NAME,
             ).exists()
         )
 

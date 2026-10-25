@@ -2,19 +2,25 @@ import logging
 import os
 import re
 import tempfile
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextvars import ContextVar
 from pathlib import PurePosixPath
+from typing import override
 from urllib.parse import urlsplit
 
+import css_inline
 import post_office.mail
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.mail import EmailMultiAlternatives
+from django.db.models import QuerySet
 from django.http import HttpRequest, JsonResponse
-from django.template import Context, Template, engines
+from django.template import Context, Origin, Template, TemplateDoesNotExist, engines
 from django.template.exceptions import TemplateSyntaxError
+from django.template.loaders.base import Loader
 from post_office.models import Attachment, Email, EmailTemplate
+from post_office.utils import create_attachments
 
 from core.email_context import system_email_context
 from core.logging_extras import current_exception_log_fields
@@ -34,11 +40,28 @@ _INLINE_IMAGE_TAG_REWRITE_PATTERN = re.compile(
     r"(?P<suffix>\s*-?%})"
 )
 
+# post_office's inline_image tag renders `cid:<md5 of the image bytes>`.
+_INLINE_IMAGE_CID_PATTERN = re.compile(r"cid:([0-9a-f]{32})")
+
 _MAX_INLINE_IMAGE_BYTES: int = 10 * 1024 * 1024
 
 logger = logging.getLogger(__name__)
 
 _REQUIRED_TEMPLATE_VAR_PATTERN = re.compile(r"{{\s*(?P<var>[A-Za-z0-9_]+)\b")
+
+# Shared layout that other templates `{% extends %}`. Not configurable: existing
+# templates reference this name literally.
+EMAIL_LAYOUT_TEMPLATE_NAME = "email-layout"
+
+# Starting HTML for new templates.
+EMAIL_LAYOUT_CHILD_HTML = f'{{% extends "{EMAIL_LAYOUT_TEMPLATE_NAME}" %}}{{% block content %}}\n\n{{% endblock %}}'
+
+_EXTENDS_TAG_PATTERN = re.compile(r"{%-?\s*extends\b")
+_CONTENT_BLOCK_TAG_PATTERN = re.compile(r"{%-?\s*block\s+content\s*-?%}")
+
+# Keep <style> tags so @media rules (which cannot be inlined) still reach
+# clients that support them.
+_CSS_INLINER = css_inline.CSSInliner(load_remote_stylesheets=False, keep_style_tags=True)
 
 
 def validate_email_subject(subject: str) -> str:
@@ -82,8 +105,15 @@ def configured_email_template_names() -> frozenset[str]:
             settings.ACCOUNT_INVITE_EMAIL_TEMPLATE_NAME,
             settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME,
             *settings.ACCOUNT_INVITATION_EMAIL_TEMPLATE_NAMES,
+            EMAIL_LAYOUT_TEMPLATE_NAME,
         }
     )
+
+
+def sendable_email_templates() -> QuerySet[EmailTemplate]:
+    """Templates offered for sending; the layout only exists to be extended."""
+
+    return EmailTemplate.objects.exclude(name=EMAIL_LAYOUT_TEMPLATE_NAME).order_by("name")
 
 
 def locked_email_template_names() -> frozenset[str]:
@@ -301,13 +331,13 @@ def queue_templated_email(
         commit=commit,
     )
 
-    # Preserve linkage to the EmailTemplate and original context so the admin UI
-    # and any dedupe logic based on template/context continue to work.
+    # Record the template name and context for de-duplication lookups. Not via
+    # Email.template: post_office re-renders template+context at delivery, which
+    # would discard this rendering (staged inline images, inlined CSS, system context).
     try:
-        email.template = template
-        email.context = dict(context)
+        email.context = {**dict(context), "template_name": template_name}
         if commit:
-            email.save(update_fields=["template", "context"])
+            email.save(update_fields=["context"])
     except Exception:
         logger.exception(
             "Failed to persist post_office template/context metadata template=%s",
@@ -318,8 +348,12 @@ def queue_templated_email(
     return email
 
 
-def _attachments_from_html_template(*, html_template: Template, rendered_html: str) -> dict[str, object]:
-    attachments: dict[str, object] = {}
+def _store_inline_images(*, html_template: Template, rendered_html: str) -> None:
+    """Store each `{% inline_image %}` once as a post_office Attachment.
+
+    Content-IDs are hashes of the image bytes, so a stored row can be shared by
+    every email that references it; bulk_save_emails links them by `cid:`.
+    """
 
     # `_attached_images` is provided by the post_office template backend when
     # `{% inline_image %}` is used. We guard with `hasattr` because plain Django
@@ -341,24 +375,27 @@ def _attachments_from_html_template(*, html_template: Template, rendered_html: s
         ]
     for image in attached_images or []:
         cid = str(image.get("Content-ID") or "").strip().strip("<>")
-        if not cid:
+        if not cid or Attachment.objects.filter(headers__contains={"Content-ID": f"<{cid}>"}).exists():
             continue
-        payload = image.get_payload(decode=True) or b""
         content_type = str(image.get_content_type() or "application/octet-stream")
-        headers = {str(k): str(v) for k, v in image.items()}
 
         filename = cid
         subtype = content_type.split("/", 1)[-1]
         if subtype and subtype.isalnum():
             filename = f"{cid}.{subtype}"
 
-        attachments[filename] = {
-            "file": ContentFile(payload),
-            "mimetype": content_type,
-            "headers": headers,
-        }
-
-    return attachments
+        create_attachments(
+            {
+                filename: {
+                    # Keep the payload in its transfer encoding: post_office sends
+                    # attachment bytes as-is under these headers, which include
+                    # `Content-Transfer-Encoding: base64`.
+                    "file": ContentFile(image.get_payload().encode("ascii")),
+                    "mimetype": content_type,
+                    "headers": {str(k): str(v) for k, v in image.items()},
+                }
+            }
+        )
 
 
 def queue_composed_email(
@@ -380,29 +417,38 @@ def queue_composed_email(
     """Queue operator/template-composed email through the SSOT pipeline.
 
     This helper is intentionally metadata-agnostic: callers that need
-    `Email.template` / `Email.context` persistence (template-based sends)
-    should set those fields after calling this helper.
+    `Email.context` persistence (e.g. for de-duplication) should set it after
+    calling this helper. Never set `Email.template` as well: post_office would
+    re-render the raw template at delivery instead of sending this rendering.
 
-    When *commit=False*, the Email object is constructed and rendered but not
-    saved to the database.  The caller is responsible for persisting it (e.g.
-    via ``Email.objects.bulk_create``).  Attachments are not supported in
-    deferred-commit mode.
+    Every email is saved and dispatched by bulk_save_emails, which also links
+    its inline images. When *commit=False*, the Email is rendered but not
+    saved, so callers can pass a batch to bulk_save_emails themselves; caller
+    *attachments* are not supported then (pass shared Attachment rows to
+    bulk_save_emails instead).
 
     *attachments* uses post_office's format ({filename: file or
-    {"file": ..., "mimetype": ...}}) and is sent alongside inline images.
+    {"file": ..., "mimetype": ...}}).
     """
 
     staged_files: list[str] = []
-    try:
-        staged_html_content, staged_files = stage_inline_images_for_sending(
-            html_source,
+
+    def stage_source(source: str) -> str:
+        staged_source, paths = stage_inline_images_for_sending(
+            source,
             strict=strict_inline_images,
             template_name=template_name,
         )
+        staged_files.extend(paths)
+        return staged_source
 
+    # Parent templates (the email layout) are loaded mid-render, so they get
+    # their inline images staged through the loader.
+    source_transform_token = _parent_template_source_transform.set(stage_source)
+    try:
         template_engine = engines["post_office"]
         text_template = template_engine.from_string(preview_drop_inline_image_tags(text_source))
-        html_template = template_engine.from_string(staged_html_content)
+        html_template = template_engine.from_string(stage_source(html_source))
 
         rendered_context = {
             **system_email_context(),
@@ -412,39 +458,15 @@ def queue_composed_email(
             render_template_string(subject_source, rendered_context, autoescape=False)
         )
         rendered_text = text_template.render(rendered_context)
-        rendered_html = html_template.render(rendered_context)
-        attachments = {
-            **_attachments_from_html_template(
-                html_template=html_template,
-                rendered_html=rendered_html,
-            ),
-            **(attachments or {}),
-        }
+        rendered_html = _inline_css(html_template.render(rendered_context))
 
         headers: dict[str, str] | None = None
         if reply_to:
             headers = {"Reply-To": ", ".join(reply_to)}
 
-        if commit:
-            return post_office.mail.send(
-                recipients=recipients,
-                sender=sender,
-                subject=rendered_subject,
-                message=rendered_text,
-                html_message=rendered_html,
-                attachments=attachments or None,
-                render_on_delivery=False,
-                commit=True,
-                cc=cc,
-                bcc=bcc,
-                headers=headers,
-            )
-        # Bypass send() which rejects commit=False with the default
-        # priority='now'.  create() has no such restriction and honours
-        # the configured default priority.  bulk_save_emails() dispatches
-        # 'now'-priority emails after insert so dev doesn't need
-        # send_queued_mail running.
-        return post_office.mail.create(
+        # create() rather than send(): send() rejects commit=False with
+        # priority='now' and would dispatch before inline images are linked.
+        email = post_office.mail.create(
             sender=sender,
             recipients=recipients,
             cc=cc,
@@ -456,7 +478,15 @@ def queue_composed_email(
             render_on_delivery=False,
             commit=False,
         )
+        # Email.save() would validate (e.g. recipient addresses); bulk_create does not.
+        email.full_clean()
+        _store_inline_images(html_template=html_template, rendered_html=rendered_html)
+
+        if commit:
+            bulk_save_emails([email], attachments=create_attachments(attachments) if attachments else ())
+        return email
     finally:
+        _parent_template_source_transform.reset(source_transform_token)
         for path in staged_files:
             try:
                 os.unlink(path)
@@ -481,14 +511,26 @@ def bulk_save_emails(
     the bulk insert.  In production (priority='medium' / 'low'), emails remain
     queued for the ``send_queued_mail`` management command.
 
-    *attachments* are shared post_office Attachment rows linked to every email
-    (before dispatch, so immediate sends include them).
+    *attachments* are shared post_office Attachment rows linked to every email.
+    Each email is also linked to the inline images its HTML references (stored
+    by queue_composed_email). Both happen before dispatch, so immediate sends
+    include them.
     """
     if not emails:
         return
     Email.objects.bulk_create(emails, batch_size=batch_size)
     for attachment in attachments:
         attachment.emails.add(*emails)
+
+    emails_by_cid: dict[str, list[Email]] = {}
+    for email in emails:
+        for cid in set(_INLINE_IMAGE_CID_PATTERN.findall(email.html_message or "")):
+            emails_by_cid.setdefault(cid, []).append(email)
+    for cid, cid_emails in emails_by_cid.items():
+        inline_image = Attachment.objects.filter(headers__contains={"Content-ID": f"<{cid}>"}).first()
+        if inline_image is not None:
+            inline_image.emails.add(*cid_emails)
+
     for email in emails:
         # create() sets status=None for priority='now'; dispatch sends
         # the email immediately through the configured backend.
@@ -617,6 +659,36 @@ def preview_drop_inline_image_tags(value: str) -> str:
     return _INLINE_IMAGE_TAG_PATTERN.sub("", value)
 
 
+# How EmailTemplateLoader rewrites `{% inline_image %}` in parent templates:
+# URLs for previews by default, staged temp files while queue_composed_email sends.
+_parent_template_source_transform: ContextVar[Callable[[str], str]] = ContextVar(
+    "parent_template_source_transform",
+    default=preview_rewrite_inline_image_tags_to_urls,
+)
+
+
+class EmailTemplateLoader(Loader):
+    """Load EmailTemplate HTML by name so templates can `{% extends %}` each other."""
+
+    @override
+    def get_template_sources(self, template_name: str) -> Iterator[Origin]:
+        yield Origin(name=template_name, template_name=template_name, loader=self)
+
+    @override
+    def get_contents(self, origin: Origin) -> str:
+        template = EmailTemplate.objects.filter(name=origin.name, default_template__isnull=True).first()
+        if template is None:
+            raise TemplateDoesNotExist(origin)
+        return _parent_template_source_transform.get()(template.html_content)
+
+
+def _inline_css(html: str) -> str:
+    # Only layouts carry stylesheets; inlining a fragment would wrap it in <html><body>.
+    if "<style" not in html:
+        return html
+    return _CSS_INLINER.inline(html)
+
+
 def placeholderize_empty_values(context: Mapping[str, object]) -> dict[str, object]:
     """Return a copy of context with empty values replaced by `-var-` placeholders.
 
@@ -666,6 +738,31 @@ def render_template_string(value: str, context: Mapping[str, object], *, autoesc
         raise ValueError(str(exc)) from exc
 
 
+def validate_email_template_sources(*, name: str, subject: str, html_content: str, text_content: str) -> None:
+    """Reject template sources that would fail or mis-render when sent.
+
+    Rendering (not just compiling) is needed: Django only resolves an
+    `{% extends %}` parent at render time.
+    """
+
+    validate_email_subject(subject)
+    if _EXTENDS_TAG_PATTERN.search(text_content):
+        raise ValueError("The plain-text version cannot use {% extends %}; the email layout is HTML only.")
+    if name == EMAIL_LAYOUT_TEMPLATE_NAME and not _CONTENT_BLOCK_TAG_PATTERN.search(html_content):
+        raise ValueError(
+            "The email layout must contain {% block content %}{% endblock %} where each email's content goes."
+        )
+    try:
+        render_templated_email_preview(
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+            context={},
+        )
+    except ValueError as exc:
+        raise ValueError(f"Template error: {exc}") from exc
+
+
 def execute_email_template_save(
     *,
     template: EmailTemplate | None,
@@ -674,6 +771,12 @@ def execute_email_template_save(
     html_content: str,
     text_content: str,
 ) -> EmailTemplate:
+    validate_email_template_sources(
+        name=template.name if template is not None else raw_name or "",
+        subject=subject,
+        html_content=html_content,
+        text_content=text_content,
+    )
     if template is not None:
         update_email_template(
             template=template,
@@ -693,6 +796,8 @@ def execute_email_template_save(
 
 def render_templated_email_preview(*, subject: str, html_content: str, text_content: str, context: Mapping[str, object]) -> dict[str, str]:
     subject = validate_email_subject(subject)
+    html_content = preview_rewrite_inline_image_tags_to_urls(html_content)
+    text_content = preview_drop_inline_image_tags(text_content)
     sources = (subject, html_content, text_content)
 
     # Always start with placeholders inferred from the template sources, then
@@ -714,7 +819,7 @@ def render_templated_email_preview(*, subject: str, html_content: str, text_cont
 
     return {
         "subject": render_template_string(subject, render_context, autoescape=False),
-        "html": render_template_string(html_content, render_context),
+        "html": _inline_css(render_template_string(html_content, render_context)),
         "text": render_template_string(text_content, render_context),
     }
 
@@ -726,16 +831,12 @@ def render_templated_email_preview_response(*, request: HttpRequest, context: Ma
     error handling (syntax errors surfaced as 400s) is centralized here.
     """
 
-    subject = str(request.POST.get("subject") or "")
-    html_content = preview_rewrite_inline_image_tags_to_urls(str(request.POST.get("html_content") or ""))
-    text_content = preview_drop_inline_image_tags(str(request.POST.get("text_content") or ""))
-
     try:
         return JsonResponse(
             render_templated_email_preview(
-                subject=subject,
-                html_content=html_content,
-                text_content=text_content,
+                subject=str(request.POST.get("subject") or ""),
+                html_content=str(request.POST.get("html_content") or ""),
+                text_content=str(request.POST.get("text_content") or ""),
                 context=context,
             )
         )
@@ -754,7 +855,6 @@ def email_template_to_dict(template: EmailTemplate) -> dict[str, object]:
 
 
 def update_email_template(*, template: EmailTemplate, subject: str, html_content: str, text_content: str) -> None:
-    subject = validate_email_subject(subject)
     template.subject = subject
     template.html_content = html_content
     template.content = text_content
@@ -772,7 +872,6 @@ def unique_email_template_name(raw_name: str) -> str:
 
 def create_email_template_unique(*, raw_name: str, subject: str, html_content: str, text_content: str) -> EmailTemplate:
     name = unique_email_template_name(raw_name)
-    subject = validate_email_subject(subject)
     return EmailTemplate.objects.create(
         name=name,
         subject=subject,

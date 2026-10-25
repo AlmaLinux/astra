@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.conf import settings
 from django.test import TestCase
 from django.utils import timezone
-from post_office.models import Email, EmailTemplate
+from post_office.models import Email
 
 from core.freeipa.user import FreeIPAUser
 from core.membership_notifications import (
@@ -33,18 +33,12 @@ class AlreadySentTodayTests(TestCase):
         )
 
     def test_returns_true_for_matching_template_recipient_context(self) -> None:
-        template = EmailTemplate.objects.create(
-            name="dedup-template-true",
-            subject="Subject",
-            content="Body",
-        )
         Email.objects.create(
             from_email="noreply@example.com",
             to="user@example.com",
             subject="Subject",
             message="Body",
-            template=template,
-            context={"membership_type_code": "gold"},
+            context={"membership_type_code": "gold", "template_name": "dedup-template-true"},
         )
 
         self.assertTrue(
@@ -56,18 +50,12 @@ class AlreadySentTodayTests(TestCase):
         )
 
     def test_returns_false_for_mismatched_context(self) -> None:
-        template = EmailTemplate.objects.create(
-            name="dedup-template-false",
-            subject="Subject",
-            content="Body",
-        )
         Email.objects.create(
             from_email="noreply@example.com",
             to="user@example.com",
             subject="Subject",
             message="Body",
-            template=template,
-            context={"membership_type_code": "gold"},
+            context={"membership_type_code": "gold", "template_name": "dedup-template-false"},
         )
 
         self.assertFalse(

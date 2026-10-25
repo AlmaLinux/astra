@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
+from post_office.models import Email
 
 from core import elections_services
 from core.freeipa.user import FreeIPAUser
@@ -308,10 +309,7 @@ class AdminElectionLifecycleActionTests(TestCase):
                 return voter_user
             return None
 
-        with (
-            patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user),
-            patch("post_office.mail.send", autospec=True) as post_office_send_mock,
-        ):
+        with patch("core.freeipa.user.FreeIPAUser.get", side_effect=get_user):
             url = reverse("admin:core_election_changelist")
             resp = self.client.post(
                 url,
@@ -324,7 +322,7 @@ class AdminElectionLifecycleActionTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(VotingCredential.objects.filter(election=election, freeipa_username="voter1").exists())
-        self.assertEqual(post_office_send_mock.call_count, 0)
+        self.assertFalse(Email.objects.exists())
 
     def test_election_admin_status_is_readonly(self) -> None:
         now = timezone.now()

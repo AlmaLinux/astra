@@ -78,7 +78,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
         from post_office.models import Email
 
         emails = Email.objects.filter(
-            template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+            context__template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
         )
         self.assertEqual(emails.count(), 1)
         msg = emails.first()
@@ -112,7 +112,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         self.assertFalse(
             Email.objects.filter(
-                template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+                context__template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
             ).exists()
         )
 
@@ -155,7 +155,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         self.assertFalse(
             Email.objects.filter(
-                template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+                context__template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
             ).exists()
         )
         self.assertTrue(any("No pending membership requests." in line for line in logs.output))
@@ -186,7 +186,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         self.assertFalse(
             Email.objects.filter(
-                template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+                context__template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
             ).exists()
         )
 
@@ -316,7 +316,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         self.assertEqual(
             Email.objects.filter(
-                template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
+                context__template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME
             ).count(),
             1,
         )
@@ -348,7 +348,7 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         from post_office.models import Email
 
-        msg = Email.objects.get(template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME)
+        msg = Email.objects.get(context__template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME)
         self.assertEqual(msg.context["oldest_wait_time"], 12)
         all_mock.assert_called_once()
 
@@ -379,5 +379,5 @@ class MembershipCommitteePendingRequestsNotificationCommandTests(TestCase):
 
         from post_office.models import Email
 
-        msg = Email.objects.get(template__name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME)
+        msg = Email.objects.get(context__template_name=settings.MEMBERSHIP_COMMITTEE_PENDING_REQUESTS_EMAIL_TEMPLATE_NAME)
         self.assertNotIn("oldest_wait_time", msg.context)

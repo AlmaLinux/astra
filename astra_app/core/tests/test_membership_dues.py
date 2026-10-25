@@ -254,7 +254,7 @@ class ApprovalDuesTests(MembershipDuesTestMixin, TestCase):
         )
 
         self.assertEqual(membership.dues_usd, 0)
-        email = Email.objects.get(template=welcome)
+        email = Email.objects.get(context__template_name=welcome.name)
         self.assertEqual(email.attachments.count(), 0)
         self.assertNotIn("invoice_url", email.context)
         self.assertNotIn("billing@example.com", email.cc or [])

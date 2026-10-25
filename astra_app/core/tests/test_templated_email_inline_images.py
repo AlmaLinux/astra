@@ -43,21 +43,17 @@ class TemplatedEmailInlineImagesTests(TestCase):
         with (
             patch("core.templated_email.default_storage.open", side_effect=FileNotFoundError),
             patch("core.templated_email.logger.warning") as warning_mock,
-            patch("post_office.mail.send", autospec=True) as send_mock,
+            patch("post_office.models.Email.dispatch"),
         ):
-            queue_templated_email(
+            email = queue_templated_email(
                 recipients=["alice@example.com"],
                 sender="noreply@example.com",
                 template_name="inline-image-missing-test",
                 context={"username": "alice", "reset_url": "http://example.test/reset"},
             )
 
-        self.assertEqual(send_mock.call_count, 1)
-        kwargs = send_mock.call_args.kwargs
-        self.assertIn("subject", kwargs)
-        self.assertIn("message", kwargs)
-        self.assertIn("html_message", kwargs)
-        self.assertIn("http://example.test/reset", kwargs.get("html_message") or "")
+        self.assertIsNotNone(email.pk)
+        self.assertIn("http://example.test/reset", email.html_message)
 
         warning_mock.assert_called_once()
         _warning_args, warning_kwargs = warning_mock.call_args
@@ -74,43 +70,75 @@ class TemplatedEmailInlineImagesTests(TestCase):
         self.assertEqual(extra.get("correlation_id"), "email.templated.queue")
 
     @override_settings(AWS_STORAGE_BUCKET_NAME="astra-media")
-    def test_queue_composed_email_preserves_inline_image_attachment_content_id(self) -> None:
-        from core.templated_email import queue_composed_email
+    def test_bulk_saved_emails_carry_their_inline_images(self) -> None:
+        """Bulk runs build emails with commit=False; their inline images must still be sent,
+        stored once and shared by every email in the run."""
+        from post_office.models import Attachment
 
-        html = "{% load post_office %}<img src=\"{% inline_image 'http://localhost:9000/astra-media/mail-images/logo.png' %}\" />"
+        from core.templated_email import bulk_save_emails, queue_composed_email
 
-        # Minimal valid 1x1 PNG for MIME type detection in inline-image rendering.
         png_bytes = (
             b"\x89PNG\r\n\x1a\n"
             b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
             b"\x00\x00\x00\x0bIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4"
             b"\x00\x00\x00\x00IEND\xaeB`\x82"
         )
+        html = "{% load post_office %}<img src=\"{% inline_image 'http://localhost:9000/astra-media/mail-images/logo.png' %}\" />"
 
-        class _DummyEmail:
-            id = 123
+        with (
+            patch("core.templated_email.default_storage.open", side_effect=lambda *_args: io.BytesIO(png_bytes)),
+            patch("post_office.models.Email.dispatch"),
+        ):
+            emails = [
+                queue_composed_email(
+                    recipients=[address],
+                    sender="noreply@example.com",
+                    subject_source="Hello",
+                    text_source="Hi",
+                    html_source=html,
+                    context={},
+                    commit=False,
+                )
+                for address in ["alice@example.com", "bob@example.com"]
+            ]
+            bulk_save_emails(emails)
+
+        self.assertEqual(Attachment.objects.count(), 1)
+        for email in emails:
+            image_parts = [
+                part for part in email.email_message().message().walk() if part.get_content_maintype() == "image"
+            ]
+            self.assertEqual(len(image_parts), 1)
+            self.assertEqual(image_parts[0].get_payload(decode=True), png_bytes)
+
+    @override_settings(AWS_STORAGE_BUCKET_NAME="astra-media")
+    def test_delivered_inline_image_decodes_to_original_bytes(self) -> None:
+        """post_office copies our attachment headers verbatim and never encodes the
+        payload itself, so the stored bytes must match the declared base64 encoding."""
+        from core.templated_email import queue_composed_email
+
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n"
+            b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+            b"\x00\x00\x00\x0bIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        html = "{% load post_office %}<img src=\"{% inline_image 'http://localhost:9000/astra-media/mail-images/logo.png' %}\" />"
 
         with (
             patch("core.templated_email.default_storage.open", return_value=io.BytesIO(png_bytes)),
-            patch("core.templated_email.post_office.mail.send", return_value=_DummyEmail()) as send_mock,
+            patch("post_office.models.Email.dispatch"),
         ):
-            queue_composed_email(
+            email = queue_composed_email(
                 recipients=["alice@example.com"],
                 sender="noreply@example.com",
-                subject_source="Hello {{ username }}",
-                text_source="Hi {{ username }}",
+                subject_source="Hello",
+                text_source="Hi",
                 html_source=html,
-                context={"username": "alice"},
+                context={},
             )
 
-        _args, kwargs = send_mock.call_args
-        self.assertEqual(kwargs.get("render_on_delivery"), False)
-        attachments = kwargs.get("attachments") or {}
-        self.assertTrue(attachments)
-        has_content_id = any(
-            isinstance(meta, dict)
-            and isinstance(meta.get("headers"), dict)
-            and bool(meta["headers"].get("Content-ID"))
-            for meta in attachments.values()
-        )
-        self.assertTrue(has_content_id)
+        image_parts = [part for part in email.email_message().message().walk() if part.get_content_maintype() == "image"]
+        self.assertEqual(len(image_parts), 1)
+        self.assertEqual(image_parts[0].get_payload(decode=True), png_bytes)
+        self.assertIn(f'src="cid:{image_parts[0]["Content-ID"].strip("<>")}"', email.html_message)

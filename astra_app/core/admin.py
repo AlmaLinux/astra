@@ -2918,7 +2918,7 @@ class AccountDeletionRequestAdmin(admin.ModelAdmin):
                     )
 
                 approval_notification_already_queued = PostOfficeEmail.objects.filter(
-                    template__name=settings.ACCOUNT_DELETION_APPROVED_EMAIL_TEMPLATE_NAME,
+                    context__template_name=settings.ACCOUNT_DELETION_APPROVED_EMAIL_TEMPLATE_NAME,
                     context__account_deletion_request_id=deletion_request.pk,
                 ).exists()
                 if not approval_notification_already_queued:

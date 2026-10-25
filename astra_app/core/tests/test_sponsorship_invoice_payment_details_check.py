@@ -49,7 +49,7 @@ class PaymentDetailsCheckCommandTests(TestCase):
 
     def _alerts(self) -> list[Email]:
         return list(
-            Email.objects.filter(template__name=settings.SPONSORSHIP_INVOICE_PAYMENT_DETAILS_ALERT_EMAIL_TEMPLATE_NAME)
+            Email.objects.filter(context__template_name=settings.SPONSORSHIP_INVOICE_PAYMENT_DETAILS_ALERT_EMAIL_TEMPLATE_NAME)
         )
 
     def test_a_sensible_unchanged_file_raises_no_alert(self) -> None:

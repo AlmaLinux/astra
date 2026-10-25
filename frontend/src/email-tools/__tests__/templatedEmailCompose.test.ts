@@ -233,4 +233,55 @@ describe("templated email compose", () => {
     expect(document.querySelector<HTMLIFrameElement>('[data-compose-preview="text"] iframe')?.srcdoc).toContain("Rendered text");
   });
 
+  it("highlights Django tags and comments as well as variables in both editors", () => {
+    type Overlay = { token: (stream: unknown, state?: unknown) => string | null };
+    type Stream = { pos: number; start: number; eol: () => boolean; current: () => string };
+
+    // The real CodeMirror StringStream drives the overlay exactly as the editor would.
+    window.eval(readFileSync(resolve(process.cwd(), "../astra_app/core/static/core/vendor/codemirror/codemirror.min.js"), "utf8"));
+    const { StringStream } = (window as Window & { CodeMirror: { StringStream: new (line: string) => Stream } }).CodeMirror;
+
+    const overlays: Overlay[] = [];
+    const fakeEditor = () => ({
+      addOverlay: (overlay: Overlay) => overlays.push(overlay),
+      on: vi.fn(),
+      save: vi.fn(),
+      refresh: vi.fn(),
+      getValue: () => "",
+      setValue: vi.fn(),
+    });
+    vi.stubGlobal("CodeMirror", { fromTextArea: fakeEditor, helpers: {} });
+    document.body.innerHTML = `
+      <div class="templated-email-compose" data-templated-email-compose>
+        <input name="subject" value="">
+        <textarea name="html_content"></textarea>
+        <textarea name="text_content"></textarea>
+      </div>
+    `;
+    loadTemplatedEmailComposeScript();
+
+    const tokenize = (overlay: Overlay, line: string): Array<[string, string | null]> => {
+      const stream = new StringStream(line);
+      const tokens: Array<[string, string | null]> = [];
+      while (!stream.eol()) {
+        stream.start = stream.pos;
+        const style = overlay.token(stream);
+        tokens.push([stream.current(), style]);
+      }
+      return tokens;
+    };
+
+    expect(overlays).toHaveLength(2);
+    for (const overlay of overlays) {
+      expect(tokenize(overlay, "<p>{% if name %}Hi {{ name }}{# note #}</p>")).toEqual([
+        ["<p>", null],
+        ["{% if name %}", "django-tag"],
+        ["Hi ", null],
+        ["{{ name }}", "mustache"],
+        ["{# note #}", "django-comment"],
+        ["</p>", null],
+      ]);
+    }
+  });
+
 });

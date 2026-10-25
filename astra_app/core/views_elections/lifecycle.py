@@ -20,6 +20,7 @@ from core.mail_progress import MailRunKind
 from core.models import Election, ElectionRoll, VotingCredential
 from core.permissions import ASTRA_ADD_ELECTION, json_permission_required
 from core.rate_limit import allow_request
+from core.templated_email import sendable_email_templates
 from core.views_elections._helpers import (
     CREDENTIAL_EMAIL_SECRET_VARIABLES,
     _election_email_preview_context,
@@ -689,7 +690,7 @@ def election_credential_email_template_api(request: HttpRequest, election_id: in
     subject, html_content, text_content = elections_services.resolve_election_email_template(election=election)
 
     # Template selector options.
-    templates = list(EmailTemplate.objects.all().order_by("name"))
+    templates = list(sendable_email_templates())
     template_options = [
         {"id": t.pk, "name": t.name}
         for t in templates

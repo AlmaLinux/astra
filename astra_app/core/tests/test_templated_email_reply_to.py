@@ -1,6 +1,5 @@
 
 from email.header import decode_header
-from unittest.mock import patch
 
 from django.core.mail import EmailMultiAlternatives
 from django.test import TestCase
@@ -18,25 +17,17 @@ class QueueTemplatedEmailReplyToTests(TestCase):
             html_content="",
         )
 
-        class _DummyEmail:
-            template = None
-            context = None
+        email = queue_templated_email(
+            recipients=["alice@example.com"],
+            sender="from@example.com",
+            template_name="subject-encoding-test",
+            context={
+                "invitation_subject": "Who's ready for cafe? ☕",
+            },
+            commit=False,
+        )
 
-            def save(self, update_fields=None) -> None:
-                return None
-
-        with patch("core.templated_email.post_office.mail.send", return_value=_DummyEmail()) as send_mock:
-            queue_templated_email(
-                recipients=["alice@example.com"],
-                sender="from@example.com",
-                template_name="subject-encoding-test",
-                context={
-                    "invitation_subject": "Who's ready for cafe? ☕",
-                },
-            )
-
-        _args, kwargs = send_mock.call_args
-        subject = kwargs.get("subject")
+        subject = email.subject
         self.assertEqual(subject, "Who's ready for cafe? ☕")
         self.assertNotIn("&#x27;", subject)
 
@@ -60,21 +51,13 @@ class QueueTemplatedEmailReplyToTests(TestCase):
             html_content="",
         )
 
-        class _DummyEmail:
-            template = None
-            context = None
+        email = queue_templated_email(
+            recipients=["alice@example.com"],
+            sender="from@example.com",
+            template_name="reply-to-test",
+            context={"username": "alice"},
+            reply_to=["reply@example.com"],
+            commit=False,
+        )
 
-            def save(self, update_fields=None) -> None:
-                return None
-
-        with patch("core.templated_email.post_office.mail.send", return_value=_DummyEmail()) as send_mock:
-            queue_templated_email(
-                recipients=["alice@example.com"],
-                sender="from@example.com",
-                template_name="reply-to-test",
-                context={"username": "alice"},
-                reply_to=["reply@example.com"],
-            )
-
-        _args, kwargs = send_mock.call_args
-        self.assertEqual(kwargs.get("headers"), {"Reply-To": "reply@example.com"})
+        self.assertEqual(email.headers, {"Reply-To": "reply@example.com"})

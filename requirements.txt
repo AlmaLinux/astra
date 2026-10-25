@@ -10,6 +10,7 @@ psycopg2-binary
 django-storages[boto3]
 django-ses[events]
 django-post-office
+css-inline
 django-logentry-admin
 gunicorn
 whitenoise

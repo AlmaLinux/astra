@@ -44,11 +44,10 @@ from core.permissions import ASTRA_ADD_SEND_MAIL, json_permission_required
 from core.rate_limit import allow_request
 from core.templated_email import (
     execute_email_template_save,
-    preview_drop_inline_image_tags,
-    preview_rewrite_inline_image_tags_to_urls,
     queue_composed_email,
     render_templated_email_preview,
     render_templated_email_preview_response,
+    sendable_email_templates,
 )
 from core.views_account_invitations import send_organization_claim_invitation
 from core.views_utils import get_username
@@ -680,8 +679,8 @@ def _render_send_mail_preview(
         rendered_preview.update(
             render_templated_email_preview(
                 subject=subject,
-                html_content=preview_rewrite_inline_image_tags_to_urls(html_content),
-                text_content=preview_drop_inline_image_tags(text_content),
+                html_content=html_content,
+                text_content=text_content,
                 context=context,
             )
         )
@@ -806,9 +805,9 @@ def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
     selected_template: EmailTemplate | None = None
     if template_key:
         if template_key.isdigit():
-            selected_template = EmailTemplate.objects.filter(pk=int(template_key)).first()
+            selected_template = sendable_email_templates().filter(pk=int(template_key)).first()
         if selected_template is None:
-            selected_template = EmailTemplate.objects.filter(name=template_key).first()
+            selected_template = sendable_email_templates().filter(name=template_key).first()
 
         if selected_template is None:
             messages.error(request, f"Email template not found: {template_key!r}.")
@@ -932,7 +931,7 @@ def _prepare_send_mail_get_state(request: HttpRequest) -> SendMailGetState:
 
 
 def _send_mail_templates(*, recipient_mode: str) -> list[EmailTemplate]:
-    templates_qs = EmailTemplate.objects.all().order_by("name")
+    templates_qs = sendable_email_templates()
     if recipient_mode == SendMailForm.RECIPIENT_MODE_CSV:
         templates_qs = templates_qs.exclude(name=settings.ORG_CLAIM_INVITATION_EMAIL_TEMPLATE_NAME)
     return list(templates_qs)
@@ -1064,15 +1063,19 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 action = ""
 
             if action == "save" and selected_template is not None:
-                selected_template = execute_email_template_save(
-                    template=selected_template,
-                    raw_name=None,
-                    subject=subject,
-                    html_content=html_content,
-                    text_content=text_content,
-                )
-                messages.success(request, f"Saved template: {selected_template.name}.")
-                selected_template_id = selected_template.pk
+                try:
+                    selected_template = execute_email_template_save(
+                        template=selected_template,
+                        raw_name=None,
+                        subject=subject,
+                        html_content=html_content,
+                        text_content=text_content,
+                    )
+                except ValueError as exc:
+                    messages.error(request, str(exc))
+                else:
+                    messages.success(request, f"Saved template: {selected_template.name}.")
+                    selected_template_id = selected_template.pk
             elif action == "save" and selected_template is None:
                 messages.error(request, "Select a template to save, or use Save as.")
 
@@ -1081,16 +1084,20 @@ def send_mail(request: HttpRequest) -> HttpResponse:
                 if not raw_name:
                     messages.error(request, "Provide a template name for Save as.")
                 else:
-                    selected_template = execute_email_template_save(
-                        template=None,
-                        raw_name=raw_name,
-                        subject=subject,
-                        html_content=html_content,
-                        text_content=text_content,
-                    )
-                    messages.success(request, f"Created template: {selected_template.name}.")
-                    created_template_id = selected_template.pk
-                    selected_template_id = selected_template.pk
+                    try:
+                        selected_template = execute_email_template_save(
+                            template=None,
+                            raw_name=raw_name,
+                            subject=subject,
+                            html_content=html_content,
+                            text_content=text_content,
+                        )
+                    except ValueError as exc:
+                        messages.error(request, str(exc))
+                    else:
+                        messages.success(request, f"Created template: {selected_template.name}.")
+                        created_template_id = selected_template.pk
+                        selected_template_id = selected_template.pk
 
             if action == "send":
                 if preview is None or not recipients:
@@ -1339,8 +1346,8 @@ def send_mail(request: HttpRequest) -> HttpResponse:
             try:
                 render_templated_email_preview(
                     subject=subject_value,
-                    html_content=preview_rewrite_inline_image_tags_to_urls(html_content_value),
-                    text_content=preview_drop_inline_image_tags(text_content_value),
+                    html_content=html_content_value,
+                    text_content=text_content_value,
                     context=first_context,
                 )
             except ValueError as error:

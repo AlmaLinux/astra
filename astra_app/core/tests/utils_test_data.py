@@ -1,11 +1,14 @@
 import datetime
+from collections.abc import Iterator
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from post_office.models import EmailTemplate
 
 from core.models import MembershipTypeCategory
-from core.templated_email import configured_email_template_names
+from core.templated_email import bulk_save_emails, configured_email_template_names
 
 # Expiry for fixtures that only need an active membership that never nears renewal.
 FAR_FUTURE = datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
@@ -19,6 +22,19 @@ def migrate_to_latest() -> None:
     """
     executor = MigrationExecutor(connection)
     executor.migrate(executor.loader.graph.leaf_nodes())
+
+
+@contextmanager
+def capture_sent_emails() -> Iterator[MagicMock]:
+    """Record single sends (one bulk_save_emails call per email) without delivering them.
+
+    Emails are still saved, since callers use their ids (e.g. for notes).
+    """
+    with (
+        patch("post_office.models.Email.dispatch"),
+        patch("core.templated_email.bulk_save_emails", wraps=bulk_save_emails) as save_mock,
+    ):
+        yield save_mock
 
 
 def ensure_core_categories() -> None:

@@ -117,7 +117,7 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
         from post_office.models import Email
 
         email = Email.objects.filter(
-            template__name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME
+            context__template_name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME
         ).first()
         self.assertIsNotNone(email)
         assert email is not None
@@ -189,7 +189,7 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
         from post_office.models import Email
 
         email = Email.objects.filter(
-            template__name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME
+            context__template_name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME
         ).latest("created")
         ctx = dict(email.context or {})
         self.assertEqual(ctx.get("embargoed_count"), 2)
@@ -242,7 +242,7 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
 
         self.assertFalse(
             Email.objects.filter(
-                template__name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME
+                context__template_name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME
             ).exists()
         )
 
@@ -290,7 +290,7 @@ class MembershipEmbargoedMembersNotificationCommandTests(TestCase):
 
         self.assertFalse(
             Email.objects.filter(
-                template__name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME
+                context__template_name=settings.MEMBERSHIP_COMMITTEE_EMBARGOED_MEMBERS_EMAIL_TEMPLATE_NAME
             ).exists()
         )
 

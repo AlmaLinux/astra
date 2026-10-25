@@ -495,7 +495,7 @@ class SponsorshipInvoiceNotificationTests(SponsorshipInvoiceTestMixin, TestCase)
             call_command("membership_expiration_notifications", dry_run=dry_run)
 
     def _latest_email(self, template_name: str) -> Email:
-        return Email.objects.filter(to="rep1@example.com", template__name=template_name).latest("created")
+        return Email.objects.filter(to="rep1@example.com", context__template_name=template_name).latest("created")
 
     def test_expiring_soon_email_attaches_invoice_links_it_and_ccs_business_contact(self) -> None:
         from core.sponsorship_invoices import invoice_number
@@ -534,7 +534,7 @@ class SponsorshipInvoiceNotificationTests(SponsorshipInvoiceTestMixin, TestCase)
         render_mock.assert_called_once()
         emails = Email.objects.filter(
             to="rep1@example.com",
-            template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+            context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
         )
         self.assertEqual(emails.count(), 2)
         for email in emails:
@@ -639,7 +639,7 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
         return Membership.objects.get(target_organization=self.organization, membership_type=self.gold)
 
     def _welcome_email(self) -> Email:
-        return Email.objects.get(template__name=self.welcome_template.name)
+        return Email.objects.get(context__template_name=self.welcome_template.name)
 
     def test_new_sponsor_welcome_email_carries_the_current_term_invoice(self) -> None:
         from core.sponsorship_invoices import invoice_number
@@ -673,7 +673,7 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
         with patch("core.sponsorship_invoices.render_invoice_pdf", return_value=b"%PDF-renewed"):
             membership = self._approve()
 
-        email = Email.objects.get(template__name=settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME)
+        email = Email.objects.get(context__template_name=settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME)
         self.assertEqual([attachment.name for attachment in email.attachments.all()], [self._invoice_filename(membership, InvoiceTerm.current)])
         self.assertEqual(email.context["invoice_number"], invoice_number(membership, InvoiceTerm.current))
         self.assertEqual(email.cc, ["billing@example.com"])
@@ -738,7 +738,7 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
         query = self._approve_with_custom_email()
 
         membership = Membership.objects.get(target_organization=self.organization, membership_type=self.gold)
-        self.assertFalse(Email.objects.filter(template=self.welcome_template).exists())
+        self.assertFalse(Email.objects.filter(context__template_name=self.welcome_template.name).exists())
         [attachment] = mail_attachments_from_tokens(query["attachment"])
         self.assertEqual(attachment.key, self._invoice_key(membership, InvoiceTerm.current))
         self.assertEqual(attachment.name, self._invoice_filename(membership, InvoiceTerm.current))

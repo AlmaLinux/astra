@@ -11,6 +11,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 
+from core.tests.utils_test_data import capture_sent_emails
 from core.views_settings import settings_root
 from core.views_users import user_profile_detail_api
 
@@ -867,7 +868,7 @@ class FASAttributesTests(TestCase):
                         "full_name": "Alice User",
                         "email": "alice@example.com",
                     }):
-                        with patch("post_office.mail.send", autospec=True) as send_mock:
+                        with capture_sent_emails() as send_mock:
                             resp = settings_root(req)
 
         self.assertEqual(resp.status_code, 302)
@@ -908,7 +909,7 @@ class FASAttributesTests(TestCase):
                         "full_name": "Alice User",
                         "email": "alice@example.com",
                     }):
-                        with patch("post_office.mail.send", autospec=True) as send_mock2:
+                        with capture_sent_emails() as send_mock2:
                             resp2 = settings_root(req2)
 
         self.assertEqual(resp2.status_code, 302)

@@ -386,8 +386,20 @@ TEMPLATES = [
         'NAME': 'post_office',
         'BACKEND': 'post_office.template.backends.post_office.PostOfficeTemplates',
         'DIRS': [],
-        'APP_DIRS': True,
         'OPTIONS': {
+            # EmailTemplateLoader lets templates `{% extends %}` other EmailTemplate
+            # rows (the shared email layout). It is left out of the cache so
+            # layout edits take effect immediately.
+            'loaders': [
+                (
+                    'django.template.loaders.cached.Loader',
+                    [
+                        'django.template.loaders.filesystem.Loader',
+                        'django.template.loaders.app_directories.Loader',
+                    ],
+                ),
+                'core.templated_email.EmailTemplateLoader',
+            ],
             'context_processors': [
                 'django.contrib.auth.context_processors.auth',
                 'django.template.context_processors.debug',

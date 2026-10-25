@@ -51,17 +51,25 @@
     return container.querySelector(selector);
   }
 
-  function mustacheOverlay() {
+  // Highlights Django template syntax: {{ variables }}, {% tags %} and {# comments #}.
+  var DJANGO_SYNTAX = [
+    { open: '{{', close: '}}', style: 'mustache' },
+    { open: '{%', close: '%}', style: 'django-tag' },
+    { open: '{#', close: '#}', style: 'django-comment' },
+  ];
+
+  function djangoTemplateOverlay() {
     return {
       token: function (stream) {
-        if (stream.match('{{')) {
-          var ch;
-          while ((ch = stream.next()) != null) {
-            if (ch === '}' && stream.match('}')) break;
+        for (var i = 0; i < DJANGO_SYNTAX.length; i++) {
+          var syntax = DJANGO_SYNTAX[i];
+          if (stream.match(syntax.open)) {
+            // An unclosed opener highlights to the end of the line, like the editor would show it.
+            while (!stream.eol() && !stream.match(syntax.close)) stream.next();
+            return syntax.style;
           }
-          return 'mustache';
         }
-        while (stream.next() != null && !stream.match('{{', false)) {}
+        while (stream.next() != null && !stream.match(/^\{[{%#]/, false)) {}
         return null;
       }
     };
@@ -82,6 +90,9 @@
       /<p>\s*<em>\s*The AlmaLinux Team\s*<\/em>\s*<\/p>/gi,
       '\n<p>-- The AlmaLinux Team</p>'
     );
+
+    // Layout inheritance tags only make sense in HTML; the plain-text part has no layout.
+    rawHtml = rawHtml.replace(/{%-?\s*(?:extends|block|endblock)\b.*?-?%}/g, '');
 
     // Preserve Django template syntax as literal text so copied templates keep
     // their control flow and placeholders intact.
@@ -395,8 +406,8 @@
         autocapitalize: cmSpellcheckOpts.autocapitalize,
       });
 
-      htmlEditor.addOverlay(mustacheOverlay());
-      textEditor.addOverlay(mustacheOverlay());
+      htmlEditor.addOverlay(djangoTemplateOverlay());
+      textEditor.addOverlay(djangoTemplateOverlay());
 
       htmlEditor.on('change', function () {
         htmlEditor.save();

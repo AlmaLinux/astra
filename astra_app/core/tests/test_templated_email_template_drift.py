@@ -1,7 +1,7 @@
 
-from unittest.mock import patch
-
 from django.test import TestCase, override_settings
+
+from core.tests.utils_test_data import capture_sent_emails
 
 
 class TemplatedEmailTemplateDriftTests(TestCase):
@@ -25,7 +25,7 @@ class TemplatedEmailTemplateDriftTests(TestCase):
         )
 
         with (
-            patch("post_office.mail.send", autospec=True),
+            capture_sent_emails(),
             self.assertLogs("core.templated_email", level="WARNING") as logs,
         ):
             queue_templated_email(

@@ -7,6 +7,7 @@ from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
+from post_office.models import EmailTemplate
 
 from core import elections_services
 from core.elections_eligibility import VoteWeightLine
@@ -1734,6 +1735,9 @@ class ElectionsApiTests(TestCase):
             principal_name="admin",
             permission=ASTRA_ADD_ELECTION,
         )
+        EmailTemplate.objects.update_or_create(
+            name="email-layout", defaults={"html_content": "{% block content %}{% endblock %}"}
+        )
 
         now = timezone.now()
         election = Election.objects.create(
@@ -1767,6 +1771,7 @@ class ElectionsApiTests(TestCase):
         self.assertIn("vote_url", variable_names)
         # Template options and selected template should be present.
         self.assertIsInstance(payload["template_options"], list)
+        self.assertNotIn("email-layout", [option["name"] for option in payload["template_options"]])
         self.assertIn("selected_template_id", payload)
 
     def test_election_send_mail_credentials_api_passes_custom_template_content(self) -> None:

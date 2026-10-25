@@ -121,7 +121,7 @@ def already_sent_today(
 
     target_date = today if today is not None else timezone.localdate()
     filters: dict[str, object] = {
-        "template__name": template_name,
+        "context__template_name": template_name,
         "created__date": target_date,
     }
     if recipient_email:

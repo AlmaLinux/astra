@@ -13,6 +13,10 @@ _SIGNATURE_BLOCK_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Layout inheritance tags only make sense in HTML; the plain-text part has no layout.
+# Mirrors `htmlToPlainText()` in astra_app/core/static/core/js/templated_email.js.
+_LAYOUT_TAG_RE = re.compile(r"{%-?\s*(?:extends|block|endblock)\b.*?-?%}")
+
 
 class _TextFromHTMLParser(HTMLParser):
     def __init__(self) -> None:
@@ -243,7 +247,7 @@ def text_from_html(html_content: str) -> str:
     Mirrors the client-side conversion used by the template editor.
 
     - Preserves Django template tags `{% ... %}` so template control flow stays
-      editable in the copied text.
+      editable in the copied text, except layout inheritance tags.
     - Drops `<img>` elements.
     - Keeps `{{ ... }}` variables intact.
     """
@@ -251,6 +255,7 @@ def text_from_html(html_content: str) -> str:
     raw = str(html_content or "")
 
     raw = _SIGNATURE_BLOCK_RE.sub("\n<p>-- The AlmaLinux Team</p>", raw)
+    raw = _LAYOUT_TAG_RE.sub("", raw)
 
     parser = _TextFromHTMLParser()
     parser.feed(raw)

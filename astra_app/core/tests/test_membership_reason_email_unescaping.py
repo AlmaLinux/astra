@@ -89,7 +89,7 @@ class MembershipReasonEmailUnescapingTests(TestCase):
         self.assertEqual(Email.objects.count(), before + 1)
 
         email = Email.objects.latest("created")
-        self.assertEqual(email.template.name, settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(email.context["template_name"], settings.MEMBERSHIP_REQUEST_RFI_EMAIL_TEMPLATE_NAME)
         self.assertIn(message, str(email.message or ""))
         self.assertIn(message, str(email.html_message or ""))
         self.assertNotIn("&#x27;", str(email.message or ""))
@@ -127,7 +127,7 @@ class MembershipReasonEmailUnescapingTests(TestCase):
         self.assertEqual(Email.objects.count(), before + 1)
 
         email = Email.objects.latest("created")
-        self.assertEqual(email.template.name, settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(email.context["template_name"], settings.MEMBERSHIP_REQUEST_REJECTED_EMAIL_TEMPLATE_NAME)
         self.assertIn(reason, str(email.message or ""))
         self.assertIn(reason, str(email.html_message or ""))
         self.assertNotIn("&#x27;", str(email.message or ""))

@@ -27,7 +27,11 @@ from core.models import (
     Organization,
 )
 from core.permissions import ASTRA_ADD_ELECTION
-from core.templated_email import placeholderize_empty_values, render_templated_email_preview
+from core.templated_email import (
+    placeholderize_empty_values,
+    render_templated_email_preview,
+    sendable_email_templates,
+)
 from core.user_labels import user_choice_from_freeipa
 from core.views_elections._helpers import (
     _election_email_preview_context,
@@ -248,7 +252,7 @@ def election_edit(request, election_id: int):
         candidate_queryset = Candidate.objects.filter(election=election).order_by("id")
         group_queryset = ExclusionGroup.objects.filter(election=election).order_by("name", "id")
 
-    templates = list(EmailTemplate.objects.all().order_by("name"))
+    templates = list(sendable_email_templates())
     default_template = EmailTemplate.objects.filter(name=settings.ELECTION_VOTING_CREDENTIAL_EMAIL_TEMPLATE_NAME).first()
 
     def _saved_email_template_id(for_election: Election | None) -> str:

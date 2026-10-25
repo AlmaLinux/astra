@@ -111,14 +111,14 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertTrue(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
 
         email = Email.objects.filter(
             to="alice@example.com",
-            template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+            context__template_name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
         ).latest("created")
         ctx = dict(email.context or {})
         self.assertIn("first_name", ctx)
@@ -174,7 +174,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -237,7 +237,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -295,7 +295,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -368,7 +368,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -446,7 +446,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertTrue(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -499,7 +499,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -653,7 +653,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
 
         email = Email.objects.filter(
             to="rep@example.com",
-            template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+            context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
         ).latest("created")
 
         ctx = dict(email.context or {})
@@ -728,7 +728,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="rep@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__organization_id=organization.pk,
                 context__membership_type_code=membership_type.code,
             ).exists()
@@ -793,7 +793,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="rep@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__organization_id=organization.pk,
                 context__membership_type_code=membership_type.code,
             ).exists()
@@ -873,7 +873,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="rep@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__organization_id=organization.pk,
                 context__membership_type_code=membership_type.code,
             ).exists()
@@ -960,7 +960,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertTrue(
             Email.objects.filter(
                 to="rep@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__organization_id=organization.pk,
                 context__membership_type_code=membership_type.code,
             ).exists()
@@ -1122,7 +1122,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
         self.assertTrue(
             Email.objects.filter(
                 to="fallback@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__organization_id=organization.pk,
                 context__membership_type_code="sponsor",
             ).exists()
@@ -1178,7 +1178,7 @@ class MembershipExpirationNotificationsCommandTests(TestCase):
 
         self.assertFalse(
             Email.objects.filter(
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRING_SOON_EMAIL_TEMPLATE_NAME,
                 context__organization_id=organization.pk,
                 context__membership_type_code="sponsor",
             ).exists()

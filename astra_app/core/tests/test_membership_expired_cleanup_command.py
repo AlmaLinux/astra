@@ -122,7 +122,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         self.assertTrue(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -176,7 +176,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -309,7 +309,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -374,7 +374,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         self.assertTrue(
             Email.objects.filter(
                 to="rep1@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__organization_id=org.pk,
                 context__membership_type_code="gold",
                 context__extend_url=expected_extend_url,
@@ -383,7 +383,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
 
         email = Email.objects.filter(
             to="rep1@example.com",
-            template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+            context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
         ).latest("created")
         ctx = dict(email.context or {})
         self.assertTrue(str(ctx.get("expires_at") or "").endswith("(America/New_York)"))
@@ -445,7 +445,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="rep1@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__organization_id=org.pk,
                 context__membership_type_code="gold",
             ).exists()
@@ -531,7 +531,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="rep1@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__organization_id=org.pk,
                 context__membership_type_code="gold",
             ).exists()
@@ -589,7 +589,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="alice@example.com",
-                template__name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.MEMBERSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__membership_type_code="individual",
             ).exists()
         )
@@ -652,7 +652,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         self.assertFalse(
             Email.objects.filter(
                 to="rep1@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__organization_id=org.pk,
                 context__membership_type_code="gold",
             ).exists()
@@ -702,7 +702,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
         self.assertTrue(
             Email.objects.filter(
                 to="fallback@example.com",
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__organization_id=org.pk,
                 context__membership_type_code="gold",
             ).exists()
@@ -753,7 +753,7 @@ class MembershipExpiredCleanupCommandTests(TestCase):
 
         self.assertFalse(
             Email.objects.filter(
-                template__name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
+                context__template_name=settings.ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME,
                 context__organization_id=org.pk,
                 context__membership_type_code="gold",
             ).exists()

@@ -1,3 +1,5 @@
+from typing import Any, override
+
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
@@ -14,6 +16,7 @@ from core.form_payloads import form_payload
 from core.forms_base import StyledForm
 from core.permissions import ASTRA_ADD_ELECTION, ASTRA_ADD_SEND_MAIL, json_permission_required_any
 from core.templated_email import (
+    EMAIL_LAYOUT_CHILD_HTML,
     email_template_to_dict,
     execute_email_template_save,
     locked_email_template_names,
@@ -21,6 +24,7 @@ from core.templated_email import (
     render_templated_email_preview,
     render_templated_email_preview_response,
     validate_email_subject,
+    validate_email_template_sources,
 )
 
 
@@ -80,6 +84,22 @@ class EmailTemplateManageForm(StyledForm):
             return validate_email_subject(subject)
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
+
+    @override
+    def clean(self) -> dict[str, Any]:
+        cleaned_data = super().clean()
+        if self.errors:
+            return cleaned_data
+        try:
+            validate_email_template_sources(
+                name=cleaned_data["name"],
+                subject=cleaned_data["subject"],
+                html_content=cleaned_data["html_content"],
+                text_content=cleaned_data["text_content"],
+            )
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        return cleaned_data
 
 
 def _build_email_templates_list_payload() -> dict[str, object]:
@@ -229,7 +249,7 @@ def email_template_edit(request: HttpRequest, template_id: int | None = None):
                     return redirect("email-template-edit", template_id=tpl.pk)
     else:
         form = EmailTemplateManageForm(
-            initial={}
+            initial={"html_content": EMAIL_LAYOUT_CHILD_HTML}
             if tpl is None
             else {
                 "name": tpl.name,
@@ -325,7 +345,7 @@ def email_template_edit_detail_api(request: HttpRequest, template_id: int | None
     is_create = template is None
     is_locked = template is not None and template.name in locked_email_template_names()
     form = EmailTemplateManageForm(
-        initial={}
+        initial={"html_content": EMAIL_LAYOUT_CHILD_HTML}
         if template is None
         else {
             "name": template.name,

@@ -23,6 +23,13 @@ class EmailTemplateTextFromHTMLTests(SimpleTestCase):
         self.assertNotIn("example.com/x.png", text)
         self.assertNotIn("alt=", text)
 
+    def test_drops_layout_inheritance_tags(self) -> None:
+        from core.migration_helpers.email_template_text import text_from_html
+
+        html = '{% extends "email-layout" %}{% block content %}<p>Hi {{ name }}</p>{%- endblock -%}'
+
+        self.assertEqual(text_from_html(html), "Hi {{ name }}")
+
     def test_signature_normalization_matches_js(self) -> None:
         from core.migration_helpers.email_template_text import text_from_html
 
