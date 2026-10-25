@@ -664,8 +664,8 @@ def _override_post_office_email_admin() -> None:
 
     django-post-office's EmailAdmin.get_fieldsets() eagerly renders the email
     preview by calling obj.email_message(), which opens an SMTP connection.
-    In dev we intentionally allow flaky SMTP (MailHog jim-*), so the admin
-    page should not 500 if SMTP disconnects.
+    In dev we intentionally allow flaky SMTP (Mailpit chaos triggers), so the
+    admin page should not 500 if SMTP disconnects.
     """
 
     try:

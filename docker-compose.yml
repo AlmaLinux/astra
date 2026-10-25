@@ -14,17 +14,15 @@ services:
       timeout: 5s
       retries: 5
 
-  mailhog:
-    image: mailhog/mailhog
+  mailpit:
+    image: axllent/mailpit:v1.32.0
     command:
-      - -jim-accept=0.25
-      - -jim-disconnect=0.25
-      - -jim-reject-sender=0.25
-      - -jim-reject-recipient=0.25
-      - -jim-reject-auth=0.25
+      # Randomly reject a quarter of SMTP commands (<stage>:<code>:<percent>) so
+      # dev exercises post_office's retry and failure paths.
+      - --chaos-triggers=Sender:451:25,Recipient:451:25,Authentication:535:25
     ports:
-      - "${MAILHOG_UI_PORT:-8025}:8025"
-      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
 
   minio:
     image: bitnamilegacy/minio:latest
@@ -100,7 +98,7 @@ services:
       # - SENTRY_SEND_DEFAULT_PII=False
       #- DJANGO_AUTO_MIGRATE=1
       - DATABASE_URL=postgres://postgres:postgres@db:5432/almalinux_members
-      - EMAIL_URL=smtp://mailhog:1025
+      - EMAIL_URL=smtp://mailpit:1025
       - FREEIPA_HOST=ipa.tinystage.test
       - FREEIPA_VERIFY_SSL=False
       - FREEIPA_SERVICE_USER=admin

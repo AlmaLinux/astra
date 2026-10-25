@@ -497,7 +497,7 @@ JAZZMIN_SETTINGS = {
 }
 
 # Email
-# In DEBUG, docker-compose provides EMAIL_URL pointing to Mailhog.
+# In DEBUG, docker-compose provides EMAIL_URL pointing to Mailpit.
 _email_url_raw = os.environ.get("EMAIL_URL", "").strip()
 EMAIL_CONFIG = _parse_email_url(_email_url_raw) if _email_url_raw else None
 if EMAIL_CONFIG:
@@ -743,7 +743,7 @@ ELECTION_VOTE_RECEIPT_EMAIL_TEMPLATE_NAME = _env_str(
 EMAIL_BACKEND = 'post_office.EmailBackend'
 
 # Configure post_office delivery backends.
-# - DEBUG: deliver immediately via SMTP to Mailhog.
+# - DEBUG: deliver immediately via SMTP to Mailpit.
 # - non-DEBUG: default delivery backend is AWS SES (django-ses); delivery still
 #   requires running `python manage.py send_queued_mail` (or enabling Celery).
 POST_OFFICE = {
