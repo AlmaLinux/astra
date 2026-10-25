@@ -556,4 +556,65 @@ describe("MembershipNotesCard", () => {
     expect(wrapper.find('.modal-body img').exists()).toBe(false);
     expect(wrapper.find('.modal-body script').exists()).toBe(false);
   });
+
+  it("links the old and new representatives of a representative change to their profiles", async () => {
+    const representativeChange = (old: string) => ({
+      kind: "action",
+      label: "Representative changed",
+      icon: "fa-user-check",
+      representative: { old, new: "bob" },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith("/summary")) {
+          return new Response(JSON.stringify({ note_count: 2, approvals: 0, disapprovals: 0, current_user_vote: null }));
+        }
+        return new Response(
+          JSON.stringify({
+            groups: [
+              {
+                username: "reviewer",
+                display_username: "reviewer",
+                is_self: true,
+                is_custos: false,
+                avatar_kind: "user",
+                avatar_url: "",
+                timestamp_display: "2026-10-18 10:00",
+                entries: [representativeChange("carol"), representativeChange("")],
+              },
+            ],
+          }),
+        );
+      }),
+    );
+
+    const wrapper = mount(MembershipNotesCard, {
+      props: {
+        requestId: 15,
+        summaryUrl: "/api/v1/membership/notes/15/summary",
+        detailUrl: "/api/v1/membership/notes/15",
+        addUrl: "/membership/requests/15/notes/add/",
+        csrfToken: "csrf-token",
+        nextUrl: "/membership/requests/",
+        canView: true,
+        canWrite: false,
+        canVote: false,
+      },
+    });
+
+    await flushPromises();
+    await wrapper.get('[data-membership-notes-toggle="15"]').trigger("click");
+    await flushPromises();
+    await flushPromises();
+
+    const bubbles = wrapper.findAll(".membership-notes-bubbles .direct-chat-text");
+    expect(bubbles.map((bubble) => bubble.text().replace(/\s+/g, " "))).toEqual([
+      "Representative changed carol → bob",
+      "Representative changed (none) → bob",
+    ]);
+    expect(bubbles[0]?.find('a[href="/user/carol/"]').text()).toBe("carol");
+    expect(bubbles[0]?.find('a[href="/user/bob/"]').text()).toBe("bob");
+    expect(bubbles[1]?.findAll("a").map((link) => link.attributes("href"))).toEqual(["/user/bob/"]);
+  });
 });

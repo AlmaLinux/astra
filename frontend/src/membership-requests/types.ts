@@ -1,3 +1,4 @@
+import type { AuditLogRepresentativeChange } from "../membership-audit-log/types";
 import { formatMembershipTimestamp, formatUsd } from "../shared/membershipPresentation";
 
 export interface MembershipRequestsBootstrap {
@@ -159,6 +160,7 @@ export interface NoteEntry {
   note_id?: number;
   contacted_email?: ContactedEmail;
   request_resubmitted_diff_rows?: RequestResubmittedDiffRow[];
+  representative?: AuditLogRepresentativeChange;
 }
 
 export interface NoteGroup {

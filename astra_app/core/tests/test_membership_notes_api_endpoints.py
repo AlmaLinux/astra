@@ -416,6 +416,36 @@ class MembershipNotesApiEndpointTests(TestCase):
         self.assertIn("Cycle 1", entry["request_resubmitted_diff_rows"][0]["old_value"])
         self.assertIn("Cycle 2", entry["request_resubmitted_diff_rows"][0]["new_value"])
 
+    def test_request_notes_detail_api_includes_representative_change_usernames(self) -> None:
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
+        # An empty old representative means the organization was just claimed.
+        for old in ("carol", ""):
+            Note.objects.create(
+                membership_request=req,
+                username="reviewer",
+                content=None,
+                action={"type": "representative_changed", "old": old, "new": "bob"},
+            )
+        Note.objects.create(membership_request=req, username="reviewer", content=None, action={"type": "request_approved"})
+
+        self._login_as("reviewer")
+        with patch("core.freeipa.user.FreeIPAUser.get", return_value=self._reviewer()):
+            response = self.client.get(
+                reverse("api-membership-request-notes", args=[req.pk]),
+                HTTP_ACCEPT="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        entries = [entry for group in response.json()["groups"] for entry in group["entries"]]
+        self.assertEqual(
+            [(entry["label"], entry.get("representative")) for entry in entries],
+            [
+                ("Representative changed", {"old": "carol", "new": "bob"}),
+                ("Representative changed", {"old": "", "new": "bob"}),
+                ("Request approved", None),
+            ],
+        )
+
     def test_request_notes_summary_api_uses_latest_vote_for_current_user(self) -> None:
         req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="individual")
         Note.objects.create(membership_request=req, username="reviewer", action={"type": "vote", "value": "approve"})

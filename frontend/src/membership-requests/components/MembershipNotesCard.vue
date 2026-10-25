@@ -4,6 +4,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import "./membershipNotes.css";
 
 import GuardedButton from "../../shared/components/GuardedButton.vue";
+import RepresentativeChange from "../../shared/components/RepresentativeChange.vue";
 import { formatMembershipTimestamp } from "../../shared/membershipPresentation";
 import { useMembershipNotes } from "../composables/useMembershipNotes";
 import { replaceTemplateToken, type ContactedEmail, type NoteEntry, type NoteGroup } from "../types";
@@ -227,6 +228,11 @@ function membershipRequestHref(group: NoteGroup): string {
   return replaceTemplateToken(props.requestDetailTemplate, "__request_id__", group.membership_request_id);
 }
 
+// Same profile route as WidgetUser; the notes card is embedded in pages that don't bootstrap a profile URL template.
+function userProfileHref(username: string): string {
+  return `/user/${encodeURIComponent(username)}/`;
+}
+
 function groupTimestampLabel(group: NoteGroup): string {
   return formatMembershipTimestamp(group.timestamp ?? null) || group.timestamp_display;
 }
@@ -333,6 +339,9 @@ function groupTimestampLabel(group: NoteGroup): string {
                       aria-label="View email"
                       :data-target="`#${entryModalId(entry)}`"
                     >View email</button>
+                    <div v-if="entry.representative" class="small">
+                      <RepresentativeChange v-bind="entry.representative" :profile-href="userProfileHref" />
+                    </div>
                     <div v-if="entry.request_resubmitted_diff_rows?.length" class="mt-2">
                       <details v-for="diffRow in entry.request_resubmitted_diff_rows" :key="diffRow.question" class="mt-1">
                         <summary>{{ diffRow.question }}</summary>

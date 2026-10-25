@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import RepresentativeChange from "../../shared/components/RepresentativeChange.vue";
 import TableBase from "../../shared/components/TableBase.vue";
 import { formatMembershipTimestamp, formatUsd, membershipLogActionLabel } from "../../shared/membershipPresentation";
 import { fillUrlTemplate } from "../../shared/urlTemplates";
@@ -180,11 +181,7 @@ function segmentKey(segment: AuditLogRequestResponseSegment, index: number): str
           <span v-else>{{ asRow(row).invoice?.number }}</span>
         </div>
         <div v-if="asRow(row).representative" class="small text-muted">
-          <template v-for="(username, index) in [asRow(row).representative?.old, asRow(row).representative?.new]" :key="index">
-            <template v-if="index"> → </template>
-            <a v-if="username" :href="userProfileHref(username)">{{ username }}</a>
-            <template v-else>(none)</template>
-          </template>
+          <RepresentativeChange v-bind="asRow(row).representative!" :profile-href="userProfileHref" />
         </div>
         <div v-if="asRow(row).previous_expires_at" class="small text-muted">
           {{ formatAuditLogExpiresAt(asRow(row).previous_expires_at) }} → {{ formatAuditLogExpiresAt(asRow(row).expires_at) }}

@@ -840,6 +840,8 @@ def serialize_note_entry(
         payload["icon"] = entry["icon"]
         payload["request_resubmitted_diff_rows"] = entry.get("request_resubmitted_diff_rows", [])
         payload["note_id"] = note.pk
+        if note.action["type"] == "representative_changed":
+            payload["representative"] = {"old": note.action["old"], "new": note.action["new"]}
         email_id = _email_id_from_action(note.action)
         if email_id is not None and email_id in contacted_email_by_id:
             payload["contacted_email"] = _serialize_contacted_email_detail(contacted_email_by_id[email_id])

@@ -629,7 +629,9 @@ class OrganizationUserViewsTests(TestCase):
         self.assertContains(resp, reverse("api-membership-request-notes", args=[mr.pk]))
         self.assertEqual(detail_resp.status_code, 200)
         payload = detail_resp.json()
-        self.assertEqual(payload["groups"][0]["entries"][0]["label"], "Representative changed from carol to bob")
+        entry = payload["groups"][0]["entries"][0]
+        self.assertEqual(entry["label"], "Representative changed")
+        self.assertEqual(entry["representative"], {"old": "carol", "new": "bob"})
 
     def test_representative_change_does_not_create_membershiplog_when_no_pending_requests(self) -> None:
         from core.models import MembershipLog, MembershipType, Note, Organization

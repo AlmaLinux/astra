@@ -95,6 +95,8 @@ _ACTION_DISPLAY: dict[str, tuple[str, str]] = {
     "on_hold_override_approved": ("Request approved (on hold override)", "fa-circle-check"),
     "contacted": ("User contacted", "fa-envelope"),
     "dues_waiver_review": ("Dues waiver to review", "fa-hand-holding-dollar"),
+    # The old/new usernames are serialized separately so the UI can link their profiles.
+    "representative_changed": ("Representative changed", "fa-user-check"),
 }
 
 _VOTE_LABELS: dict[str, str] = {"approve": "Voted approve", "disapprove": "Voted disapprove"}
@@ -138,13 +140,6 @@ def note_action_label(action: dict[str, Any]) -> str:
             return f"Dues set to the default ${default:,}"
         return f"Dues set to ${new:,} of ${default:,} ({action.get('discount_percent')}% in-kind discount)"
 
-    if action_type == "representative_changed":
-        old = str(action.get("old") or "").strip()
-        new = str(action.get("new") or "").strip()
-        if old and new:
-            return f"Representative changed from {old} to {new}"
-        return "Representative changed"
-
     if action_type == "expiry_changed":
         new = _note_date(action.get("new_expires_at"))
         old = _note_date(action.get("old_expires_at"))
@@ -172,9 +167,6 @@ def note_action_icon(action: dict[str, Any]) -> str:
     if action_type == "vote":
         value = str(action.get("value") or "").strip().lower()
         return _VOTE_ICONS.get(value, "fa-thumbs-up")
-
-    if action_type == "representative_changed":
-        return "fa-user-check"
 
     if action_type == "dues_changed":
         return "fa-hand-holding-dollar"
