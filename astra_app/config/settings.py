@@ -619,6 +619,10 @@ ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME = _env_str(
     "ORGANIZATION_SPONSORSHIP_EXPIRED_EMAIL_TEMPLATE_NAME",
     default="organization-sponsorship-expired",
 )
+ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME = _env_str(
+    "ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME",
+    default="organization-sponsorship-renewal-approved",
+)
 # Bank/payment instructions printed on sponsorship invoices. Read from a file on the
 # server (not the repo or the database) so payment details can only be changed by
 # someone with root access to the host.

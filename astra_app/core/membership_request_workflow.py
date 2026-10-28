@@ -190,6 +190,8 @@ def _resolve_approval_template_name(
 ) -> str:
     """Resolve the email template for an approval notification."""
     if previous_expires_at is not None:
+        if membership_type.category.is_organization:
+            return settings.ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME
         return settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME
     if override:
         return override
@@ -383,14 +385,17 @@ def emit_membership_request_signal_on_commit(
     transaction.on_commit(_send_user_signal)
 
 
-def approval_invoice_membership(*, membership_request: MembershipRequest) -> Membership | None:
+def approval_invoice_membership(
+    *,
+    membership_request: MembershipRequest,
+    previous_expires_at: datetime.datetime | None,
+) -> Membership | None:
     """Return the just-granted membership whose invoice belongs with the approval email.
 
-    Sponsors are only invoiced once approved. A renewal's invoice is usually the one
-    its reminders already carried (same number and PDF); sending it again covers
-    renewals no reminder reached.
+    New sponsors are only invoiced once approved. Renewals are not: their reminders
+    carried the invoice, and the renewal is approved once it is paid.
     """
-    if membership_request.requested_organization is None:
+    if membership_request.requested_organization is None or previous_expires_at is not None:
         return None
     membership = Membership.objects.select_related("membership_type", "target_organization").get(
         target_organization=membership_request.requested_organization,
@@ -1113,7 +1118,10 @@ def approve_membership_request(
         target = _build_membership_target(membership_request)
         if target.email:
             _ensure_configured_email_template_exists(template_name=template_name)
-        invoice_membership = approval_invoice_membership(membership_request=membership_request)
+        invoice_membership = approval_invoice_membership(
+            membership_request=membership_request,
+            previous_expires_at=previous_expires_at,
+        )
         try:
             sent_email = _send_membership_request_notification(
                 target=target,

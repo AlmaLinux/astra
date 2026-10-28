@@ -659,24 +659,24 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
             [{"action": "invoice_generated", "actor_username": "committee", "invoice_number": invoice_number(membership, InvoiceTerm.current)}],
         )
 
-    def test_renewal_approval_email_carries_the_renewed_term_invoice(self) -> None:
-        from core.sponsorship_invoices import invoice_number
-
-        # Renewals usually got this invoice with their reminders already; it is the same
-        # invoice, and it covers renewals no reminder reached.
+    def test_renewal_approval_email_has_no_invoice(self) -> None:
+        # Renewals are approved once the sponsor has paid the invoice their reminders carried.
         self._membership(expires_at=datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(days=30))
         EmailTemplate.objects.get_or_create(
-            name=settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME,
+            name=settings.ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME,
             defaults={"subject": "Renewed", "content": "Renewed", "html_content": "<p>Renewed</p>"},
         )
 
-        with patch("core.sponsorship_invoices.render_invoice_pdf", return_value=b"%PDF-renewed"):
-            membership = self._approve()
+        with patch("core.sponsorship_invoices.render_invoice_pdf", return_value=b"%PDF-renewed") as render_mock:
+            self._approve()
 
-        email = Email.objects.get(context__template_name=settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME)
-        self.assertEqual([attachment.name for attachment in email.attachments.all()], [self._invoice_filename(membership, InvoiceTerm.current)])
-        self.assertEqual(email.context["invoice_number"], invoice_number(membership, InvoiceTerm.current))
-        self.assertEqual(email.cc, ["billing@example.com"])
+        render_mock.assert_not_called()
+        email = Email.objects.get(context__template_name=settings.ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME)
+        self.assertEqual(email.to, ["rep1@example.com"])
+        self.assertEqual(email.attachments.count(), 0)
+        self.assertNotIn("invoice_url", email.context)
+        self.assertEqual(email.cc, [])
+        self.assertEqual(self._invoice_logs(), [])
 
     def test_invoice_failure_still_approves_and_welcomes(self) -> None:
         with (
@@ -748,15 +748,13 @@ class SponsorshipWelcomeInvoiceTests(SponsorshipInvoiceTestMixin, TestCase):
         [log] = self._invoice_logs()
         self.assertEqual(log["actor_username"], "committee")
 
-    def test_custom_email_renewal_approval_attaches_the_renewed_term_invoice(self) -> None:
-        from core.mail_attachments import mail_attachments_from_tokens
-        from core.sponsorship_invoices import invoice_number
-
+    def test_custom_email_renewal_approval_has_no_invoice(self) -> None:
         self._membership(expires_at=datetime.datetime.now(tz=datetime.UTC) + datetime.timedelta(days=30))
 
         query = self._approve_with_custom_email()
 
-        membership = Membership.objects.get(target_organization=self.organization, membership_type=self.gold)
-        [attachment] = mail_attachments_from_tokens(query["attachment"])
-        self.assertEqual(attachment.key, self._invoice_key(membership, InvoiceTerm.current))
-        self.assertEqual(query["invoice_number"], [invoice_number(membership, InvoiceTerm.current)])
+        self.assertEqual(query["template"], [settings.ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME])
+        self.assertNotIn("attachment", query)
+        self.assertNotIn("invoice_number", query)
+        self.assertNotIn("cc", query)
+        self.assertEqual(self._invoice_logs(), [])

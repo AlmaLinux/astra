@@ -1145,7 +1145,11 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
         # Like the standard approval email, a custom one carries the sponsor's invoice.
         invoice_cc: list[str] = []
         invoice_attachment_tokens: list[str] = []
-        invoice_membership = approval_invoice_membership(membership_request=req) if custom_email else None
+        invoice_membership = (
+            approval_invoice_membership(membership_request=req, previous_expires_at=previous_expires_at)
+            if custom_email
+            else None
+        )
         if invoice_membership is not None:
             # The recipient is only chosen in Send Mail, so the business contact is always copied.
             invoice_parts = invoice_email_parts(

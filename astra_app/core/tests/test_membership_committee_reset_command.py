@@ -175,6 +175,26 @@ class MembershipCommitteeResetCommandTests(TestCase):
         self.assertTrue(Membership.objects.filter(target_username="regular04", membership_type_id="mirror").exists())
 
     @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
+    def test_command_creates_fake_freeipa_groups_for_the_seeded_membership_types(self) -> None:
+        # The fake registry outlives each test; start without groups other tests created.
+        reset_e2e_fake_freeipa_state()
+        group_cns = list(MembershipType.objects.filter(code__in=["individual", "mirror"]).values_list("group_cn", flat=True))
+
+        call_command("membership_committee_reset", stdout=io.StringIO())
+
+        client = get_e2e_service_client()
+        for group_cn in group_cns:
+            self.assertEqual(client.group_find(o_cn=group_cn)["count"], 1, group_cn)
+
+    @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
+    def test_command_leaves_membership_types_untouched(self) -> None:
+        types_before = list(MembershipType.objects.order_by("code").values())
+
+        call_command("membership_committee_reset", stdout=io.StringIO())
+
+        self.assertEqual(list(MembershipType.objects.order_by("code").values()), types_before)
+
+    @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
     def test_command_assigns_committee_actor_and_signs_coc(self) -> None:
         call_command("membership_committee_reset")
 

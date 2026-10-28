@@ -1541,8 +1541,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(kwargs["recipients"], ["bob@example.com"])
         self.assertEqual(kwargs["template_name"], "membership-request-approved-silver")
 
-    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
-    def test_committee_approve_org_renewal_sends_renewal_template(self) -> None:
+    def test_committee_approve_org_renewal_sends_sponsorship_renewal_template(self) -> None:
         from post_office.models import EmailTemplate
 
         from core.models import Membership, MembershipRequest, MembershipType, Organization
@@ -1627,7 +1626,7 @@ class MembershipRequestsFlowTests(TestCase):
         _, kwargs = send_mock.call_args
         self.assertEqual(
             kwargs["template_name"],
-            settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME,
+            settings.ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME,
         )
 
     def test_committee_can_approve_org_request_with_custom_email_redirects_to_send_mail(self) -> None:
@@ -1715,8 +1714,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(qs.get("to"), ["bob"])
         self.assertEqual(qs.get("template"), ["membership-request-approved-silver"])
 
-    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
-    def test_committee_approve_org_renewal_custom_email_preselects_renewal_template(self) -> None:
+    def test_committee_approve_org_renewal_custom_email_preselects_sponsorship_renewal_template(self) -> None:
         from post_office.models import EmailTemplate
 
         from core.models import Membership, MembershipRequest, MembershipType, Organization
@@ -1805,7 +1803,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(qs.get("to"), ["bob"])
         self.assertEqual(
             qs.get("template"),
-            [settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME],
+            [settings.ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME],
         )
 
     @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
@@ -1906,7 +1904,6 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(qs.get("type"), ["manual"])
         self.assertEqual(qs.get("to"), ["cern@example.com"])
 
-    @override_settings(MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME="membership-renewal-approved")
     def test_committee_approve_org_renewal_custom_email_prefers_private_representative(self) -> None:
         from post_office.models import EmailTemplate
 
@@ -2009,7 +2006,7 @@ class MembershipRequestsFlowTests(TestCase):
         self.assertEqual(qs.get("to"), ["bob"])
         self.assertEqual(
             qs.get("template"),
-            [settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME],
+            [settings.ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME],
         )
 
 
