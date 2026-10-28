@@ -97,7 +97,7 @@ test("membership-organization-target-form submits an organization-target request
 
   await expect(page).toHaveURL(new RegExp(`${organization.detail_route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
   await expect(page.getByText("Membership request submitted for review.")).toBeVisible();
-  await expect(page.getByRole("listitem").filter({ hasText: /Gold Sponsor Member/ })).toContainText("Under review");
+  await expect(page.getByRole("listitem").filter({ hasText: /Gold Sponsor/ })).toContainText("Under review");
 });
 
 // As a user with all available types already held, I see a no-types-available state instead of a submittable form.

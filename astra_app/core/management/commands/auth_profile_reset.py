@@ -11,7 +11,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.account_deletion import invalidate_sessions_for_freeipa_username
-from core.e2e_membership_request_reset import ensure_individual_and_mirror_types
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.client import clear_freeipa_service_client_cache
 from core.freeipa.e2e_registry import (
@@ -74,7 +73,6 @@ class Command(BaseCommand):
         clear_freeipa_service_client_cache()
 
         with transaction.atomic():
-            ensure_individual_and_mirror_types()
             self._clear_profile_membership_slice()
             payload = self._seed_playwright_state()
         self.stdout.write(json.dumps(payload))

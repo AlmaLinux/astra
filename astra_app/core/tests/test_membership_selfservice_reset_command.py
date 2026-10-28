@@ -212,43 +212,16 @@ class MembershipSelfServiceResetCommandTests(TestCase):
         self.assertTrue(Membership.objects.filter(pk=committee_renewal_membership.pk).exists())
 
     @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
-    def test_command_preserves_existing_sponsorship_type_display_order(self) -> None:
-        MembershipType.objects.update_or_create(
-            code="ruby",
-            defaults={
-                "name": "Ruby Sponsor Member",
-                "group_cn": "almalinux-ruby",
-                "category_id": "sponsorship",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="gold",
-            defaults={
-                "name": "Gold Sponsor Member",
-                "group_cn": "almalinux-gold",
-                "category_id": "sponsorship",
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="silver",
-            defaults={
-                "name": "Silver Sponsor Member",
-                "group_cn": "almalinux-silver",
-                "category_id": "sponsorship",
-                "sort_order": 2,
-                "enabled": True,
-            },
-        )
+    def test_command_leaves_membership_types_and_categories_untouched(self) -> None:
+        # Membership types are configuration (seeded by migrations, edited in the admin),
+        # so a scenario reset must not rewrite them in the database it runs against.
+        types_before = list(MembershipType.objects.order_by("code").values())
+        categories_before = list(MembershipTypeCategory.objects.order_by("name").values())
 
         call_command("membership_selfservice_reset")
 
-        self.assertEqual(MembershipType.objects.get(code="ruby").sort_order, 0)
-        self.assertEqual(MembershipType.objects.get(code="gold").sort_order, 1)
-        self.assertEqual(MembershipType.objects.get(code="silver").sort_order, 2)
+        self.assertEqual(list(MembershipType.objects.order_by("code").values()), types_before)
+        self.assertEqual(list(MembershipTypeCategory.objects.order_by("name").values()), categories_before)
 
     @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
     def test_command_seeds_settings_actor_into_the_mirror_freeipa_group_for_leave_submission(self) -> None:
@@ -257,7 +230,7 @@ class MembershipSelfServiceResetCommandTests(TestCase):
         client = get_e2e_service_client()
 
         self.assertIn(
-            "almalinux-mirror",
+            MembershipType.objects.get(code="mirror").group_cn,
             client.user_show("regular33")["result"].get("memberof_group", []),
         )
 

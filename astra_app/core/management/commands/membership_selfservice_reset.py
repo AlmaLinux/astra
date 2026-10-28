@@ -17,7 +17,6 @@ from core.models import (
     MembershipLog,
     MembershipRequest,
     MembershipType,
-    MembershipTypeCategory,
     Note,
     Organization,
 )
@@ -49,102 +48,11 @@ class Command(BaseCommand):
             )
 
         with transaction.atomic():
-            self._ensure_membership_types()
             self._clear_existing_slice()
             self._ensure_signed_coc()
             payload = self._seed_slice()
 
         self.stdout.write(json.dumps(payload))
-
-    def _ensure_membership_types(self) -> None:
-        MembershipTypeCategory.objects.update_or_create(
-            name="individual",
-            defaults={"is_individual": True, "is_organization": False, "sort_order": 0},
-        )
-        MembershipTypeCategory.objects.update_or_create(
-            name="mirror",
-            defaults={"is_individual": True, "is_organization": True, "sort_order": 1},
-        )
-        MembershipTypeCategory.objects.update_or_create(
-            name="sponsorship",
-            defaults={"is_individual": False, "is_organization": True, "sort_order": 2},
-        )
-        MembershipType.objects.update_or_create(
-            code="individual",
-            defaults={
-                "name": "Individual",
-                "group_cn": "almalinux-individual",
-                "category_id": "individual",
-                "sort_order": 0,
-                "enabled": True,
-            },
-        )
-        self._ensure_membership_type_preserving_order(
-            code="gold",
-            defaults={
-                "name": "Gold Sponsor Member",
-                "group_cn": "almalinux-gold",
-                "category_id": "sponsorship",
-                "sort_order": 3,
-                "enabled": True,
-            },
-        )
-        self._ensure_membership_type_preserving_order(
-            code="platinum",
-            defaults={
-                "name": "Platinum Sponsor",
-                "group_cn": "platinum-sponsors",
-                "category_id": "sponsorship",
-                "sort_order": 4,
-                "enabled": True,
-            },
-        )
-        self._ensure_membership_type_preserving_order(
-            code="ruby",
-            defaults={
-                "name": "Ruby Sponsor Member",
-                "group_cn": "almalinux-ruby",
-                "category_id": "sponsorship",
-                "sort_order": 5,
-                "enabled": True,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="mirror",
-            defaults={
-                "name": "Mirror",
-                "group_cn": "almalinux-mirror",
-                "category_id": "mirror",
-                "sort_order": 1,
-                "enabled": True,
-            },
-        )
-        self._ensure_membership_type_preserving_order(
-            code="silver",
-            defaults={
-                "name": "Silver Sponsor Member",
-                "group_cn": "almalinux-silver",
-                "category_id": "sponsorship",
-                "sort_order": 2,
-                "enabled": True,
-            },
-        )
-
-    def _ensure_membership_type_preserving_order(self, *, code: str, defaults: dict[str, object]) -> None:
-        membership_type, created = MembershipType.objects.get_or_create(code=code, defaults=defaults)
-        if created:
-            return
-        updates: dict[str, object] = {}
-        if membership_type.name != defaults["name"]:
-            updates["name"] = defaults["name"]
-        if membership_type.group_cn != defaults["group_cn"]:
-            updates["group_cn"] = defaults["group_cn"]
-        if membership_type.category_id != defaults["category_id"]:
-            updates["category_id"] = defaults["category_id"]
-        if membership_type.enabled != defaults["enabled"]:
-            updates["enabled"] = defaults["enabled"]
-        if updates:
-            MembershipType.objects.filter(pk=membership_type.pk).update(**updates)
 
     def _clear_existing_slice(self) -> None:
         membership_type_codes = ["individual", "mirror"]

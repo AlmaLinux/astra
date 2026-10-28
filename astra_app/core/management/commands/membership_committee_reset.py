@@ -9,7 +9,7 @@ from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 
-from core.e2e_membership_request_reset import ensure_individual_and_mirror_types, seed_membership_request_workflow
+from core.e2e_membership_request_reset import seed_membership_request_workflow
 from core.freeipa.agreement import FreeIPAFASAgreement
 from core.freeipa.e2e_registry import get_e2e_service_client, is_e2e_fake_freeipa_enabled
 from core.models import FreeIPAPermissionGrant, Membership, MembershipLog, MembershipRequest, MembershipType, Note
@@ -238,7 +238,6 @@ class Command(BaseCommand):
             )
 
         with transaction.atomic():
-            ensure_individual_and_mirror_types()
             self._ensure_permission_grants()
             self._clear_existing_slice()
             self._ensure_committee_actor()
@@ -290,8 +289,8 @@ class Command(BaseCommand):
         embargoed_country_code = settings.MEMBERSHIP_EMBARGOED_COUNTRY_CODES[0]
 
         client.group_add(settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP, o_description="Fake E2E membership committee group")
-        client.group_add("almalinux-individual", o_description="Fake E2E individual membership group")
-        client.group_add("almalinux-mirror", o_description="Fake E2E mirror membership group")
+        for group_cn in MembershipType.objects.filter(code__in=["individual", "mirror"]).values_list("group_cn", flat=True):
+            client.group_add(group_cn, o_description=f"Fake E2E {group_cn} membership group")
         client.user_mod(
             COMMITTEE_REVIEWER_USERNAME,
             memberof_group=["packagers", settings.FREEIPA_MEMBERSHIP_COMMITTEE_GROUP],

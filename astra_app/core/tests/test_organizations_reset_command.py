@@ -8,8 +8,15 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from core.freeipa.agreement import FreeIPAFASAgreement
-from core.freeipa.e2e_registry import get_e2e_service_client
-from core.models import FreeIPAPermissionGrant, Membership, MembershipRequest, MembershipType, Organization
+from core.freeipa.e2e_registry import get_e2e_service_client, reset_e2e_fake_freeipa_state
+from core.models import (
+    FreeIPAPermissionGrant,
+    Membership,
+    MembershipRequest,
+    MembershipType,
+    MembershipTypeCategory,
+    Organization,
+)
 from core.permissions import ASTRA_CHANGE_MEMBERSHIP, ASTRA_DELETE_MEMBERSHIP
 from core.tests.utils_test_data import ensure_core_categories
 
@@ -29,6 +36,30 @@ class OrganizationsResetCommandTests(TestCase):
     def test_command_rejects_runs_outside_fake_freeipa_e2e_mode(self) -> None:
         with self.assertRaisesMessage(CommandError, "ASTRA_E2E_FAKE_FREEIPA_ENABLED"):
             call_command("organizations_reset")
+
+    @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
+    def test_command_leaves_membership_types_and_categories_untouched(self) -> None:
+        # Membership types are configuration (seeded by migrations, edited in the admin),
+        # so a scenario reset must not rewrite them in the database it runs against.
+        types_before = list(MembershipType.objects.order_by("code").values())
+        categories_before = list(MembershipTypeCategory.objects.order_by("name").values())
+
+        call_command("organizations_reset", stdout=io.StringIO())
+
+        self.assertEqual(list(MembershipType.objects.order_by("code").values()), types_before)
+        self.assertEqual(list(MembershipTypeCategory.objects.order_by("name").values()), categories_before)
+
+    @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
+    def test_command_creates_fake_freeipa_groups_for_the_seeded_membership_types(self) -> None:
+        # The fake registry outlives each test; start without groups other tests created.
+        reset_e2e_fake_freeipa_state()
+        group_cns = list(MembershipType.objects.filter(code__in=["gold", "mirror", "ruby"]).values_list("group_cn", flat=True))
+
+        call_command("organizations_reset", stdout=io.StringIO())
+
+        client = get_e2e_service_client()
+        for group_cn in group_cns:
+            self.assertEqual(client.group_find(o_cn=group_cn)["count"], 1, group_cn)
 
     @override_settings(ASTRA_E2E_MODE=True, ASTRA_E2E_FAKE_FREEIPA_ENABLED=True)
     def test_command_seeds_wave4_organization_scenarios_idempotently_with_fresh_claim_routes(self) -> None:
@@ -264,7 +295,8 @@ class OrganizationsResetCommandTests(TestCase):
         self.assertTrue(detail_payload["memberships"])
         first_membership = detail_payload["memberships"][0]
         self.assertTrue(first_membership["canRequestTierChange"])
-        self.assertEqual(first_membership["tierChangeMembershipTypeCode"], "ruby")
+        # In the seeded tier order, the next tier above gold is platinum.
+        self.assertEqual(first_membership["tierChangeMembershipTypeCode"], "platinum")
         self.assertTrue(first_membership["canManage"])
         # detail_focus_org expires outside the expiring-soon window, so no renewal CTA here.
         self.assertFalse(first_membership["isExpiringSoon"])

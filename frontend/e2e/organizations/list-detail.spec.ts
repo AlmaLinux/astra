@@ -90,9 +90,9 @@ test("organizations-detail-membership-state shows active membership metadata and
     page.locator("[data-membership-card-root]").getByRole("link", { name: "History", exact: true }),
   ).toHaveAttribute("href", `/membership/log/org/${resetState.organizations.detail_focus_org.organization_id}/`);
   // The membership title names the tier; there is no duplicate tier badge.
-  await expect(page.locator("[data-membership-card-root]").getByText("Gold Sponsor Member", { exact: true })).toHaveCount(1);
+  await expect(page.locator("[data-membership-card-root]").getByText("Gold Sponsor", { exact: true })).toHaveCount(1);
   await expect(
-    page.locator("[data-membership-card-root] .badge").filter({ hasText: /^Gold Sponsor Member$/ }),
+    page.locator("[data-membership-card-root] .badge").filter({ hasText: /^Gold Sponsor$/ }),
   ).toHaveCount(0);
   await expect(page.getByText(/Member since/)).toBeVisible();
   await expect(page.getByText(/Expires/)).toBeVisible();
@@ -209,12 +209,12 @@ test("organizations-detail-sponsorship-actions expose tier-change and typed term
 
   await expect(page.getByRole("link", { name: "Change tier", exact: true })).toHaveAttribute(
     "href",
-    /membership_type=ruby/,
+    /membership_type=platinum/,
   );
 
   await page.getByRole("button", { name: "Edit membership", exact: true }).click();
 
-  const managementModal = page.locator(".modal.show").filter({ hasText: `Manage membership: Gold Sponsor Member for ${orgName}` }).first();
+  const managementModal = page.locator(".modal.show").filter({ hasText: `Manage membership: Gold Sponsor for ${orgName}` }).first();
   await expect(managementModal).toBeVisible();
   await expect(managementModal.getByRole("button", { name: "Save changes", exact: true })).toBeVisible();
   await expect(managementModal.getByRole("button", { name: /^Terminate membership/ }).first()).toBeVisible();
@@ -417,7 +417,7 @@ test("organizations-invoice-pdf-content prints billing details notes price and p
   expect(text).toContain("United States");
   expect(text).toContain(`Invoice # ${invoiceNumber}`);
   expect(text).toMatch(/Invoice date \w+ \d{1,2}, \d{4}/);
-  expect(text).toContain("Gold Sponsor Member");
+  expect(text).toContain("Gold Sponsor");
   expect(text).toMatch(/from \w+ \d{1,2}(st|nd|rd|th) \d{4} to \w+ \d{1,2}(st|nd|rd|th) \d{4}/);
   expect(text).toContain("Amount due $20,000");
   expect(text).not.toContain("List price");
@@ -438,7 +438,7 @@ test("organizations-inkind-dues-invoice lets the committee discount dues and pri
   await expect(page.locator("[data-organization-detail-root]")).toBeVisible();
 
   await page.locator('[data-membership-actions="committee"]').getByRole("button", { name: "Edit membership", exact: true }).click();
-  const managementModal = page.locator(".modal.show").filter({ hasText: "Manage membership: Gold Sponsor Member" }).first();
+  const managementModal = page.locator(".modal.show").filter({ hasText: "Manage membership: Gold Sponsor" }).first();
   const save = managementModal.getByRole("button", { name: "Save changes", exact: true });
   const duesInput = managementModal.getByLabel("Annual dues (USD)", { exact: true });
   // Nothing to save until something changes.

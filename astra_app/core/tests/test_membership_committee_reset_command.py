@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 
 from core.country_codes import country_label_from_code
 from core.freeipa.agreement import FreeIPAFASAgreement
-from core.freeipa.e2e_registry import get_e2e_service_client
+from core.freeipa.e2e_registry import get_e2e_service_client, reset_e2e_fake_freeipa_state
 from core.membership_notes import CUSTOS
 from core.models import Membership, MembershipLog, MembershipRequest, MembershipType, Note
 from core.tests.utils_test_data import FAR_FUTURE, ensure_core_categories

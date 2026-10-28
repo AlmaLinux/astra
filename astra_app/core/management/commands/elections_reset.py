@@ -9,7 +9,6 @@ from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 
-from core.e2e_membership_request_reset import ensure_individual_and_mirror_types
 from core.elections_services import (
     BallotReceipt,
     close_election,
@@ -166,7 +165,6 @@ class Command(BaseCommand):
             )
 
         with transaction.atomic():
-            ensure_individual_and_mirror_types(with_votes=True)
             self._clear_slice_memberships()
             self._ensure_large_electorate()
             elections_by_alias = self._upsert_slice_elections()

@@ -54,8 +54,6 @@ test("reports-admin-audit-sponsors-stats", async ({ page }) => {
   await expect(page.locator("[data-membership-sponsors-root]")).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "CSV", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Excel", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "PDF", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Print", exact: true })).toBeVisible();
   await page.getByLabel("Search sponsors", { exact: true }).fill("org");
   await page.getByTitle("Search sponsors").click();

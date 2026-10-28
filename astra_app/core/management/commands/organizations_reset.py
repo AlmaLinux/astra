@@ -17,7 +17,6 @@ from core.models import (
     Membership,
     MembershipRequest,
     MembershipType,
-    MembershipTypeCategory,
     Organization,
 )
 from core.organization_claim import make_organization_claim_token
@@ -231,67 +230,11 @@ class Command(BaseCommand):
             )
 
         with transaction.atomic():
-            self._ensure_membership_types()
             self._clear_existing_slice()
             self._ensure_actor_prerequisites()
             payload = self._seed_slice()
 
         self.stdout.write(json.dumps(payload))
-
-    def _ensure_membership_types(self) -> None:
-        MembershipTypeCategory.objects.update_or_create(
-            pk="mirror",
-            defaults={
-                "is_individual": False,
-                "is_organization": True,
-                "sort_order": 0,
-            },
-        )
-        MembershipTypeCategory.objects.update_or_create(
-            pk="sponsorship",
-            defaults={
-                "is_individual": False,
-                "is_organization": True,
-                "sort_order": 1,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="mirror",
-            defaults={
-                "name": "Mirror",
-                "category_id": "mirror",
-                "sort_order": 0,
-                "enabled": True,
-                "group_cn": "almalinux-mirror",
-                "description": "Wave 4 mirror membership",
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="gold",
-            defaults={
-                "name": "Gold Sponsor Member",
-                "category_id": "sponsorship",
-                "sort_order": 1,
-                "enabled": True,
-                "group_cn": "almalinux-gold",
-                "description": "Wave 4 gold sponsorship",
-                # Paid tiers, so sponsorship invoices are offered.
-                "annual_dues_usd": 20000,
-            },
-        )
-        MembershipType.objects.update_or_create(
-            code="ruby",
-            defaults={
-                "name": "Ruby Sponsor Member",
-                "category_id": "sponsorship",
-                "sort_order": 0,
-                "enabled": True,
-                "group_cn": "almalinux-ruby",
-                "description": "Wave 4 ruby sponsorship",
-                # Paid tiers, so sponsorship invoices are offered.
-                "annual_dues_usd": 5000,
-            },
-        )
 
     def _clear_existing_slice(self) -> None:
         organization_names = [str(definition["name"]) for definition in ORGANIZATION_DEFINITIONS]
@@ -318,7 +261,7 @@ class Command(BaseCommand):
     def _ensure_actor_prerequisites(self) -> None:
         client = get_e2e_service_client()
         country_attr = str(settings.SELF_SERVICE_ADDRESS_COUNTRY_ATTR).strip()
-        for group_cn in ["almalinux-gold", "almalinux-mirror", "almalinux-ruby"]:
+        for group_cn in MembershipType.objects.filter(code__in=["gold", "mirror", "ruby"]).values_list("group_cn", flat=True):
             client.group_add(group_cn, o_description=f"Wave 4 E2E {group_cn} group")
 
         agreement_cn = settings.COMMUNITY_CODE_OF_CONDUCT_AGREEMENT_CN
