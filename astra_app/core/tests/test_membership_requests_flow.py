@@ -1039,6 +1039,34 @@ class MembershipRequestsFlowTests(TestCase):
             settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME,
         )
 
+    def test_approve_user_mirror_renewal_sends_the_individual_renewal_template(self) -> None:
+        from core.membership_request_workflow import approve_membership_request
+        from core.models import Membership, MembershipRequest
+
+        # Mirror memberships can be held by users or organizations; a user's renewal
+        # must not get the sponsor email, which needs an organization.
+        Membership.objects.create(
+            target_username="alice",
+            membership_type_id="mirror",
+            expires_at=timezone.now() + datetime.timedelta(days=30),
+        )
+        req = MembershipRequest.objects.create(requested_username="alice", membership_type_id="mirror")
+        alice = FreeIPAUser("alice", {"uid": ["alice"], "mail": ["alice@example.com"], "memberof_group": []})
+
+        with (
+            patch("core.freeipa.user.FreeIPAUser.get", return_value=alice),
+            patch.object(FreeIPAUser, "add_to_group", autospec=True),
+            patch("core.membership_request_workflow.queue_templated_email", autospec=True) as send_mock,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            approve_membership_request(membership_request=req, actor_username="reviewer", send_approved_email=True)
+
+        send_mock.assert_called_once()
+        self.assertEqual(
+            send_mock.call_args.kwargs["template_name"],
+            settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME,
+        )
+
     def test_committee_approve_is_blocked_if_configured_template_is_missing(self) -> None:
         import uuid
 
@@ -1228,6 +1256,7 @@ class MembershipRequestsFlowTests(TestCase):
 
         resolved_template = _resolve_approval_template_name(
             membership_type=membership_type,
+            is_organization_target=False,
             override="manual-override-template",
             previous_expires_at=timezone.now(),
         )

@@ -185,12 +185,14 @@ def _organization_notification_email(organization: Organization) -> str:
 def _resolve_approval_template_name(
     *,
     membership_type: MembershipType,
+    is_organization_target: bool,
     override: str | None,
     previous_expires_at: datetime.datetime | None,
 ) -> str:
     """Resolve the email template for an approval notification."""
     if previous_expires_at is not None:
-        if membership_type.category.is_organization:
+        # The target decides, not the category: mirror memberships can be held by users too.
+        if is_organization_target:
             return settings.ORGANIZATION_SPONSORSHIP_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME
         return settings.MEMBERSHIP_REQUEST_RENEWAL_APPROVED_EMAIL_TEMPLATE_NAME
     if override:
@@ -1112,6 +1114,7 @@ def approve_membership_request(
     if send_approved_email:
         template_name = _resolve_approval_template_name(
             membership_type=membership_type,
+            is_organization_target=membership_request.is_organization_target,
             override=approved_email_template_name,
             previous_expires_at=previous_expires_at,
         )

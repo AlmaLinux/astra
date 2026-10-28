@@ -1134,6 +1134,7 @@ def run_membership_request_action(request: HttpRequest, pk: int, *, action: str)
 
         template_name = _resolve_approval_template_name(
             membership_type=membership_type,
+            is_organization_target=req.is_organization_target,
             override=None,
             previous_expires_at=previous_expires_at,
         )
