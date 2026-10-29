@@ -231,6 +231,34 @@ class SESPostOfficeAuditLogTests(TestCase):
         email.refresh_from_db()
         self.assertEqual(email.recipient_delivery_status, RecipientDeliveryStatus.HARD_BOUNCED)
 
+    def test_bounce_log_includes_subtype_status_and_diagnostic(self) -> None:
+        email = self._create_email(message_id="<diag@example.com>", status=POST_OFFICE_STATUS.sent)
+
+        handle_ses_bounce_received(
+            sender=self.__class__,
+            mail_obj={"commonHeaders": {"messageId": "<diag@example.com>"}},
+            bounce_obj={
+                "bounceType": "Transient",
+                "bounceSubType": "MailboxFull",
+                "bouncedRecipients": [
+                    {
+                        "emailAddress": "full@example.com",
+                        "status": "5.2.2",
+                        "diagnosticCode": "smtp; 552 5.2.2 Mailbox full",
+                    },
+                    {"emailAddress": "bare@example.com"},
+                ],
+            },
+            raw_message=b"{}",
+        )
+
+        log_entry = PostOfficeLog.objects.get(email=email, exception_type="SESBounce")
+        self.assertEqual(
+            log_entry.message,
+            "SES bounce (Transient/MailboxFull): "
+            "full@example.com [5.2.2: smtp; 552 5.2.2 Mailbox full], bare@example.com",
+        )
+
     def test_bounce_marks_queued_email_as_failed(self) -> None:
         email = self._create_email(message_id="<queued@example.com>", status=POST_OFFICE_STATUS.queued)
 

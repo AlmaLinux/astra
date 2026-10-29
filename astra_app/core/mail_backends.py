@@ -5,9 +5,11 @@ from email.message import Message, MIMEPart
 from typing import override
 
 import django_ses
+from django.conf import settings
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.core.mail.backends.base import BaseEmailBackend
 from django.core.mail.backends.smtp import EmailBackend as SMTPBackend
+from django_ses.utils import filter_blacklisted_recipients
 
 
 def nest_inline_images(message: EmailMessage) -> None:
@@ -62,5 +64,19 @@ class SMTPEmailBackend(RelatedInlineImagesMixin, SMTPBackend):
     pass
 
 
-class SESEmailBackend(RelatedInlineImagesMixin, django_ses.SESBackend):
+class BlacklistedRecipientsError(Exception):
     pass
+
+
+class SESEmailBackend(RelatedInlineImagesMixin, django_ses.SESBackend):
+    @override
+    def send_messages(self, email_messages: Sequence[EmailMessage]) -> int:
+        # django-ses silently skips a message whose recipients are all
+        # blacklisted, so post_office would log it as sent. Raising makes
+        # post_office record (and retry) it as failed instead.
+        if settings.AWS_SES_USE_BLACKLIST:
+            for message in email_messages:
+                recipients = message.recipients()
+                if recipients and not filter_blacklisted_recipients(recipients):
+                    raise BlacklistedRecipientsError(f"All recipients are blacklisted: {', '.join(recipients)}")
+        return super().send_messages(email_messages)
