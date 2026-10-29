@@ -12,6 +12,10 @@ EnvironmentFile=/etc/astra/caddy.env
 ExecStartPre=-/usr/bin/podman rm -f astra-caddy
 ExecStart=/usr/bin/podman run --rm --name astra-caddy --network host -v /etc/astra/Caddyfile:/etc/caddy/Caddyfile:ro -v /var/lib/caddy:/data --log-driver=journald ${CADDY_IMAGE}
 ExecStop=/usr/bin/podman stop -t 10 astra-caddy
+# Load the host's Caddyfile through the admin API (host network, localhost:2019)
+# with no downtime. Don't use `podman exec ... caddy reload`: the single-file
+# bind mount keeps pointing at the old file once Ansible replaces it.
+ExecReload=/usr/bin/curl -fsS -H "Content-Type: text/caddyfile" --data-binary @/etc/astra/Caddyfile http://127.0.0.1:2019/load
 Restart=always
 RestartSec=5
 User=root

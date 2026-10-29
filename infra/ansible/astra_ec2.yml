@@ -36,6 +36,12 @@
         - astra-app@1.service
         - astra-app@2.service
         - astra-caddy.service
+    # Swaps Caddy's config in place via its admin API (see ExecReload in
+    # astra-caddy.service), so Caddyfile changes don't drop connections.
+    - name: Reload Caddy
+      ansible.builtin.systemd:
+        name: astra-caddy.service
+        state: reloaded
   tasks:
     - name: Read EC2 instance metadata (public hostname and IPv4)
       ansible.builtin.shell: |
@@ -124,7 +130,7 @@
         owner: root
         group: root
         mode: "0644"
-      notify: Restart astra services
+      notify: Reload Caddy
 
     - name: Install env file example if missing
       ansible.builtin.copy:
