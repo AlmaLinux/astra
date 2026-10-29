@@ -698,15 +698,22 @@ def handle_ses_bounce_received(
         recipient_domain=recipient_domain,
         event_source="django_ses.bounce_received",
     )
-    bounce_type = str(bounce_obj.get("bounceType") or "").strip() if isinstance(bounce_obj, dict) else ""
-    bounced_addrs = ", ".join(
-        str(recipient.get("emailAddress") or "")
-        for recipient in bounced_recipients
-        if isinstance(recipient, dict) and recipient.get("emailAddress")
+    bounce_info = bounce_obj if isinstance(bounce_obj, dict) else {}
+    bounce_kind = "/".join(
+        str(bounce_info[key]).strip() for key in ("bounceType", "bounceSubType") if bounce_info.get(key)
     )
-    message = f"SES bounce ({bounce_type or 'unknown'})"
-    if bounced_addrs:
-        message = f"{message}: {bounced_addrs}"
+    recipient_summaries: list[str] = []
+    for recipient in bounced_recipients:
+        if not isinstance(recipient, dict) or not recipient.get("emailAddress"):
+            continue
+        # The per-recipient status is what django-ses blacklists on (any 5.x.x,
+        # even for Transient bounces), so keep it visible in the email log.
+        details = ": ".join(str(recipient[key]) for key in ("status", "diagnosticCode") if recipient.get(key))
+        address = str(recipient["emailAddress"])
+        recipient_summaries.append(f"{address} [{details}]" if details else address)
+    message = f"SES bounce ({bounce_kind or 'unknown'})"
+    if recipient_summaries:
+        message = f"{message}: {', '.join(recipient_summaries)}"
 
     _handle_ses_post_office_event(
         ses_event_type="bounce",
