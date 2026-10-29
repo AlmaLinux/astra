@@ -172,8 +172,8 @@ variable "freeipa_service_password" {
 
 variable "django_auto_migrate" {
   type        = bool
-  description = "If true, containers run migrate on startup (entrypoint DJANGO_AUTO_MIGRATE=1)."
-  default     = true
+  description = "If true, containers run migrate on startup (entrypoint DJANGO_AUTO_MIGRATE=1). Off in prod: deploy-prod.sh migrates once before the rolling restart."
+  default     = false
 }
 
 variable "django_migrate_retries" {

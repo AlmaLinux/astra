@@ -13,8 +13,6 @@ else
 fi
 
 if [[ "${DJANGO_AUTO_MIGRATE:-0}" == "1" ]]; then
-  pwd
-  ls -lR
   migrate.sh
 fi
 

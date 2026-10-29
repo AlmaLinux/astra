@@ -49,7 +49,8 @@ freeipa_service_user = "admin"
 freeipa_service_password = "REPLACE_ME_CHANGE_ME"
 
 # --- Startup migrations
-django_auto_migrate = true
+# Keep false: deploy-prod.sh already migrates before restarting the containers.
+django_auto_migrate = false
 django_migrate_retries = 30
 
 # --- Cron jobs on the host

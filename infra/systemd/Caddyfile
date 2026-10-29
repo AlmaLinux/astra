@@ -13,19 +13,21 @@ accounts.almalinux.org {
     @cf header CF-Connecting-IP *
     reverse_proxy @cf 127.0.0.1:8001 127.0.0.1:8002 {
         lb_policy least_conn
-        lb_retries 2
+        lb_try_duration 30s
+        lb_try_interval 250ms
+        fail_duration 5s
         header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
         header_up sentry-trace {http.request.header.sentry-trace}
         header_up baggage {http.request.header.baggage}
-        health_uri /readyz
     }
 
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
         lb_policy least_conn
-        lb_retries 2
+        lb_try_duration 30s
+        lb_try_interval 250ms
+        fail_duration 5s
         header_up X-Forwarded-For {http.request.remote.host}
         header_up sentry-trace {http.request.header.sentry-trace}
         header_up baggage {http.request.header.baggage}
-        health_uri /readyz
     }
 }

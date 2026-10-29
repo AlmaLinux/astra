@@ -31,6 +31,13 @@
     abort @blocked_scanners
 
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
+        lb_policy least_conn
+        # While one instance restarts, retry the other instead of returning 502.
+        lb_try_duration 30s
+        lb_try_interval 250ms
+        # Passive health check: skip an instance for 5s after a failed attempt.
+        # deploy-prod.sh waits longer than this between the two restarts.
+        fail_duration 5s
         header_up X-Forwarded-For {http.request.remote.host}
         header_up sentry-trace {http.request.header.sentry-trace}
         header_up baggage {http.request.header.baggage}
@@ -57,6 +64,13 @@
     abort @blocked_scanners
 
     reverse_proxy 127.0.0.1:8001 127.0.0.1:8002 {
+        lb_policy least_conn
+        # While one instance restarts, retry the other instead of returning 502.
+        lb_try_duration 30s
+        lb_try_interval 250ms
+        # Passive health check: skip an instance for 5s after a failed attempt.
+        # deploy-prod.sh waits longer than this between the two restarts.
+        fail_duration 5s
         header_up X-Forwarded-For {http.request.remote.host}
         header_up sentry-trace {http.request.header.sentry-trace}
         header_up baggage {http.request.header.baggage}

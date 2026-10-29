@@ -1,8 +1,9 @@
 [Unit]
 Description=Astra Caddy reverse proxy
 After=network-online.target astra-app@1.service astra-app@2.service
-Requires=astra-app@1.service astra-app@2.service
-Wants=network-online.target
+# Wants=, not Requires=: with Requires=, `systemctl restart astra-app@N` also
+# stops and restarts Caddy, taking the whole site down on every deploy.
+Wants=network-online.target astra-app@1.service astra-app@2.service
 
 [Service]
 StandardOutput=null

@@ -61,10 +61,45 @@ wait_for_unit() {
 
 set_env_value "APP_IMAGE" "$rollback_image"
 
+set -a
+# shellcheck source=/dev/null
+source "$ENV_FILE"
+set +a
+
+# Django rejects Hosts outside ALLOWED_HOSTS, so probe with the public hostname.
+probe_host="${PUBLIC_BASE_URL:-}"
+probe_host="${probe_host#*://}"
+probe_host="${probe_host%%/*}"
+probe_host="${probe_host:-localhost}"
+
+wait_until_serving() {
+  local port="$1"
+  local timeout="${2:-300}"
+  local elapsed=0
+
+  until curl -fs -o /dev/null --max-time 5 \
+      -H "Host: ${probe_host}" -H "X-Forwarded-Proto: https" \
+      "http://127.0.0.1:${port}/readyz"; do
+    if (( elapsed >= timeout )); then
+      echo "Timed out waiting for 127.0.0.1:${port}/readyz" >&2
+      exit 1
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+}
+
+restart_instance() {
+  local i="$1"
+  systemctl restart "astra-app@${i}.service"
+  wait_for_unit "astra-app@${i}.service"
+  wait_until_serving "800${i}"
+}
+
 podman pull "$rollback_image"
 
-systemctl restart astra-app@1.service
-wait_for_unit astra-app@1.service
-
-systemctl restart astra-app@2.service
-wait_for_unit astra-app@2.service
+restart_instance 1
+# Give Caddy's passive health check (fail_duration 5s) time to forget
+# instance 1's failures before instance 2 goes down.
+sleep 10
+restart_instance 2
