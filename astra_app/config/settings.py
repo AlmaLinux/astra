@@ -877,7 +877,7 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 # S3-backed storage for uploaded media.
 STORAGES = {
-    "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},
+    "default": {"BACKEND": "core.storage.AstraS3Storage"},
     "staticfiles": {
         "BACKEND": (
             "django.contrib.staticfiles.storage.StaticFilesStorage"

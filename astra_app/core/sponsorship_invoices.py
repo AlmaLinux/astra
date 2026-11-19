@@ -31,6 +31,7 @@ from core.membership import term_membership_request
 from core.membership_dues import discount_percent, effective_dues_usd
 from core.membership_notes import add_note
 from core.models import Membership, MembershipLog, Organization
+from core.storage import INVOICE_STORAGE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def invoice_filename(number: str) -> str:
 def invoice_storage_key(organization: Organization, number: str) -> str:
     # Keyed by the number, so a changed bill never reuses a stale PDF, and the
     # membership log can find the PDF from the number alone after the term ends.
-    return f"invoices/{organization.invoice_token}/{invoice_filename(number)}"
+    return f"{INVOICE_STORAGE_DIR}/{organization.invoice_token}/{invoice_filename(number)}"
 
 
 def read_payment_details() -> str:
