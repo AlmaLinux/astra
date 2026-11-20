@@ -1,4 +1,4 @@
-FROM python:3.14-slim AS base
+FROM python:3.15-slim AS base
 
 ARG ASTRA_BUILD_SHA=""
 ENV ASTRA_BUILD_SHA=$ASTRA_BUILD_SHA
